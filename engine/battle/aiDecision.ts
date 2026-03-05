@@ -1,5 +1,6 @@
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
 import type { StatusId } from './statusRegistry';
+import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
 
 export type DecisionCombatantSnapshot = {
   hp: number;
@@ -24,7 +25,7 @@ function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
   return Math.floor((combatant.hp * 10000) / combatant.hpMax);
 }
 
-function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot): number {
+function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): number {
   let score = skill.basePower;
 
   if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
@@ -48,13 +49,16 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot): number 
     score += SHIELDBREAK_BONUS;
   }
 
+  score += scoreLearnedWeightTerm(skillWeights, skill.skillId);
+
   return score;
 }
 
 export function chooseAction(
   actorActiveSkillIds: readonly [string, string],
   actorCooldowns: Record<string, number>,
-  target: DecisionCombatantSnapshot
+  target: DecisionCombatantSnapshot,
+  skillWeights: ArchetypeSkillWeights = {}
 ): CandidateAction {
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
@@ -65,7 +69,7 @@ export function chooseAction(
   }
 
   const ordered = candidateSkillIds
-    .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), target) }))
+    .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), target, skillWeights) }))
     .sort((a, b) => {
       if (a.score !== b.score) {
         return b.score - a.score;
