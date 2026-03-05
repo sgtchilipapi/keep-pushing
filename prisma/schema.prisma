@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String      @id @default(cuid())
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  characters Character[]
+}
+
+model Character {
+  id               String             @id @default(cuid())
+  userId           String
+  name             String
+  level            Int                @default(1)
+  exp              Int                @default(0)
+  hp               Int
+  hpMax            Int
+  atk              Int
+  def              Int
+  spd              Int
+  accuracyBP       Int
+  evadeBP          Int
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillUnlocks     SkillUnlock[]
+  equippedSkills   EquippedSkill[]
+  equippedPassives EquippedPassive[]
+  inventoryItems   InventoryItem[]
+
+  @@index([userId])
+}
+
+model SkillUnlock {
+  id          String    @id @default(cuid())
+  characterId String
+  skillId     String
+  unlockedAt  DateTime  @default(now())
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, skillId])
+  @@index([characterId])
+}
+
+model EquippedSkill {
+  id          String    @id @default(cuid())
+  characterId String
+  slot        Int
+  skillId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, slot])
+  @@index([characterId])
+}
+
+model EquippedPassive {
+  id          String    @id @default(cuid())
+  characterId String
+  slot        Int
+  passiveId   String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, slot])
+  @@index([characterId])
+}
+
+model InventoryItem {
+  id          String    @id @default(cuid())
+  characterId String
+  itemId      String
+  quantity    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, itemId])
+  @@index([characterId])
+}
