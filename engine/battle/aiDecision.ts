@@ -1,8 +1,10 @@
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
+import type { StatusId } from './statusRegistry';
 
 export type DecisionCombatantSnapshot = {
   hp: number;
   hpMax: number;
+  statuses: readonly StatusId[];
 };
 
 export type CandidateAction = {
@@ -11,6 +13,8 @@ export type CandidateAction = {
 
 const ACTIVE_AVAILABLE_BONUS = 200;
 const EXECUTE_BONUS = 500;
+const SHIELDBREAK_BONUS = 350;
+const WASTED_STUN_PENALTY = 10_000;
 
 function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
   if (combatant.hpMax <= 0) {
@@ -34,6 +38,14 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot): number 
     if (targetHpBP <= threshold) {
       score += EXECUTE_BONUS;
     }
+  }
+
+  if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
+    score -= WASTED_STUN_PENALTY;
+  }
+
+  if (skill.tags.includes('shieldbreak') && target.statuses.includes('shielded')) {
+    score += SHIELDBREAK_BONUS;
   }
 
   return score;
