@@ -33,6 +33,7 @@ export type BattleInput = {
 
 export type BattleEvent =
   | { type: 'ROUND_START'; round: number }
+  | { type: 'STUNNED_SKIP'; round: number; actorId: string }
   | { type: 'ACTION'; round: number; actorId: string; targetId: string; skillId: string }
   | { type: 'HIT_RESULT'; round: number; actorId: string; targetId: string; hitChanceBP: number; rollBP: number; didHit: boolean }
   | {
@@ -133,6 +134,15 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       actor.initiative -= 100;
+
+      if ((actor.statuses.stunned ?? 0) > 0) {
+        events.push({
+          type: 'STUNNED_SKIP',
+          round,
+          actorId: actor.entityId
+        });
+        continue;
+      }
 
       const selectedAction = chooseAction(actor.activeSkillIds, actor.cooldowns, {
         hp: target.hp,

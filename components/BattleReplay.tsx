@@ -23,6 +23,8 @@ function toLogLine(result: BattleResult, index: number): string {
       return `Round ${event.round} starts`;
     case 'ACTION':
       return `${event.actorId} uses ${event.skillId} on ${event.targetId}`;
+    case 'STUNNED_SKIP':
+      return `${event.actorId} is stunned and skips the action`;
     case 'HIT_RESULT':
       return `${event.actorId} ${event.didHit ? 'hits' : 'misses'} (roll ${event.rollBP} vs ${event.hitChanceBP})`;
     case 'DAMAGE':
