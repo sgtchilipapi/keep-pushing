@@ -6,6 +6,7 @@ import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
 import type { StatusId } from './statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
+import type { ArchetypeSkillWeights } from './learning';
 
 export type CombatantSnapshot = {
   entityId: string;
@@ -25,6 +26,8 @@ export type BattleInput = {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
+  playerSkillWeights?: ArchetypeSkillWeights;
+  enemySkillWeights?: ArchetypeSkillWeights;
   maxRounds?: number;
 };
 
@@ -135,7 +138,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
         hp: target.hp,
         hpMax: target.hpMax,
         statuses: getActiveStatusIds(target)
-      });
+      }, actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}));
       const selectedSkill = getSkillDef(selectedAction.skillId);
 
       events.push({
