@@ -13,6 +13,11 @@ export type BattleEvent =
       skillId: string;
     }
   | {
+      type: "STUNNED_SKIP";
+      round: number;
+      actorEntityId: number;
+    }
+  | {
       type: "HIT_RESULT";
       round: number;
       actorEntityId: number;
