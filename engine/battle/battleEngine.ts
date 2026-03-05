@@ -5,6 +5,7 @@ import { chooseAction } from './aiDecision';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
 import type { StatusId } from './statusRegistry';
+import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 
 export type CombatantSnapshot = {
   entityId: string;
@@ -16,6 +17,7 @@ export type CombatantSnapshot = {
   accuracyBP: number;
   evadeBP: number;
   activeSkillIds: [string, string];
+  passiveSkillIds?: [string, string];
 };
 
 export type BattleInput = {
@@ -58,7 +60,16 @@ export type BattleResult = {
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
 
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
-  return { ...entity, activeSkillIds: [...entity.activeSkillIds] as [string, string] };
+  const cloned: CombatantSnapshot = {
+    ...entity,
+    activeSkillIds: [...entity.activeSkillIds] as [string, string]
+  };
+
+  if (entity.passiveSkillIds !== undefined) {
+    cloned.passiveSkillIds = [...entity.passiveSkillIds] as [string, string];
+  }
+
+  return cloned;
 }
 
 function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
@@ -83,13 +94,13 @@ export function simulateBattle(input: BattleInput): BattleResult {
   const events: BattleEvent[] = [];
 
   const player: RuntimeEntity = {
-    ...cloneEntity(input.playerInitial),
+    ...applyFlatPassives(cloneEntity(input.playerInitial)),
     initiative: 0,
     cooldowns: initializeCooldowns(input.playerInitial),
     statuses: {}
   };
   const enemy: RuntimeEntity = {
-    ...cloneEntity(input.enemyInitial),
+    ...applyFlatPassives(cloneEntity(input.enemyInitial)),
     initiative: 0,
     cooldowns: initializeCooldowns(input.enemyInitial),
     statuses: {}
@@ -146,7 +157,13 @@ export function simulateBattle(input: BattleInput): BattleResult {
         });
       }
 
-      const attack = resolveAttack(actor, target, selectedSkill, rng);
+      const attackContext = applyConditionalPassives({
+        actor,
+        target,
+        skill: selectedSkill
+      });
+
+      const attack = resolveAttack(attackContext.actor, attackContext.target, attackContext.skill, rng);
       events.push({
         type: 'HIT_RESULT',
         round,
