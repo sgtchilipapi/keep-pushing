@@ -3,6 +3,8 @@ import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
 import { chooseAction } from './aiDecision';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
+import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
+import type { StatusId } from './statusRegistry';
 
 export type CombatantSnapshot = {
   entityId: string;
@@ -28,6 +30,15 @@ export type BattleEvent =
   | { type: 'ROUND_START'; round: number }
   | { type: 'ACTION'; round: number; actorId: string; targetId: string; skillId: string }
   | { type: 'HIT_RESULT'; round: number; actorId: string; targetId: string; hitChanceBP: number; rollBP: number; didHit: boolean }
+  | {
+      type: 'STATUS_APPLY' | 'STATUS_REFRESH';
+      round: number;
+      targetId: string;
+      statusId: StatusId;
+      sourceId: string;
+      remainingTurns: number;
+    }
+  | { type: 'STATUS_EXPIRE'; round: number; targetId: string; statusId: StatusId }
   | { type: 'DAMAGE'; round: number; actorId: string; targetId: string; amount: number; targetHpAfter: number }
   | { type: 'COOLDOWN_SET'; round: number; actorId: string; skillId: string; cooldownRemainingTurns: number }
   | { type: 'DEATH'; round: number; entityId: string }
@@ -44,7 +55,7 @@ export type BattleResult = {
   roundsPlayed: number;
 };
 
-type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number> };
+type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
 
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   return { ...entity, activeSkillIds: [...entity.activeSkillIds] as [string, string] };
@@ -60,6 +71,12 @@ function decrementCooldowns(entity: RuntimeEntity): void {
   }
 }
 
+function getActiveStatusIds(entity: RuntimeEntity): StatusId[] {
+  return Object.keys(entity.statuses)
+    .filter((statusId) => (entity.statuses[statusId as StatusId] ?? 0) > 0)
+    .sort() as StatusId[];
+}
+
 export function simulateBattle(input: BattleInput): BattleResult {
   const rng = new XorShift32(input.seed);
   const maxRounds = input.maxRounds ?? 30;
@@ -68,12 +85,14 @@ export function simulateBattle(input: BattleInput): BattleResult {
   const player: RuntimeEntity = {
     ...cloneEntity(input.playerInitial),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.playerInitial)
+    cooldowns: initializeCooldowns(input.playerInitial),
+    statuses: {}
   };
   const enemy: RuntimeEntity = {
     ...cloneEntity(input.enemyInitial),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.enemyInitial)
+    cooldowns: initializeCooldowns(input.enemyInitial),
+    statuses: {}
   };
   const combatants: RuntimeEntity[] = [player, enemy];
 
@@ -103,7 +122,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
 
       const selectedAction = chooseAction(actor.activeSkillIds, actor.cooldowns, {
         hp: target.hp,
-        hpMax: target.hpMax
+        hpMax: target.hpMax,
+        statuses: getActiveStatusIds(target)
       });
       const selectedSkill = getSkillDef(selectedAction.skillId);
 
@@ -148,6 +168,10 @@ export function simulateBattle(input: BattleInput): BattleResult {
           targetHpAfter: target.hp
         });
 
+        for (const statusId of selectedSkill.appliesStatusIds ?? []) {
+          events.push(applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round));
+        }
+
         if (target.hp === 0) {
           events.push({ type: 'DEATH', round, entityId: target.entityId });
           winner = actor;
@@ -159,6 +183,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
 
     decrementCooldowns(player);
     decrementCooldowns(enemy);
+    events.push(...decrementStatusesAtRoundEnd(player.statuses, player.entityId, round));
+    events.push(...decrementStatusesAtRoundEnd(enemy.statuses, enemy.entityId, round));
     events.push({ type: 'ROUND_END', round });
 
     if (winner !== null) {

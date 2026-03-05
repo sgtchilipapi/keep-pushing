@@ -1,4 +1,6 @@
-export type SkillTag = 'execute';
+import type { StatusId } from './statusRegistry';
+
+export type SkillTag = 'execute' | 'stun' | 'shieldbreak';
 
 export type SkillDef = {
   skillId: string;
@@ -7,6 +9,7 @@ export type SkillDef = {
   cooldownTurns: number;
   tags: SkillTag[];
   executeThresholdBP?: number;
+  appliesStatusIds?: StatusId[];
 };
 
 export const BASIC_ATTACK_SKILL_ID = 'BASIC_ATTACK';
@@ -16,7 +19,8 @@ const BASIC_ATTACK: SkillDef = {
   basePower: 100,
   accuracyModBP: 0,
   cooldownTurns: 0,
-  tags: []
+  tags: [],
+  appliesStatusIds: []
 };
 
 const VOLT_STRIKE: SkillDef = {
@@ -24,7 +28,8 @@ const VOLT_STRIKE: SkillDef = {
   basePower: 170,
   accuracyModBP: 0,
   cooldownTurns: 2,
-  tags: []
+  tags: ['shieldbreak'],
+  appliesStatusIds: ['broken_armor']
 };
 
 const FINISHING_BLOW: SkillDef = {
@@ -32,8 +37,9 @@ const FINISHING_BLOW: SkillDef = {
   basePower: 140,
   accuracyModBP: 300,
   cooldownTurns: 3,
-  tags: ['execute'],
-  executeThresholdBP: 3000
+  tags: ['execute', 'stun'],
+  executeThresholdBP: 3000,
+  appliesStatusIds: ['stunned']
 };
 
 const SKILL_REGISTRY: Record<string, SkillDef> = {
