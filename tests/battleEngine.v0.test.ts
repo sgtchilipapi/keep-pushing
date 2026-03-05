@@ -1,14 +1,16 @@
-import { simulateBattle, type BattleEntity } from '../engine/battle/battleEngine';
+import { simulateBattle, type CombatantSnapshot } from '../engine/battle/battleEngine';
 
-function baseEntity(overrides: Partial<BattleEntity>): BattleEntity {
+function baseEntity(overrides: Partial<CombatantSnapshot>): CombatantSnapshot {
   return {
     entityId: 'entity',
     hp: 2000,
+    hpMax: 2000,
     atk: 150,
     def: 120,
     spd: 100,
     accuracyBP: 8000,
     evadeBP: 1500,
+    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
     ...overrides
   };
 }
@@ -40,7 +42,7 @@ describe('battleEngine v0', () => {
       battleId: 'speed-check',
       seed: 999,
       playerInitial: baseEntity({ entityId: 'fast', spd: 160 }),
-      enemyInitial: baseEntity({ entityId: 'slow', spd: 80, hp: 6000, def: 220 }),
+      enemyInitial: baseEntity({ entityId: 'slow', spd: 80, hp: 6000, hpMax: 6000, def: 220 }),
       maxRounds: 30
     });
 
@@ -58,6 +60,7 @@ describe('battleEngine v0', () => {
       playerInitial: baseEntity({
         entityId: 'alpha',
         hp: 10000,
+        hpMax: 10000,
         atk: 10,
         def: 10000,
         spd: 101,
@@ -67,6 +70,7 @@ describe('battleEngine v0', () => {
       enemyInitial: baseEntity({
         entityId: 'beta',
         hp: 10000,
+        hpMax: 10000,
         atk: 10,
         def: 10000,
         spd: 100,

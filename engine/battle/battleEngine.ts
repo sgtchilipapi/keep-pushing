@@ -1,30 +1,35 @@
 import { applyRoundInitiative, hasReadyActor, nextActorIndex, timeoutWinner } from './initiative';
 import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
+import { chooseAction } from './aiDecision';
+import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
 
-export type BattleEntity = {
+export type CombatantSnapshot = {
   entityId: string;
   hp: number;
+  hpMax: number;
   atk: number;
   def: number;
   spd: number;
   accuracyBP: number;
   evadeBP: number;
+  activeSkillIds: [string, string];
 };
 
 export type BattleInput = {
   battleId: string;
   seed: number;
-  playerInitial: BattleEntity;
-  enemyInitial: BattleEntity;
+  playerInitial: CombatantSnapshot;
+  enemyInitial: CombatantSnapshot;
   maxRounds?: number;
 };
 
 export type BattleEvent =
   | { type: 'ROUND_START'; round: number }
-  | { type: 'ACTION'; round: number; actorId: string; targetId: string; skillId: 'BASIC_ATTACK' }
+  | { type: 'ACTION'; round: number; actorId: string; targetId: string; skillId: string }
   | { type: 'HIT_RESULT'; round: number; actorId: string; targetId: string; hitChanceBP: number; rollBP: number; didHit: boolean }
   | { type: 'DAMAGE'; round: number; actorId: string; targetId: string; amount: number; targetHpAfter: number }
+  | { type: 'COOLDOWN_SET'; round: number; actorId: string; skillId: string; cooldownRemainingTurns: number }
   | { type: 'DEATH'; round: number; entityId: string }
   | { type: 'ROUND_END'; round: number }
   | { type: 'BATTLE_END'; round: number; winnerEntityId: string; reason: 'death' | 'timeout' };
@@ -32,23 +37,27 @@ export type BattleEvent =
 export type BattleResult = {
   battleId: string;
   seed: number;
-  playerInitial: BattleEntity;
-  enemyInitial: BattleEntity;
+  playerInitial: CombatantSnapshot;
+  enemyInitial: CombatantSnapshot;
   events: BattleEvent[];
   winnerEntityId: string;
   roundsPlayed: number;
 };
 
-type RuntimeEntity = BattleEntity & { initiative: number };
+type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number> };
 
-const BASIC_ATTACK = {
-  skillId: 'BASIC_ATTACK' as const,
-  basePower: 100,
-  accuracyModBP: 0
-};
+function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
+  return { ...entity, activeSkillIds: [...entity.activeSkillIds] as [string, string] };
+}
 
-function cloneEntity(entity: BattleEntity): BattleEntity {
-  return { ...entity };
+function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
+  return Object.fromEntries(entity.activeSkillIds.map((skillId) => [skillId, 0]));
+}
+
+function decrementCooldowns(entity: RuntimeEntity): void {
+  for (const skillId of entity.activeSkillIds) {
+    entity.cooldowns[skillId] = Math.max(0, (entity.cooldowns[skillId] ?? 0) - 1);
+  }
 }
 
 export function simulateBattle(input: BattleInput): BattleResult {
@@ -56,8 +65,16 @@ export function simulateBattle(input: BattleInput): BattleResult {
   const maxRounds = input.maxRounds ?? 30;
   const events: BattleEvent[] = [];
 
-  const player: RuntimeEntity = { ...cloneEntity(input.playerInitial), initiative: 0 };
-  const enemy: RuntimeEntity = { ...cloneEntity(input.enemyInitial), initiative: 0 };
+  const player: RuntimeEntity = {
+    ...cloneEntity(input.playerInitial),
+    initiative: 0,
+    cooldowns: initializeCooldowns(input.playerInitial)
+  };
+  const enemy: RuntimeEntity = {
+    ...cloneEntity(input.enemyInitial),
+    initiative: 0,
+    cooldowns: initializeCooldowns(input.enemyInitial)
+  };
   const combatants: RuntimeEntity[] = [player, enemy];
 
   let roundsPlayed = 0;
@@ -83,15 +100,33 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       actor.initiative -= 100;
+
+      const selectedAction = chooseAction(actor.activeSkillIds, actor.cooldowns, {
+        hp: target.hp,
+        hpMax: target.hpMax
+      });
+      const selectedSkill = getSkillDef(selectedAction.skillId);
+
       events.push({
         type: 'ACTION',
         round,
         actorId: actor.entityId,
         targetId: target.entityId,
-        skillId: 'BASIC_ATTACK'
+        skillId: selectedSkill.skillId
       });
 
-      const attack = resolveAttack(actor, target, BASIC_ATTACK, rng);
+      if (selectedSkill.skillId !== BASIC_ATTACK_SKILL_ID) {
+        actor.cooldowns[selectedSkill.skillId] = selectedSkill.cooldownTurns;
+        events.push({
+          type: 'COOLDOWN_SET',
+          round,
+          actorId: actor.entityId,
+          skillId: selectedSkill.skillId,
+          cooldownRemainingTurns: selectedSkill.cooldownTurns
+        });
+      }
+
+      const attack = resolveAttack(actor, target, selectedSkill, rng);
       events.push({
         type: 'HIT_RESULT',
         round,
@@ -122,6 +157,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
     }
 
+    decrementCooldowns(player);
+    decrementCooldowns(enemy);
     events.push({ type: 'ROUND_END', round });
 
     if (winner !== null) {
