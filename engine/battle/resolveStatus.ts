@@ -29,6 +29,7 @@ export function applyStatus(
   const nextRemainingTurns = statusDef.durationTurns;
   const hadStatus = (statuses[statusId] ?? 0) > 0;
 
+  // Reapplying a status refreshes duration instead of stacking intensity to keep effects predictable.
   statuses[statusId] = nextRemainingTurns;
 
   return {
@@ -48,6 +49,7 @@ export function decrementStatusesAtRoundEnd(
 ): StatusExpireEvent[] {
   const expires: StatusExpireEvent[] = [];
 
+  // Stable ordering keeps emitted STATUS_EXPIRE events deterministic for snapshot-based tests and replays.
   const orderedStatusIds = Object.keys(statuses).sort() as StatusId[];
   for (const statusId of orderedStatusIds) {
     const remainingTurns = statuses[statusId] ?? 0;

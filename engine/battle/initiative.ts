@@ -14,6 +14,7 @@ function compareTurnOrder(a: InitiativeCombatant, b: InitiativeCombatant): numbe
     return b.spd - a.spd;
   }
 
+  // Entity id tie-breaker ensures strict deterministic ordering when stats are identical.
   return a.entityId.localeCompare(b.entityId);
 }
 
@@ -47,5 +48,6 @@ export function timeoutWinner(a: InitiativeCombatant, b: InitiativeCombatant): I
     return a.initiative > b.initiative ? a : b;
   }
 
+  // Final deterministic tie-break keeps timeout outcomes stable across runs and environments.
   return a.entityId.localeCompare(b.entityId) <= 0 ? a : b;
 }

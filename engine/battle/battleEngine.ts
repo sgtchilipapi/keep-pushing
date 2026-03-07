@@ -63,6 +63,7 @@ export type BattleResult = {
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
 
+// Clone snapshots so simulation-side mutations (hp, cooldowns, statuses) never leak into caller-owned inputs.
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   const cloned: CombatantSnapshot = {
     ...entity,
@@ -93,6 +94,7 @@ function getActiveStatusIds(entity: RuntimeEntity): StatusId[] {
 }
 
 export function simulateBattle(input: BattleInput): BattleResult {
+  // The RNG is seeded once per battle to guarantee deterministic replays from the same input payload.
   const rng = new XorShift32(input.seed);
   const maxRounds = input.maxRounds ?? 30;
   const events: BattleEvent[] = [];
@@ -134,6 +136,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       actor.initiative -= 100;
+      // Action cost is always consumed even on control-loss turns, preventing stunned actors from stockpiling turns.
 
       if ((actor.statuses.stunned ?? 0) > 0) {
         events.push({
@@ -160,6 +163,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
       });
 
       if (selectedSkill.skillId !== BASIC_ATTACK_SKILL_ID) {
+        // Cooldown is set before attack resolution so misses still pay the intended opportunity cost.
         actor.cooldowns[selectedSkill.skillId] = selectedSkill.cooldownTurns;
         events.push({
           type: 'COOLDOWN_SET',
@@ -199,6 +203,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
         });
 
         for (const statusId of selectedSkill.appliesStatusIds ?? []) {
+          // Status side effects are hit-gated by design: on-hit riders do not trigger on misses.
           events.push(applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round));
         }
 
@@ -213,6 +218,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
 
     decrementCooldowns(player);
     decrementCooldowns(enemy);
+    // Status durations are decremented after all actions so a newly applied status always survives through the next round.
     events.push(...decrementStatusesAtRoundEnd(player.statuses, player.entityId, round));
     events.push(...decrementStatusesAtRoundEnd(enemy.statuses, enemy.entityId, round));
     events.push({ type: 'ROUND_END', round });
