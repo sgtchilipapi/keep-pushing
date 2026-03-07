@@ -8,6 +8,13 @@ import type { StatusId } from './statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import type { ArchetypeSkillWeights } from './learning';
 
+/**
+ * Immutable combatant input snapshot used to initialize a battle simulation.
+ *
+ * This shape captures the persistent stats and equipped skills for one side at
+ * simulation start. The engine clones this payload before mutation so callers
+ * can safely reuse the same object across multiple runs.
+ */
 export type CombatantSnapshot = {
   entityId: string;
   hp: number;
@@ -21,6 +28,13 @@ export type CombatantSnapshot = {
   passiveSkillIds?: [string, string];
 };
 
+/**
+ * Complete deterministic input payload required to run a battle simulation.
+ *
+ * Callers provide initial combatants, a random seed, and optional policy
+ * inputs such as learned skill weights and round caps. Given the same payload,
+ * the simulator is expected to produce the same ordered event stream.
+ */
 export type BattleInput = {
   battleId: string;
   seed: number;
@@ -31,6 +45,12 @@ export type BattleInput = {
   maxRounds?: number;
 };
 
+/**
+ * Discrete event emitted by the simulation timeline.
+ *
+ * The engine records every meaningful transition as a typed event so the
+ * caller can reconstruct battle flow for replay, analytics, and auditing.
+ */
 export type BattleEvent =
   | { type: 'ROUND_START'; round: number }
   | { type: 'STUNNED_SKIP'; round: number; actorId: string }
@@ -51,6 +71,12 @@ export type BattleEvent =
   | { type: 'ROUND_END'; round: number }
   | { type: 'BATTLE_END'; round: number; winnerEntityId: string; reason: 'death' | 'timeout' };
 
+/**
+ * Deterministic battle simulation output.
+ *
+ * This payload includes immutable copies of initial inputs, an ordered event
+ * log, and winner metadata suitable for replay and downstream persistence.
+ */
 export type BattleResult = {
   battleId: string;
   seed: number;
@@ -64,6 +90,15 @@ export type BattleResult = {
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
 
 // Clone snapshots so simulation-side mutations (hp, cooldowns, statuses) never leak into caller-owned inputs.
+/**
+ * Produces a mutation-safe clone of a combatant input snapshot.
+ *
+ * The battle loop mutates hp, cooldowns, and status state, so input snapshots
+ * are cloned to preserve caller-owned objects and arrays.
+ *
+ * @param entity - Source combatant snapshot provided by the caller.
+ * @returns A cloned snapshot with copied skill tuple arrays.
+ */
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   const cloned: CombatantSnapshot = {
     ...entity,
@@ -77,22 +112,61 @@ function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   return cloned;
 }
 
+/**
+ * Builds initial cooldown tracking for every active skill on a combatant.
+ *
+ * @param entity - Combatant snapshot whose active skills should be tracked.
+ * @returns A cooldown map keyed by skill id with all counters initialized to zero.
+ */
 function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
   return Object.fromEntries(entity.activeSkillIds.map((skillId) => [skillId, 0]));
 }
 
+/**
+ * Decrements all active skill cooldown counters at round end.
+ *
+ * Cooldowns are clamped at zero so consumers never observe negative remaining
+ * turns.
+ *
+ * @param entity - Runtime combatant state mutated in place.
+ */
 function decrementCooldowns(entity: RuntimeEntity): void {
   for (const skillId of entity.activeSkillIds) {
     entity.cooldowns[skillId] = Math.max(0, (entity.cooldowns[skillId] ?? 0) - 1);
   }
 }
 
+/**
+ * Returns currently active status identifiers on a runtime entity.
+ *
+ * Status ids are sorted before return to keep downstream decision logic stable
+ * and deterministic across object key iteration differences.
+ *
+ * @param entity - Runtime combatant state containing status turn counters.
+ * @returns Sorted list of status ids with remaining turns greater than zero.
+ */
 function getActiveStatusIds(entity: RuntimeEntity): StatusId[] {
   return Object.keys(entity.statuses)
     .filter((statusId) => (entity.statuses[statusId as StatusId] ?? 0) > 0)
     .sort() as StatusId[];
 }
 
+/**
+ * Runs a deterministic battle simulation and emits an event timeline.
+ *
+ * The engine advances initiative, resolves actions, applies damage and status
+ * effects, updates cooldowns, and terminates on death or timeout. Runtime
+ * combatant state is mutated internally, while the returned payload includes
+ * cloned initial snapshots to avoid leaking mutable references.
+ *
+ * Assumptions and invariants:
+ * - Exactly two combatants are simulated, indexed as player and enemy.
+ * - Initiative action cost is paid even when an actor loses control.
+ * - Status duration decrement occurs at round end after all actions.
+ *
+ * @param input - Full simulation configuration, seed, and initial combatants.
+ * @returns Deterministic battle result with event log, winner, and rounds played.
+ */
 export function simulateBattle(input: BattleInput): BattleResult {
   // The RNG is seeded once per battle to guarantee deterministic replays from the same input payload.
   const rng = new XorShift32(input.seed);
