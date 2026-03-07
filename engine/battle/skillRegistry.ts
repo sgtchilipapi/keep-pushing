@@ -1,7 +1,19 @@
 import type { StatusId } from './statusRegistry';
 
+/**
+ * Tags that encode special runtime handling for a skill.
+ *
+ * These tags drive downstream combat logic such as execute checks,
+ * stun application behavior, and shield-breaking interactions.
+ */
 export type SkillTag = 'execute' | 'stun' | 'shieldbreak';
 
+/**
+ * Canonical skill definition consumed by battle resolution systems.
+ *
+ * Each entry describes immutable tuning values for power, accuracy,
+ * cooldown behavior, and optional status or execute semantics.
+ */
 export type SkillDef = {
   skillId: string;
   basePower: number;
@@ -12,6 +24,12 @@ export type SkillDef = {
   appliesStatusIds?: StatusId[];
 };
 
+/**
+ * Stable identifier for the default attack skill.
+ *
+ * This constant is used by systems that need a guaranteed fallback
+ * action when no specialized skill is selected.
+ */
 export const BASIC_ATTACK_SKILL_ID = 'BASIC_ATTACK';
 
 const BASIC_ATTACK: SkillDef = {
@@ -48,6 +66,17 @@ const SKILL_REGISTRY: Record<string, SkillDef> = {
   [FINISHING_BLOW.skillId]: FINISHING_BLOW
 };
 
+/**
+ * Resolves a skill definition by its identifier.
+ *
+ * The registry is assumed to contain all valid skill IDs used by the
+ * combat pipeline. A missing entry indicates an invalid or out-of-sync
+ * skill reference and is treated as a hard error.
+ *
+ * @param skillId - Unique skill identifier to resolve from the registry.
+ * @returns The immutable skill definition associated with the provided ID.
+ * @throws Error if the skill identifier is unknown.
+ */
 export function getSkillDef(skillId: string): SkillDef {
   const skill = SKILL_REGISTRY[skillId];
   if (skill === undefined) {
