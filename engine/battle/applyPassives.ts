@@ -62,6 +62,7 @@ function collectFlatModifiers(passiveSkillIds: readonly string[]): PassiveStatMo
     for (const statKey of STAT_KEYS) {
       const delta = passive.flatStats?.[statKey] ?? 0;
       if (delta !== 0) {
+        // Flat modifiers from multiple passives are cumulative; registry balance is responsible for caps.
         acc[statKey] = (acc[statKey] ?? 0) + delta;
       }
     }
@@ -86,6 +87,7 @@ export function applyConditionalPassives(context: AttackContext): {
   target: AttackSnapshot;
   skill: AttackSkill;
 } {
+  // Each triggered conditional modifier is applied in sequence so later passives can build on prior adjustments.
   let actor = { ...context.actor };
   let target = { ...context.target };
   let skill = { ...context.skill };

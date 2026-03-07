@@ -26,6 +26,7 @@ function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
 }
 
 function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): number {
+  // Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
   let score = skill.basePower;
 
   if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
@@ -42,6 +43,7 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
   }
 
   if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
+    // Reapplying stun is heavily penalized to avoid wasting turns on non-stacking control effects.
     score -= WASTED_STUN_PENALTY;
   }
 
@@ -75,6 +77,7 @@ export function chooseAction(
         return b.score - a.score;
       }
 
+      // Lexical tie-break keeps action selection deterministic for replay and test consistency.
       return a.skillId.localeCompare(b.skillId);
     });
 
