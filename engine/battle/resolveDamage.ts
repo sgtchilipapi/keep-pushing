@@ -68,6 +68,7 @@ export function clamp(value: number, min: number, max: number): number {
  * @param target - Defending unit snapshot providing evade stats.
  * @param skill - Selected skill accuracy modifier.
  * @returns Hit probability in basis points, constrained to the resolver bounds.
+ * @todo #21 After the MVP is implemented, assess whether it is worth it to separate the roll for enemy evade and player accuracy.
  */
 export function calculateHitChanceBP(actor: AttackSnapshot, target: AttackSnapshot, skill: AttackSkill): number {
   return clamp(actor.accuracyBP - target.evadeBP + skill.accuracyModBP, MIN_HIT_BP, MAX_HIT_BP);

@@ -50,6 +50,8 @@ export type BattleInput = {
  *
  * The engine records every meaningful transition as a typed event so the
  * caller can reconstruct battle flow for replay, analytics, and auditing.
+ * @see: Review finding: Why not use the BattleEvent from types/battle?
+ * @see: STUNNED_SKIP is too specific. After the MVP, replace with a general 'DISABLED' maybe?
  */
 export type BattleEvent =
   | { type: 'ROUND_START'; round: number }
@@ -292,7 +294,12 @@ export function simulateBattle(input: BattleInput): BattleResult {
 
     decrementCooldowns(player);
     decrementCooldowns(enemy);
-    // Status durations are decremented after all actions so a newly applied status always survives through the next round.
+
+    /**
+     * Status durations are decremented after all actions so a newly applied status always survives through the next round.
+     * @see:  Review finding: Statuses are only advanced but no effect resolving for now? Please verify.
+     */
+
     events.push(...decrementStatusesAtRoundEnd(player.statuses, player.entityId, round));
     events.push(...decrementStatusesAtRoundEnd(enemy.statuses, enemy.entityId, round));
     events.push({ type: 'ROUND_END', round });
