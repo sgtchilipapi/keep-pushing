@@ -124,3 +124,50 @@ The API validator checks payloads against the engine-local `CombatantSnapshot` r
 3. **Version API contract** when schema changes are expected.
 4. **Publish contract examples** (request/response) in docs to aid clients and prevent ambiguity.
 5. **Add schema-based validation** (e.g., zod/json-schema) for better error quality and evolvability.
+
+---
+
+## Module: `engine/battle` status resolution flow (cross-cutting)
+
+### Entry 4 — Statuses should resolve their gameplay effects before duration decrement in a general, centralized phase
+
+**Problem Observed**
+
+Status lifecycle events are advanced consistently (`STATUS_APPLY`/`STATUS_REFRESH`/`STATUS_EXPIRE`), but effect resolution is not modeled as a first-class, general phase that runs before end-of-round duration decrement.
+
+As a result, effect behavior can become fragmented across action-time code paths, and newly introduced statuses can accidentally participate in lifecycle tracking without guaranteed mechanical resolution timing.
+
+This finding is intentionally system-level and cross-cutting, rather than scoped to a single file, skill, or status identifier.
+
+The desired invariant is: active status effects resolve in a deterministic phase before status duration is decremented.
+
+**Assessment**
+
+- **Severity**: High (combat correctness / systemic extensibility).
+- **Likelihood of recurring issues**: High, especially as status catalog grows.
+- **Primary risks**:
+  1. **Lifecycle/effect drift**: statuses can be present in state and events without deterministic gameplay impact windows.
+  2. **Inconsistent timing semantics**: effect application timing may vary by implementation site rather than engine rule.
+  3. **Feature regression risk**: adding statuses requires touching multiple systems, increasing omission probability.
+  4. **Replay/audit ambiguity**: consumers can see status events without clear proof of when effects were actually resolved.
+- **Design impact**:
+  - Harder to enforce universal invariants such as: “active statuses resolve before decrement.”
+  - Harder to reason about ordering interactions (passives, damage, control-loss, and expiration).
+
+**Recommendations**
+
+1. **Define an explicit status-effect resolution phase**
+   - Add a deterministic phase in round processing where active statuses resolve their gameplay effects.
+   - Ensure this phase executes **before** status duration decrement/expiration.
+
+2. **Centralize status effect handlers by status ID**
+   - Introduce a single dispatch surface (e.g., per-status resolver registry) so each active status has a declared mechanical outcome and timing.
+
+3. **Document timing invariants in engine comments/docs**
+   - Record the expected order of operations (action resolution, status effect resolution, cooldown decrement, status decrement/expire, round end).
+
+4. **Add status-phase tests at engine level**
+   - Include tests that assert effect resolution occurs while status is active and before decrement, including boundary rounds where expiration occurs.
+
+5. **Improve observability with phase-accurate events (optional but recommended)**
+   - Consider dedicated status-effect-resolved events to make replay and diagnostics reflect both lifecycle and mechanical effect timing.

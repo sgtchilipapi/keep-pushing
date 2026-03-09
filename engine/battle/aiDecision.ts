@@ -7,6 +7,16 @@ import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
  *
  * This shape intentionally contains only data required by heuristics so decision-making
  * remains deterministic and independent from mutable battle engine state.
+ * 
+ * @todo: So as for now, a combatant only uses enemy hp and statuses? That is too shallow for MVP.
+ *       To have a meaningful combat agent, they should have need to be able to factor in multiple information and weigh the possible actions to take.
+ *       For example, skills might be for offense or self-preservation. Or skills might be to set a trap hence the agent understands timing.
+ *       Moreover, the agent must have the ability to anticipate even if crude at first which it improves over time through weights as well.
+ *       
+ *       Idea: Should agents decide based on ratios or levels of multiple stats? Like for example, combatantHp, enemyHp, skillDamageOutput, hitChance, etc?
+ *             So agents actually decide based on the current situation rather than just decide based on skill weights alone?
+ * 
+ *       Re-design.
  */
 export type DecisionCombatantSnapshot = {
   hp: number;
@@ -23,6 +33,12 @@ export type CandidateAction = {
   skillId: string;
 };
 
+/**
+ * @todo: Where did we get these hardcoded values from? As far as I know, we dont want hardcoded bonuses and organically let the combatants learn
+ *        and choose on their own.
+ *        
+ *        Re-design.
+ */
 const ACTIVE_AVAILABLE_BONUS = 200;
 const EXECUTE_BONUS = 500;
 const SHIELDBREAK_BONUS = 350;
@@ -46,13 +62,23 @@ function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
  * and learned archetype preferences.
  */
 function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): number {
-  // Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
+  /** Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
+   * @todo: Why we use skill.basePower as a base? I gues this only applies when the combatant decides to execute an offensive action.
+   *        Decide where to create a decision point between offensive or defensive. Before specific skill weights? Or after skill weights?
+   *        Re-design.
+   */
   let score = skill.basePower;
 
+  /**
+   * @see: We dont want to influence with hardcoded bonuses. Re-design.
+   */
   if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
     score += ACTIVE_AVAILABLE_BONUS;
   }
 
+  /**
+   * @see: This is yet another hardcoded bonus to influence the agent's decision making. We dont want this. Re-design.
+   */
   if (skill.tags.includes('execute')) {
     const targetHpBP = hpPercentBP(target);
     const threshold = skill.executeThresholdBP ?? 0;
@@ -62,11 +88,21 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
     }
   }
 
+  /**
+   * @todo: This is hardcoded influence about how a combatant should be efficient. We dont want this.
+   *       Imagine a combatant almost winning if only it uses a high-damage high-hit-chance skill for the last time on a stunned enemy.
+   *       But it doesnt because such skill includes a 'stun' tag? That is undesirable. We want organic learning even if it is rule-based.
+   * 
+   *       Re-design.
+   */
   if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
     // Reapplying stun is heavily penalized to avoid wasting turns on non-stacking control effects.
     score -= WASTED_STUN_PENALTY;
   }
 
+  /**
+   * @todo: Another hardcoded influence. Re-design.
+   */
   if (skill.tags.includes('shieldbreak') && target.statuses.includes('shielded')) {
     score += SHIELDBREAK_BONUS;
   }
@@ -100,6 +136,14 @@ export function chooseAction(
 ): CandidateAction {
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
+  /**
+   * @see: It is worth mentioning but not implementing now for the initial MVP or aiDecision version that agents should be able to think ahead.
+   *        Think ahead in the sense that they factor in future availability of other actions. Like for example, they can see that in the next
+   *        turn, their high damage skill but with low-hit chance is going to be available, they might prioritize using a 'stun' skill for this
+   *        turn so the next turn they can use such high-damage skill successfully.
+   * 
+   *        This might sound interesting but might be too complex for MVP. But leaving a note for this.
+   */
   for (const activeSkillId of actorActiveSkillIds) {
     if ((actorCooldowns[activeSkillId] ?? 0) === 0) {
       candidateSkillIds.push(activeSkillId);
