@@ -142,6 +142,23 @@ This creates two conceptually valid but practically incompatible schema families
 
 ### Entry 3 — API contract validation is tightly coupled to engine-internal snapshot shape
 
+**Status: Clarified (implementation pending)**
+
+**Fix Direction Locked**
+
+Entry 3 is now clarification-complete with a locked implementation direction documented in `docs/fix-api-contract-validation.md`.
+
+Locked direction:
+- Introduce canonical API DTO ownership under `/types/api/combat.ts` (separate from engine internal types).
+- Move route validation to schema-first DTO validation (strict unknown-field rejection) with inferred TypeScript types.
+- Validate DTO payloads first, then map DTO → engine input via explicit API-layer adapters.
+- Treat seed as server-generated (remove client seed ownership).
+- Keep canonical response event keys (`actorId`, `targetId`, `sourceId`, `rollBP`, `entityId`) and full event logs.
+- Apply a hard cut on legacy payload shapes, with migration examples documented.
+- Keep current client-supplied snapshot request mode for near-term combat-rules iteration; later evolve API toward character-ID inputs with server-side snapshot assembly from persisted data.
+
+This status update records decision closure for Entry 3; implementation remains a subsequent code pass.
+
 **Problem Observed**
 
 The API validator checks payloads against the engine-local `CombatantSnapshot` rather than a stable public API DTO contract. This couples external request shape directly to internal engine typing choices.

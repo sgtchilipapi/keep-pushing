@@ -140,6 +140,10 @@ Shared battle/combat contracts are canonical under:
 Rules:
 
 - Use shared `/types` exports for battle/combat DTOs and event contracts.
+- Public API request/response contracts are canonical under `/types/api/*` (for example, combat API DTOs under `/types/api/combat.ts`).
+- Engine battle/combat input/output contracts remain internal simulation contracts under `/types/combat.ts` and `/types/battle.ts`.
+- Route handlers must validate API DTO contracts first and then map DTOs to engine inputs through an explicit boundary (adapter/mapping layer).
+- Current tactical API may accept client-supplied snapshots for rapid combat iteration, but strategic direction is character-ID driven requests with server-side snapshot assembly from persisted character state.
 - Do not define parallel battle/combat contract unions in engine modules.
 - Canonical event keys use normalized naming (`actorId`, `targetId`, `sourceId`, `rollBP`, `entityId`).
 
