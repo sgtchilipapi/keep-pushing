@@ -1,4 +1,4 @@
-import type { BattleEvent } from './battleEngine';
+import type { BattleEvent } from '../../types/battle';
 
 /**
  * Lower saturation bound applied to learned skill preference values.

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 import BattleReplay from '../../components/BattleReplay';
-import type { BattleResult } from '../../engine/battle/battleEngine';
+import type { BattleResult } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
 const playerInitial: CombatantSnapshot = {
