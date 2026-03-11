@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
-import { simulateBattle, type CombatantSnapshot } from '../../../engine/battle/battleEngine';
+import { simulateBattle } from '../../../engine/battle/battleEngine';
+import type { CombatantSnapshot } from '../../../types/combat';
 
 type CombatRequestBody = {
   playerInitial: CombatantSnapshot;

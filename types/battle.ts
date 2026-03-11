@@ -8,20 +8,20 @@ export type BattleEvent =
   | {
       type: "ACTION";
       round: number;
-      actorEntityId: number;
-      targetEntityId: number;
+      actorEntityId: string;
+      targetEntityId: string;
       skillId: string;
     }
   | {
       type: "STUNNED_SKIP";
       round: number;
-      actorEntityId: number;
+      actorEntityId: string;
     }
   | {
       type: "HIT_RESULT";
       round: number;
-      actorEntityId: number;
-      targetEntityId: number;
+      actorEntityId: string;
+      targetEntityId: string;
       skillId: string;
       roll: number;
       hitChanceBP: number;
@@ -30,8 +30,8 @@ export type BattleEvent =
   | {
       type: "DAMAGE";
       round: number;
-      actorEntityId: number;
-      targetEntityId: number;
+      actorEntityId: string;
+      targetEntityId: string;
       skillId: string;
       amount: number;
       targetHpAfter: number;
@@ -39,29 +39,29 @@ export type BattleEvent =
   | {
       type: "STATUS_APPLY";
       round: number;
-      targetEntityId: number;
+      targetEntityId: string;
       statusId: string;
-      sourceEntityId: number;
+      sourceEntityId: string;
       remainingTurns: number;
     }
   | {
       type: "STATUS_REFRESH";
       round: number;
-      targetEntityId: number;
+      targetEntityId: string;
       statusId: string;
-      sourceEntityId: number;
+      sourceEntityId: string;
       remainingTurns: number;
     }
   | {
       type: "STATUS_EXPIRE";
       round: number;
-      targetEntityId: number;
+      targetEntityId: string;
       statusId: string;
     }
   | {
       type: "COOLDOWN_SET";
       round: number;
-      actorEntityId: number;
+      actorEntityId: string;
       skillId: string;
       cooldownRemainingTurns: number;
     }
@@ -72,13 +72,13 @@ export type BattleEvent =
   | {
       type: "DEATH";
       round: number;
-      targetEntityId: number;
+      targetEntityId: string;
     }
   | {
       type: "BATTLE_END";
       round: number;
-      winnerEntityId: number;
-      loserEntityId: number;
+      winnerEntityId: string;
+      loserEntityId: string;
     };
 
 export interface BattleResult {
