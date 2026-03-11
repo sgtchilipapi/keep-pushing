@@ -123,15 +123,15 @@ A **single shared canonical** `CombatantSnapshot` in `types/combat.ts` that is s
 
 ## Migration Checklist
 
-- [ ] Replace shared `CombatantSnapshot` in `types/combat.ts` with canonical unified shape.
-- [ ] Remove engine-local `CombatantSnapshot` in `engine/battle/battleEngine.ts`.
-- [ ] Import and use shared `CombatantSnapshot` inside engine.
-- [ ] Remove snapshot-level `initiative` from shared contract and keep it runtime-derived only.
-- [ ] Update ID-related shared types to align with canonical string entity IDs where needed.
-- [ ] Confirm API route validation still aligns with canonical fields (no API contract redesign yet).
-- [ ] Add deprecation/migration comments for removed assumptions.
-- [ ] Run compile/type check.
-- [ ] Execute targeted battle-engine and API checks.
+- [x] Replace shared `CombatantSnapshot` in `types/combat.ts` with canonical unified shape.
+- [x] Remove engine-local `CombatantSnapshot` in `engine/battle/battleEngine.ts`.
+- [x] Import and use shared `CombatantSnapshot` inside engine.
+- [x] Remove snapshot-level `initiative` from shared contract and keep it runtime-derived only.
+- [x] Update ID-related shared types to align with canonical string entity IDs where needed.
+- [x] Confirm API route validation still aligns with canonical fields (no API contract redesign yet).
+- [x] Add deprecation/migration comments for removed assumptions.
+- [x] Run compile/type check.
+- [x] Execute targeted battle-engine and API checks.
 
 ---
 

@@ -7,26 +7,9 @@ import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from '.
 import type { StatusId } from './statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import type { ArchetypeSkillWeights } from './learning';
+import type { CombatantSnapshot } from '../../types/combat';
 
-/**
- * Immutable combatant input snapshot used to initialize a battle simulation.
- *
- * This shape captures the persistent stats and equipped skills for one side at
- * simulation start. The engine clones this payload before mutation so callers
- * can safely reuse the same object across multiple runs.
- */
-export type CombatantSnapshot = {
-  entityId: string;
-  hp: number;
-  hpMax: number;
-  atk: number;
-  def: number;
-  spd: number;
-  accuracyBP: number;
-  evadeBP: number;
-  activeSkillIds: [string, string];
-  passiveSkillIds?: [string, string];
-};
+export type { CombatantSnapshot } from '../../types/combat';
 
 /**
  * Complete deterministic input payload required to run a battle simulation.

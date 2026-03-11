@@ -1,17 +1,23 @@
 export type EntitySide = "PLAYER" | "ENEMY";
 
 export interface CombatantSnapshot {
-  entityId: number;
-  side: EntitySide;
-  name: string;
+  // Migration note: entity identifiers are canonical string IDs.
+  // Numeric IDs from legacy payloads are no longer part of the shared contract.
+  entityId: string;
+  // Engine ignores these metadata fields; they remain optional for callers.
+  side?: EntitySide;
+  name?: string;
   hp: number;
   hpMax: number;
   atk: number;
   def: number;
   spd: number;
-  initiative: number;
+  // Migration note: initiative is runtime-derived in the battle engine and is
+  // intentionally excluded from the shared input snapshot contract.
   accuracyBP: number;
   evadeBP: number;
+  activeSkillIds: [string, string];
+  passiveSkillIds?: [string, string];
 }
 
 export interface StatusDef {
@@ -23,7 +29,7 @@ export interface StatusDef {
 
 export interface ActiveStatus {
   statusId: string;
-  sourceEntityId: number;
+  sourceEntityId: string;
   remainingTurns: number;
 }
 
