@@ -10,6 +10,14 @@ type CombatRequestBody = {
   seed: number;
 };
 
+function isValidEntityId(entityId: string): boolean {
+  return /^\d+$/.test(entityId);
+}
+
+function isSkillTuple(value: unknown): value is [string, string] {
+  return Array.isArray(value) && value.length === 2 && value.every((skillId) => typeof skillId === 'string');
+}
+
 function isCombatantSnapshot(value: unknown): value is CombatantSnapshot {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -18,7 +26,9 @@ function isCombatantSnapshot(value: unknown): value is CombatantSnapshot {
   const snapshot = value as Partial<CombatantSnapshot>;
 
   return (
+    !('initiative' in snapshot) &&
     typeof snapshot.entityId === 'string' &&
+    isValidEntityId(snapshot.entityId) &&
     typeof snapshot.hp === 'number' &&
     typeof snapshot.hpMax === 'number' &&
     typeof snapshot.atk === 'number' &&
@@ -26,9 +36,8 @@ function isCombatantSnapshot(value: unknown): value is CombatantSnapshot {
     typeof snapshot.spd === 'number' &&
     typeof snapshot.accuracyBP === 'number' &&
     typeof snapshot.evadeBP === 'number' &&
-    Array.isArray(snapshot.activeSkillIds) &&
-    snapshot.activeSkillIds.length === 2 &&
-    snapshot.activeSkillIds.every((skillId) => typeof skillId === 'string')
+    isSkillTuple(snapshot.activeSkillIds) &&
+    (snapshot.passiveSkillIds === undefined || isSkillTuple(snapshot.passiveSkillIds))
   );
 }
 
