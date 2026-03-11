@@ -11,6 +11,22 @@ This document captures architecture and implementation findings across battle-re
 
 ### Entry 1 — Engine-local `CombatantSnapshot` diverges from shared combat domain type
 
+**Status: Solved**
+
+**Fix Applied**
+
+Entry 1 has been resolved by adopting a single shared canonical `CombatantSnapshot` strategy (Option A) and removing the duplicate engine-local ownership.
+
+Applied changes (per `docs/fix-combatant-snapshot-type-divergence.md`):
+- Canonical `CombatantSnapshot` ownership is in `types/combat.ts`.
+- `entityId` is unified as `string`.
+- `initiative` is treated as runtime-derived and no longer part of the canonical input snapshot.
+- Engine-required loadout fields (`activeSkillIds`, optional `passiveSkillIds`) are part of the canonical shared snapshot.
+- Metadata (`side`, `name`) remains optional and engine-ignored.
+- Legacy duplicate snapshot aliases/surfaces are removed rather than retained.
+
+This closes the type divergence issue and removes naming ambiguity around `CombatantSnapshot`.
+
 **Problem Observed**
 
 The battle engine defines and exports its own `CombatantSnapshot` type instead of using the interface from `types/combat.ts`.
@@ -73,6 +89,21 @@ Overall, this appears to be a legacy split between a “shared domain type layer
 ## Module: `types/combat.ts` and `types/battle.ts`
 
 ### Entry 2 — Shared type layer appears to represent a parallel/legacy event and entity schema
+
+**Status: Solved**
+
+**Fix Applied**
+
+Entry 2 has been resolved by unifying battle/combat contracts in the shared `/types` layer and hard-cutting away parallel schema interpretation.
+
+Applied changes (per `docs/fix-shared-type-layer.md`):
+- `/types` is treated as canonical source of truth for shared battle/combat contracts.
+- Event payload keys are normalized to canonical names (for example: `actorId`, `targetId`, `sourceId`, `rollBP`) to eliminate dual key families.
+- Shared contracts use `string` entity IDs consistently.
+- Divergent duplicate event/result type surfaces outside `/types` are removed in favor of canonical shared types.
+- Migration approach is one-shot (no compatibility alias layer), preventing ongoing schema drift.
+
+This closes the parallel/legacy schema finding by establishing one authoritative shared contract surface.
 
 **Status Update (Migration in progress)**
 
