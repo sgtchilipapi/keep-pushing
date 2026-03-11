@@ -7,6 +7,7 @@ import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from '.
 import type { StatusId } from './statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import type { ArchetypeSkillWeights } from './learning';
+import type { BattleEvent, BattleResult } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
 export type { CombatantSnapshot } from '../../types/combat';
@@ -26,50 +27,6 @@ export type BattleInput = {
   playerSkillWeights?: ArchetypeSkillWeights;
   enemySkillWeights?: ArchetypeSkillWeights;
   maxRounds?: number;
-};
-
-/**
- * Discrete event emitted by the simulation timeline.
- *
- * The engine records every meaningful transition as a typed event so the
- * caller can reconstruct battle flow for replay, analytics, and auditing.
- * @see: Review finding: Why not use the BattleEvent from types/battle?
- * @see: STUNNED_SKIP is too specific. After the MVP, replace with a general 'DISABLED' maybe?
- */
-export type BattleEvent =
-  | { type: 'ROUND_START'; round: number }
-  | { type: 'STUNNED_SKIP'; round: number; actorId: string }
-  | { type: 'ACTION'; round: number; actorId: string; targetId: string; skillId: string }
-  | { type: 'HIT_RESULT'; round: number; actorId: string; targetId: string; hitChanceBP: number; rollBP: number; didHit: boolean }
-  | {
-      type: 'STATUS_APPLY' | 'STATUS_REFRESH';
-      round: number;
-      targetId: string;
-      statusId: StatusId;
-      sourceId: string;
-      remainingTurns: number;
-    }
-  | { type: 'STATUS_EXPIRE'; round: number; targetId: string; statusId: StatusId }
-  | { type: 'DAMAGE'; round: number; actorId: string; targetId: string; amount: number; targetHpAfter: number }
-  | { type: 'COOLDOWN_SET'; round: number; actorId: string; skillId: string; cooldownRemainingTurns: number }
-  | { type: 'DEATH'; round: number; entityId: string }
-  | { type: 'ROUND_END'; round: number }
-  | { type: 'BATTLE_END'; round: number; winnerEntityId: string; reason: 'death' | 'timeout' };
-
-/**
- * Deterministic battle simulation output.
- *
- * This payload includes immutable copies of initial inputs, an ordered event
- * log, and winner metadata suitable for replay and downstream persistence.
- */
-export type BattleResult = {
-  battleId: string;
-  seed: number;
-  playerInitial: CombatantSnapshot;
-  enemyInitial: CombatantSnapshot;
-  events: BattleEvent[];
-  winnerEntityId: string;
-  roundsPlayed: number;
 };
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
@@ -245,6 +202,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
         round,
         actorId: actor.entityId,
         targetId: target.entityId,
+        skillId: selectedSkill.skillId,
         hitChanceBP: attack.hitChanceBP,
         rollBP: attack.rollBP,
         didHit: attack.didHit
@@ -257,6 +215,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
           round,
           actorId: actor.entityId,
           targetId: target.entityId,
+          skillId: selectedSkill.skillId,
           amount: attack.damage,
           targetHpAfter: target.hp
         });
@@ -297,10 +256,13 @@ export function simulateBattle(input: BattleInput): BattleResult {
     reason = 'timeout';
   }
 
+  const loser = winner.entityId === player.entityId ? enemy : player;
+
   events.push({
     type: 'BATTLE_END',
     round: roundsPlayed,
     winnerEntityId: winner.entityId,
+    loserEntityId: loser.entityId,
     reason
   });
 

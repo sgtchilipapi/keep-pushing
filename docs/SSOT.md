@@ -130,6 +130,21 @@ The engine must not depend on:
 
 ---
 
+## 4.1 Type Contract Source of Truth
+
+Shared battle/combat contracts are canonical under:
+
+- `/types/combat.ts`
+- `/types/battle.ts`
+
+Rules:
+
+- Use shared `/types` exports for battle/combat DTOs and event contracts.
+- Do not define parallel battle/combat contract unions in engine modules.
+- Canonical event keys use normalized naming (`actorId`, `targetId`, `sourceId`, `rollBP`, `entityId`).
+
+---
+
 # 5. Combat System
 
 ## 5.1 Battle Format

@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import type { BattleResult } from '../engine/battle/battleEngine';
+import type { BattleResult } from '../types/battle';
 
 type Props = {
   result: BattleResult;
