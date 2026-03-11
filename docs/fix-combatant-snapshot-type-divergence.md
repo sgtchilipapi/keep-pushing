@@ -135,18 +135,91 @@ A **single shared canonical** `CombatantSnapshot` in `types/combat.ts` that is s
 
 ---
 
-## Test Plan (plan only; not implemented in this pass)
+## Testing Plan (plan only; not implemented in this pass)
 
-### Compile coverage
-- Type-check whole project to catch all callsites expecting numeric `entityId` or snapshot-level `initiative`.
+The goal of this plan is to verify that **all affected contracts now match the canonical shared `CombatantSnapshot`** and that mismatched legacy assumptions are rejected.
 
-### Unit coverage
-- Validate battle engine helpers still accept canonical snapshot fields and preserve optional `passiveSkillIds` behavior.
-- Validate validation guard behavior for canonical fields in API route.
+### 1) Compile/type-check coverage (project-wide)
 
-### Integration coverage
-- POST `/api/combat` with canonical payload and verify successful simulation.
-- Negative-case request(s) for invalid IDs/non-canonical shapes to verify rejection behavior remains strict where applicable.
+1. **Global TypeScript compile check**
+   - **Should**: project compiles with `CombatantSnapshot.entityId` as `string`, no references to snapshot-level `initiative`, and no stale imports of engine-local snapshot type.
+   - **Actual check**: run full TypeScript type-check for the repo.
+
+2. **Type-level usage audit for changed identity semantics**
+   - **Should**: callsites that consume entity IDs from shared combat types treat IDs as `string` consistently.
+   - **Actual check**: compile catches remaining `number` assumptions and any incompatible assignments.
+
+3. **Type-level usage audit for runtime-only initiative ownership**
+   - **Should**: only runtime engine state carries `initiative`; shared snapshot users must not require it.
+   - **Actual check**: compile fails if any shared snapshot construction/consumption still expects `initiative`.
+
+### 2) Unit tests — shared type and engine behavior
+
+4. **Engine input acceptance with canonical snapshot (baseline positive)**
+   - **Should**: battle engine accepts snapshots containing required canonical fields, including `activeSkillIds` and optional metadata (`side`, `name`).
+   - **Actual check**: construct canonical snapshots and assert battle execution initializes entities correctly.
+
+5. **Optional `passiveSkillIds` handling (present vs omitted)**
+   - **Should**: both shapes work:
+     - with `passiveSkillIds` present,
+     - with `passiveSkillIds` omitted.
+   - **Actual check**: assert runtime cooldown/effect setup remains valid in both variants.
+
+6. **Skill tuple shape enforcement (negative)**
+   - **Should**: malformed skill arrays (wrong length/type) are not accepted where shape checks exist.
+   - **Actual check**: feed invalid shapes via tested boundary (API validation and/or guarded constructors) and assert rejection path.
+
+7. **No dependence on snapshot-level `initiative` (negative regression)**
+   - **Should**: engine helpers do not read `initiative` from input snapshot.
+   - **Actual check**: run engine setup tests with canonical snapshots lacking `initiative`; assert no crash and deterministic runtime initiative derivation behavior.
+
+8. **Entity ID string semantics in core flows**
+   - **Should**: engine lookup/event attribution continues to work when IDs are strings.
+   - **Actual check**: assert status/source references and event entity linkage use string IDs without coercion bugs.
+
+### 3) Unit tests — API request validation behavior
+
+9. **Canonical request payload accepted (positive)**
+   - **Should**: `POST /api/combat` request with canonical snapshot fields passes validation.
+   - **Actual check**: assert non-error response and simulation output presence.
+
+10. **Legacy numeric `entityId` rejected (negative)**
+    - **Should**: payloads using numeric `entityId` fail validation (or are rejected by guard path) per canonical `string` contract.
+    - **Actual check**: submit numeric IDs and assert 4xx with validation error details.
+
+11. **Invalid string ID rejected (negative)**
+    - **Should**: IDs that violate accepted format/conversion requirements are rejected.
+    - **Actual check**: submit malformed ID values and assert 4xx rejection.
+
+12. **Missing required canonical fields rejected (negative)**
+    - **Should**: requests missing required stats or `activeSkillIds` fail validation.
+    - **Actual check**: table-driven invalid payload cases asserting 4xx with field-specific errors.
+
+13. **`initiative` supplied by client is ignored or rejected per route behavior**
+    - **Should**: because initiative is runtime-derived, client-provided snapshot-level initiative must not become required behavior.
+    - **Actual check**: send payload with extra `initiative`; assert route behavior is explicit and stable (either ignored safely or rejected intentionally).
+
+### 4) Integration tests — end-to-end behavior
+
+14. **End-to-end combat simulation with canonical snapshots (positive)**
+    - **Should**: full API-to-engine flow succeeds and produces expected round/event structure using string IDs.
+    - **Actual check**: submit representative canonical battle request and assert response shape plus non-empty deterministic event timeline invariants.
+
+15. **End-to-end failure on mixed-schema payload (negative)**
+    - **Should**: payloads combining legacy/shared-old assumptions (e.g., numeric IDs + snapshot initiative reliance) do not silently pass.
+    - **Actual check**: submit mixed-schema request and assert failure response with clear validation diagnostics.
+
+16. **Backward-compatibility guardrail test (intentional break confirmation)**
+    - **Should**: tests explicitly document that legacy snapshot shape is no longer accepted, matching "breaking changes allowed" decision.
+    - **Actual check**: add a named regression test proving old-shape payload fails, preventing accidental reintroduction.
+
+### 5) Suggested execution order (when implementing tests)
+
+1. Add/adjust compile test gate first (fastest signal for migration completeness).
+2. Add engine unit tests for canonical snapshot + initiative/runtime ownership.
+3. Add API validation unit tests (positive + negative matrix).
+4. Add end-to-end API integration tests.
+5. Run full test suite and type-check together before merge.
 
 ---
 
