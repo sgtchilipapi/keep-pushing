@@ -86,6 +86,7 @@ describe('battleEngine v0', () => {
       type: 'BATTLE_END',
       round: 30,
       winnerEntityId: 'alpha',
+      loserEntityId: 'beta',
       reason: 'timeout'
     });
     expect(result.winnerEntityId).toBe('alpha');

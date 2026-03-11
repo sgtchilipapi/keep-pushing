@@ -74,6 +74,12 @@ Overall, this appears to be a legacy split between a “shared domain type layer
 
 ### Entry 2 — Shared type layer appears to represent a parallel/legacy event and entity schema
 
+**Status Update (Migration in progress)**
+
+- Canonical battle/combat contracts are now unified under `/types` with normalized event keys (`actorId`, `targetId`, `sourceId`, `rollBP`) and `string` entity IDs.
+- Engine-local duplicate `BattleEvent`/`BattleResult` type surfaces have been removed in favor of shared `/types` contracts.
+- Migration is one-shot (no compatibility alias layer). Legacy key families (e.g., `*EntityId`, `roll`) are no longer part of canonical shared event contracts.
+
 **Problem Observed**
 
 `types/combat.ts` and `types/battle.ts` define a full combat and battle schema that does not align with the active engine event model and field naming conventions (e.g., numeric entity IDs and alternate event payload keys).
