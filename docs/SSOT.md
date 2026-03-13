@@ -194,6 +194,29 @@ No randomness allowed in ordering.
 
 ---
 
+## 5.4 Status Resolution Timing (Canonical)
+
+Status effects resolve in two deterministic windows:
+
+1. **On Apply** (`onApply`) for successful applications/reapplications where resulting duration is `> 0`.
+2. **Round Start** (`onRoundStart`) before any actions from either side.
+
+Canonical per-round processing order:
+
+1. Status effect resolution
+2. Action resolution
+3. Status duration decrement/expire
+4. Cooldown decrement
+5. Round end
+
+Additional invariants:
+- Status resolver ordering uses explicit priority values.
+- Multi-target status resolution order is deterministic: `SPD` descending, then `entityId` ascending.
+- Death short-circuits all further processing immediately.
+- Event logs must include lifecycle events and `STATUS_EFFECT_RESOLVE` timing events.
+
+---
+
 # 6. Loadout System
 
 Each character has:

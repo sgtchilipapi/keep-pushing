@@ -6,6 +6,8 @@
  */
 export type StatusId = 'stunned' | 'shielded' | 'broken_armor' | 'silenced' | 'resist';
 
+export const ALL_STATUS_IDS: readonly StatusId[] = ['stunned', 'shielded', 'broken_armor', 'silenced', 'resist'];
+
 /**
  * Describes the canonical configuration for a status effect.
  *
@@ -27,11 +29,12 @@ const STATUS_REGISTRY: Record<StatusId, StatusDef> = {
   resist: { id: 'resist', durationTurns: 3 }
 };
 
+export function isStatusId(value: string): value is StatusId {
+  return (ALL_STATUS_IDS as readonly string[]).includes(value);
+}
+
 /**
  * Retrieves the immutable definition for a known status effect.
- *
- * This function assumes {@link statusId} is a valid member of {@link StatusId}
- * and returns the corresponding entry from the in-memory status registry.
  *
  * @param statusId - Identifier of the status whose configuration is needed.
  * @returns The canonical status definition associated with the provided ID.

@@ -60,6 +60,25 @@ export type BattleEvent =
       remainingTurns: number;
     }
   | {
+      type: "STATUS_APPLY_FAILED";
+      round: number;
+      targetId: string;
+      statusId: string;
+      sourceId: string;
+      reason: "NON_POSITIVE_DURATION";
+    }
+  | {
+      type: "STATUS_EFFECT_RESOLVE";
+      round: number;
+      phase: "onApply" | "onRoundStart";
+      statusId: string;
+      sourceId: string;
+      targetId: string;
+      hpDelta: number;
+      targetHpAfter: number;
+      controlLossApplied: boolean;
+    }
+  | {
       type: "STATUS_EXPIRE";
       round: number;
       // Migration note: renamed from targetEntityId.

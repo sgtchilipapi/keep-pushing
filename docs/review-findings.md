@@ -185,6 +185,17 @@ The API validator checks payloads against the engine-local `CombatantSnapshot` r
 
 ### Entry 4 — Statuses should resolve their gameplay effects before duration decrement in a general, centralized phase
 
+**Status: Solved**
+
+**Fix Applied**
+
+Entry 4 has been implemented with a hard-cut centralized status-effect resolution model:
+- Added explicit status effect resolution timing windows (`onApply`, `onRoundStart`) with deterministic ordering.
+- Enforced round flow: status resolution → action resolution → status decrement/expire → cooldown decrement → round end.
+- Added canonical `STATUS_EFFECT_RESOLVE` events (including phase and effect deltas) alongside lifecycle events.
+- Added fail-fast resolver guards and compile-time-complete status resolver registry coverage.
+- Added coverage tests for on-apply/round-start timing and fail-fast unknown-resolver behavior.
+
 **Problem Observed**
 
 Status lifecycle events are advanced consistently (`STATUS_APPLY`/`STATUS_REFRESH`/`STATUS_EXPIRE`), but effect resolution is not modeled as a first-class, general phase that runs before end-of-round duration decrement.

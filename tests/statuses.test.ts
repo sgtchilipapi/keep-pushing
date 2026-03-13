@@ -9,7 +9,7 @@ describe('status resolution', () => {
 
     expect(applyEvent.type).toBe('STATUS_APPLY');
     expect(refreshEvent.type).toBe('STATUS_REFRESH');
-    expect(statuses.stunned).toBe(1);
+    expect(statuses.stunned?.remainingTurns).toBe(1);
   });
 
   it('expires statuses at end of round when remaining turns reaches zero', () => {
@@ -35,6 +35,6 @@ describe('status resolution', () => {
     applyStatus(statuses, 'resist', 'actor-b', 'target-a', 1);
 
     expect(Object.keys(statuses)).toHaveLength(1);
-    expect(statuses.resist).toBe(3);
+    expect(statuses.resist?.remainingTurns).toBe(3);
   });
 });

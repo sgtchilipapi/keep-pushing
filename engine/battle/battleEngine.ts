@@ -4,21 +4,16 @@ import { XorShift32 } from '../rng/xorshift32';
 import { chooseAction } from './aiDecision';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
-import type { StatusId } from './statusRegistry';
+import { isStatusId, type StatusId } from './statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
+import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/registry';
+import type { StatusResolvePhase } from './statuses/types';
 import type { ArchetypeSkillWeights } from './learning';
 import type { BattleEvent, BattleResult } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
 export type { CombatantSnapshot } from '../../types/combat';
 
-/**
- * Complete deterministic input payload required to run a battle simulation.
- *
- * Callers provide initial combatants, a random seed, and optional policy
- * inputs such as learned skill weights and round caps. Given the same payload,
- * the simulator is expected to produce the same ordered event stream.
- */
 export type BattleInput = {
   battleId: string;
   seed: number;
@@ -31,16 +26,6 @@ export type BattleInput = {
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
 
-// Clone snapshots so simulation-side mutations (hp, cooldowns, statuses) never leak into caller-owned inputs.
-/**
- * Produces a mutation-safe clone of a combatant input snapshot.
- *
- * The battle loop mutates hp, cooldowns, and status state, so input snapshots
- * are cloned to preserve caller-owned objects and arrays.
- *
- * @param entity - Source combatant snapshot provided by the caller.
- * @returns A cloned snapshot with copied skill tuple arrays.
- */
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   const cloned: CombatantSnapshot = {
     ...entity,
@@ -54,63 +39,94 @@ function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   return cloned;
 }
 
-/**
- * Builds initial cooldown tracking for every active skill on a combatant.
- *
- * @param entity - Combatant snapshot whose active skills should be tracked.
- * @returns A cooldown map keyed by skill id with all counters initialized to zero.
- */
 function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
   return Object.fromEntries(entity.activeSkillIds.map((skillId) => [skillId, 0]));
 }
 
-/**
- * Decrements all active skill cooldown counters at round end.
- *
- * Cooldowns are clamped at zero so consumers never observe negative remaining
- * turns.
- *
- * @param entity - Runtime combatant state mutated in place.
- */
 function decrementCooldowns(entity: RuntimeEntity): void {
   for (const skillId of entity.activeSkillIds) {
     entity.cooldowns[skillId] = Math.max(0, (entity.cooldowns[skillId] ?? 0) - 1);
   }
 }
 
-/**
- * Returns currently active status identifiers on a runtime entity.
- *
- * Status ids are sorted before return to keep downstream decision logic stable
- * and deterministic across object key iteration differences.
- *
- * @param entity - Runtime combatant state containing status turn counters.
- * @returns Sorted list of status ids with remaining turns greater than zero.
- */
 function getActiveStatusIds(entity: RuntimeEntity): StatusId[] {
   return Object.keys(entity.statuses)
-    .filter((statusId) => (entity.statuses[statusId as StatusId] ?? 0) > 0)
+    .filter((statusId) => {
+      if (!isStatusId(statusId)) {
+        throw new Error(`Unknown active statusId: ${statusId}`);
+      }
+
+      return (entity.statuses[statusId]?.remainingTurns ?? 0) > 0;
+    })
     .sort() as StatusId[];
 }
 
-/**
- * Runs a deterministic battle simulation and emits an event timeline.
- *
- * The engine advances initiative, resolves actions, applies damage and status
- * effects, updates cooldowns, and terminates on death or timeout. Runtime
- * combatant state is mutated internally, while the returned payload includes
- * cloned initial snapshots to avoid leaking mutable references.
- *
- * Assumptions and invariants:
- * - Exactly two combatants are simulated, indexed as player and enemy.
- * - Initiative action cost is paid even when an actor loses control.
- * - Status duration decrement occurs at round end after all actions.
- *
- * @param input - Full simulation configuration, seed, and initial combatants.
- * @returns Deterministic battle result with event log, winner, and rounds played.
- */
+function emitStatusEffectResolution(
+  events: BattleEvent[],
+  phase: StatusResolvePhase,
+  round: number,
+  statusId: StatusId,
+  sourceId: string,
+  target: RuntimeEntity
+): void {
+  const resolver = getStatusResolver(statusId);
+  if (phase === 'onApply' && !hasStatusResolveTiming(statusId, 'onApply')) {
+    return;
+  }
+  if (phase === 'onRoundStart' && !hasStatusResolveTiming(statusId, 'onRoundStart')) {
+    return;
+  }
+
+  const resolution = resolver.resolve({
+    round,
+    phase,
+    statusId,
+    sourceId,
+    targetId: target.entityId,
+    targetHpBefore: target.hp
+  });
+
+  if (resolution.hpDelta !== 0) {
+    target.hp = Math.max(0, target.hp + resolution.hpDelta);
+  }
+
+  events.push({
+    type: 'STATUS_EFFECT_RESOLVE',
+    round,
+    phase,
+    statusId,
+    sourceId,
+    targetId: target.entityId,
+    hpDelta: resolution.hpDelta,
+    targetHpAfter: target.hp,
+    controlLossApplied: resolution.controlLossApplied
+  });
+}
+
+function resolveRoundStartStatuses(round: number, combatants: RuntimeEntity[], events: BattleEvent[]): RuntimeEntity | null {
+  const targets = [...combatants].sort((left, right) => right.spd - left.spd || left.entityId.localeCompare(right.entityId));
+
+  for (const target of targets) {
+    const activeStatuses = getActiveStatusIds(target);
+    const resolvers = getResolversForRoundStart(activeStatuses);
+
+    for (const resolver of resolvers) {
+      const statusState = target.statuses[resolver.statusId];
+      const sourceId = statusState?.sourceId ?? target.entityId;
+      emitStatusEffectResolution(events, 'onRoundStart', round, resolver.statusId, sourceId, target);
+
+      if (target.hp <= 0) {
+        events.push({ type: 'DEATH', round, entityId: target.entityId });
+        const winner = combatants.find((entity) => entity.entityId !== target.entityId) ?? null;
+        return winner;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function simulateBattle(input: BattleInput): BattleResult {
-  // The RNG is seeded once per battle to guarantee deterministic replays from the same input payload.
   const rng = new XorShift32(input.seed);
   const maxRounds = input.maxRounds ?? 30;
   const events: BattleEvent[] = [];
@@ -136,6 +152,13 @@ export function simulateBattle(input: BattleInput): BattleResult {
   for (let round = 1; round <= maxRounds; round += 1) {
     roundsPlayed = round;
     events.push({ type: 'ROUND_START', round });
+
+    winner = resolveRoundStartStatuses(round, combatants, events);
+    if (winner !== null) {
+      reason = 'death';
+      break;
+    }
+
     applyRoundInitiative(combatants);
 
     while (hasReadyActor(combatants)) {
@@ -152,9 +175,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       actor.initiative -= 100;
-      // Action cost is always consumed even on control-loss turns, preventing stunned actors from stockpiling turns.
 
-      if ((actor.statuses.stunned ?? 0) > 0) {
+      if ((actor.statuses.stunned?.remainingTurns ?? 0) > 0) {
         events.push({
           type: 'STUNNED_SKIP',
           round,
@@ -179,7 +201,6 @@ export function simulateBattle(input: BattleInput): BattleResult {
       });
 
       if (selectedSkill.skillId !== BASIC_ATTACK_SKILL_ID) {
-        // Cooldown is set before attack resolution so misses still pay the intended opportunity cost.
         actor.cooldowns[selectedSkill.skillId] = selectedSkill.cooldownTurns;
         events.push({
           type: 'COOLDOWN_SET',
@@ -190,12 +211,7 @@ export function simulateBattle(input: BattleInput): BattleResult {
         });
       }
 
-      const attackContext = applyConditionalPassives({
-        actor,
-        target,
-        skill: selectedSkill
-      });
-
+      const attackContext = applyConditionalPassives({ actor, target, skill: selectedSkill });
       const attack = resolveAttack(attackContext.actor, attackContext.target, attackContext.skill, rng);
       events.push({
         type: 'HIT_RESULT',
@@ -221,8 +237,22 @@ export function simulateBattle(input: BattleInput): BattleResult {
         });
 
         for (const statusId of selectedSkill.appliesStatusIds ?? []) {
-          // Status side effects are hit-gated by design: on-hit riders do not trigger on misses.
-          events.push(applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round));
+          const statusEvent = applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round);
+          events.push(statusEvent);
+
+          if (statusEvent.type !== 'STATUS_APPLY_FAILED') {
+            emitStatusEffectResolution(events, 'onApply', round, statusId, actor.entityId, target);
+            if (target.hp <= 0) {
+              events.push({ type: 'DEATH', round, entityId: target.entityId });
+              winner = actor;
+              reason = 'death';
+              break;
+            }
+          }
+        }
+
+        if (winner !== null) {
+          break;
         }
 
         if (target.hp === 0) {
@@ -234,16 +264,10 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
     }
 
-    decrementCooldowns(player);
-    decrementCooldowns(enemy);
-
-    /**
-     * Status durations are decremented after all actions so a newly applied status always survives through the next round.
-     * @see:  Review finding: Statuses are only advanced but no effect resolving for now? Please verify.
-     */
-
     events.push(...decrementStatusesAtRoundEnd(player.statuses, player.entityId, round));
     events.push(...decrementStatusesAtRoundEnd(enemy.statuses, enemy.entityId, round));
+    decrementCooldowns(player);
+    decrementCooldowns(enemy);
     events.push({ type: 'ROUND_END', round });
 
     if (winner !== null) {
