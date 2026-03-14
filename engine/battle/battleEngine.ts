@@ -4,7 +4,7 @@ import { XorShift32 } from '../rng/xorshift32';
 import { chooseAction } from './aiDecision';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
-import { isStatusId, type StatusId } from './statuses/statusRegistry';
+import { getStatusDef, isStatusId, type StatusId } from './statuses/statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/resolverRegistry';
 import type { StatusResolvePhase } from './statuses/types';
@@ -25,6 +25,15 @@ export type BattleInput = {
 };
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
+
+export function adjustDamageForStatuses(baseDamage: number, activeStatusIds: readonly StatusId[]): number {
+  const incomingDamageMultiplierBP = activeStatusIds.reduce((acc, statusId) => {
+    const multiplier = getStatusDef(statusId).incomingDamageMultiplierBP;
+    return Math.floor((acc * multiplier) / 10000);
+  }, 10000);
+
+  return Math.max(1, Math.floor((baseDamage * incomingDamageMultiplierBP) / 10000));
+}
 
 function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   const cloned: CombatantSnapshot = {
@@ -87,7 +96,7 @@ function emitStatusEffectResolution(
   });
 
   if (resolution.hpDelta !== 0) {
-    target.hp = Math.max(0, target.hp + resolution.hpDelta);
+    target.hp = Math.min(target.hpMax, Math.max(0, target.hp + resolution.hpDelta));
   }
 
   events.push({
@@ -225,14 +234,15 @@ export function simulateBattle(input: BattleInput): BattleResult {
       });
 
       if (attack.didHit) {
-        target.hp = Math.max(0, target.hp - attack.damage);
+        const adjustedDamage = adjustDamageForStatuses(attack.damage, getActiveStatusIds(target));
+        target.hp = Math.max(0, target.hp - adjustedDamage);
         events.push({
           type: 'DAMAGE',
           round,
           actorId: actor.entityId,
           targetId: target.entityId,
           skillId: selectedSkill.skillId,
-          amount: attack.damage,
+          amount: adjustedDamage,
           targetHpAfter: target.hp
         });
 
@@ -245,6 +255,21 @@ export function simulateBattle(input: BattleInput): BattleResult {
             if (target.hp <= 0) {
               events.push({ type: 'DEATH', round, entityId: target.entityId });
               winner = actor;
+              reason = 'death';
+              break;
+            }
+          }
+        }
+
+        for (const statusId of selectedSkill.selfAppliesStatusIds ?? []) {
+          const statusEvent = applyStatus(actor.statuses, statusId, actor.entityId, actor.entityId, round);
+          events.push(statusEvent);
+
+          if (statusEvent.type !== 'STATUS_APPLY_FAILED') {
+            emitStatusEffectResolution(events, 'onApply', round, statusId, actor.entityId, actor);
+            if (actor.hp <= 0) {
+              events.push({ type: 'DEATH', round, entityId: actor.entityId });
+              winner = target;
               reason = 'death';
               break;
             }

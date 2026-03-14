@@ -31,10 +31,10 @@ describe('status resolution', () => {
 
   it('does not increase active status count when reapplied', () => {
     const statuses: ActiveStatuses = {};
-    applyStatus(statuses, 'resist', 'actor-a', 'target-a', 1);
-    applyStatus(statuses, 'resist', 'actor-b', 'target-a', 1);
+    applyStatus(statuses, 'recovering', 'actor-a', 'target-a', 1);
+    applyStatus(statuses, 'recovering', 'actor-b', 'target-a', 1);
 
     expect(Object.keys(statuses)).toHaveLength(1);
-    expect(statuses.resist?.remainingTurns).toBe(3);
+    expect(statuses.recovering?.remainingTurns).toBe(3);
   });
 });
