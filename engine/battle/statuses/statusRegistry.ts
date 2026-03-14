@@ -17,19 +17,55 @@ export const ALL_STATUS_IDS: readonly StatusId[] = ['stunned', 'shielded', 'brok
 export type StatusDef = {
   /** Unique registry key for the status definition. */
   id: StatusId;
+  /** High-level gameplay class for the status mechanic. */
+  kind: 'disable' | 'dot' | 'hot' | 'buff' | 'debuff';
   /** Number of turns the status persists before expiring. */
   durationTurns: number;
+  /** Signed HP delta applied by status resolvers when applicable. */
+  roundStartHpDelta: number;
+  /** Incoming damage multiplier in basis points while status is active. */
+  incomingDamageMultiplierBP: number;
 };
 
 /**
  * @todo: Flesh out statuses. Disables, DOTs & HOTs, Buffs & Debuffs, etc.
  */
 const STATUS_REGISTRY: Record<StatusId, StatusDef> = {
-  stunned: { id: 'stunned', durationTurns: 1 },
-  shielded: { id: 'shielded', durationTurns: 2 },
-  broken_armor: { id: 'broken_armor', durationTurns: 2 },
-  overheated: { id: 'overheated', durationTurns: 1 },
-  recovering: { id: 'recovering', durationTurns: 3 }
+  stunned: {
+    id: 'stunned',
+    kind: 'disable',
+    durationTurns: 1,
+    roundStartHpDelta: 0,
+    incomingDamageMultiplierBP: 10000
+  },
+  shielded: {
+    id: 'shielded',
+    kind: 'buff',
+    durationTurns: 2,
+    roundStartHpDelta: 0,
+    incomingDamageMultiplierBP: 8000
+  },
+  broken_armor: {
+    id: 'broken_armor',
+    kind: 'debuff',
+    durationTurns: 2,
+    roundStartHpDelta: 0,
+    incomingDamageMultiplierBP: 13000
+  },
+  overheated: {
+    id: 'overheated',
+    kind: 'dot',
+    durationTurns: 2,
+    roundStartHpDelta: -120,
+    incomingDamageMultiplierBP: 10000
+  },
+  recovering: {
+    id: 'recovering',
+    kind: 'hot',
+    durationTurns: 3,
+    roundStartHpDelta: 90,
+    incomingDamageMultiplierBP: 10000
+  }
 };
 
 export function isStatusId(value: string): value is StatusId {
