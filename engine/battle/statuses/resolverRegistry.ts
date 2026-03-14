@@ -1,4 +1,4 @@
-import type { StatusId } from '../statusRegistry';
+import type { StatusId } from './statusRegistry';
 import type { StatusResolverDefinition, StatusResolverRegistry } from './types';
 
 const NO_OP_RESOLVE: StatusResolverDefinition['resolve'] = () => ({
@@ -6,17 +6,22 @@ const NO_OP_RESOLVE: StatusResolverDefinition['resolve'] = () => ({
   controlLossApplied: false
 });
 
-const CONTROL_LOSS_RESOLVE: StatusResolverDefinition['resolve'] = () => ({
+const STUN_RESOLVE: StatusResolverDefinition['resolve'] = () => ({
   hpDelta: 0,
   controlLossApplied: true
 });
+
+const DAMAGE_OVER_TIME_RESOLVE: StatusResolverDefinition['resolve'] = () => ({
+  hpDelta: 5,
+  controlLossApplied: false
+})
 
 export const STATUS_RESOLVER_REGISTRY: StatusResolverRegistry = {
   stunned: {
     statusId: 'stunned',
     priority: 10,
     timings: ['onApply', 'onRoundStart'],
-    resolve: CONTROL_LOSS_RESOLVE
+    resolve: STUN_RESOLVE
   },
   shielded: {
     statusId: 'shielded',
@@ -30,14 +35,14 @@ export const STATUS_RESOLVER_REGISTRY: StatusResolverRegistry = {
     timings: ['onApply', 'onRoundStart'],
     resolve: NO_OP_RESOLVE
   },
-  silenced: {
-    statusId: 'silenced',
+  overheated: {
+    statusId: 'overheated',
     priority: 40,
     timings: ['onApply', 'onRoundStart'],
-    resolve: CONTROL_LOSS_RESOLVE
+    resolve: DAMAGE_OVER_TIME_RESOLVE
   },
-  resist: {
-    statusId: 'resist',
+  recovering: {
+    statusId: 'recovering',
     priority: 50,
     timings: ['onApply', 'onRoundStart'],
     resolve: NO_OP_RESOLVE

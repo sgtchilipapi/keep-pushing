@@ -1,5 +1,5 @@
 import { simulateBattle, type CombatantSnapshot } from '../engine/battle/battleEngine';
-import { getStatusResolver } from '../engine/battle/statuses/registry';
+import { getStatusResolver } from '../engine/battle/statuses/resolverRegistry';
 
 function makeCombatant(overrides: Partial<CombatantSnapshot> = {}): CombatantSnapshot {
   return {

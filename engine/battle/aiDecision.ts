@@ -1,5 +1,5 @@
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
-import type { StatusId } from './statusRegistry';
+import type { StatusId } from './statuses/statusRegistry';
 import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
 
 /**

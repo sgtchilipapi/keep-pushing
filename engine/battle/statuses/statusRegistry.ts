@@ -4,9 +4,9 @@
  * These identifiers are used as stable keys for lookup, serialization, and
  * status application logic across battle systems.
  */
-export type StatusId = 'stunned' | 'shielded' | 'broken_armor' | 'silenced' | 'resist';
+export type StatusId = 'stunned' | 'shielded' | 'broken_armor' | 'overheated' | 'recovering';
 
-export const ALL_STATUS_IDS: readonly StatusId[] = ['stunned', 'shielded', 'broken_armor', 'silenced', 'resist'];
+export const ALL_STATUS_IDS: readonly StatusId[] = ['stunned', 'shielded', 'broken_armor', 'overheated', 'recovering'];
 
 /**
  * Describes the canonical configuration for a status effect.
@@ -21,12 +21,15 @@ export type StatusDef = {
   durationTurns: number;
 };
 
+/**
+ * @todo: Flesh out statuses. Disables, DOTs & HOTs, Buffs & Debuffs, etc.
+ */
 const STATUS_REGISTRY: Record<StatusId, StatusDef> = {
   stunned: { id: 'stunned', durationTurns: 1 },
   shielded: { id: 'shielded', durationTurns: 2 },
   broken_armor: { id: 'broken_armor', durationTurns: 2 },
-  silenced: { id: 'silenced', durationTurns: 1 },
-  resist: { id: 'resist', durationTurns: 3 }
+  overheated: { id: 'overheated', durationTurns: 1 },
+  recovering: { id: 'recovering', durationTurns: 3 }
 };
 
 export function isStatusId(value: string): value is StatusId {

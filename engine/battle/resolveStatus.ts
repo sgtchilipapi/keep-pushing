@@ -1,4 +1,4 @@
-import { getStatusDef, type StatusId } from './statusRegistry';
+import { getStatusDef, type StatusId } from './statuses/statusRegistry';
 
 export type ActiveStatusState = {
   sourceId: string;

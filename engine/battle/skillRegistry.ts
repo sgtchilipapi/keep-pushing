@@ -1,4 +1,4 @@
-import type { StatusId } from './statusRegistry';
+import type { StatusId } from './statuses/statusRegistry';
 
 /**
  * Tags that encode special runtime handling for a skill.
