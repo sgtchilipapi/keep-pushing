@@ -22,6 +22,7 @@ export type SkillDef = {
   tags: SkillTag[];
   executeThresholdBP?: number;
   appliesStatusIds?: StatusId[];
+  selfAppliesStatusIds?: StatusId[];
 };
 
 /**
@@ -38,7 +39,8 @@ const BASIC_ATTACK: SkillDef = {
   accuracyModBP: 0,
   cooldownTurns: 0,
   tags: [],
-  appliesStatusIds: []
+  appliesStatusIds: [],
+  selfAppliesStatusIds: []
 };
 
 const VOLT_STRIKE: SkillDef = {
@@ -47,7 +49,8 @@ const VOLT_STRIKE: SkillDef = {
   accuracyModBP: 0,
   cooldownTurns: 2,
   tags: ['shieldbreak'],
-  appliesStatusIds: ['broken_armor']
+  appliesStatusIds: ['broken_armor', 'overheated'],
+  selfAppliesStatusIds: ['shielded']
 };
 
 const FINISHING_BLOW: SkillDef = {
@@ -57,7 +60,8 @@ const FINISHING_BLOW: SkillDef = {
   cooldownTurns: 3,
   tags: ['execute', 'stun'],
   executeThresholdBP: 3000,
-  appliesStatusIds: ['stunned']
+  appliesStatusIds: ['stunned'],
+  selfAppliesStatusIds: ['recovering']
 };
 
 const SKILL_REGISTRY: Record<string, SkillDef> = {
