@@ -14,6 +14,10 @@ function validateUniqueIds(ids: string[]): boolean {
   return new Set(ids).size === ids.length;
 }
 
+function isNumericStringId(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
 export async function POST(request: Request) {
   let body: Partial<EquipPayload>;
 
@@ -39,6 +43,10 @@ export async function POST(request: Request) {
       { error: 'Payload must include exactly 2 activeSkills and 2 passiveSkills.' },
       { status: 400 }
     );
+  }
+
+  if (!body.activeSkills.every(isNumericStringId) || !body.passiveSkills.every(isNumericStringId)) {
+    return NextResponse.json({ error: 'Skill IDs must be numeric strings.' }, { status: 400 });
   }
 
   if (!validateUniqueIds(body.activeSkills) || !validateUniqueIds(body.passiveSkills)) {

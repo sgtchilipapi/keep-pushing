@@ -11,7 +11,7 @@ function makeCombatant(overrides: Partial<CombatantSnapshot> = {}): CombatantSna
     spd: 100,
     accuracyBP: 9000,
     evadeBP: 1000,
-    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
+    activeSkillIds: ['1001', '1002'],
     ...overrides
   };
 }

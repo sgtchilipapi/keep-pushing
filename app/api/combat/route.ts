@@ -14,8 +14,16 @@ function isValidEntityId(entityId: string): boolean {
   return /^\d+$/.test(entityId);
 }
 
+function isNumericStringId(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
 function isSkillTuple(value: unknown): value is [string, string] {
-  return Array.isArray(value) && value.length === 2 && value.every((skillId) => typeof skillId === 'string');
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((skillId) => typeof skillId === 'string' && isNumericStringId(skillId))
+  );
 }
 
 function isCombatantSnapshot(value: unknown): value is CombatantSnapshot {

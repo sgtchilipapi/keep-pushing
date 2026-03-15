@@ -14,15 +14,22 @@ type CharacterResponse = {
   } | null;
 };
 
-const ALLOWED_ACTIVE_SKILLS = ['VOLT_STRIKE', 'FINISHING_BLOW'];
-const ALLOWED_PASSIVE_SKILLS = ['EAGLE_EYE', 'EXECUTIONER_FOCUS'];
+const ACTIVE_SKILL_OPTIONS = [
+  { skillId: '1001', skillName: 'Volt Strike' },
+  { skillId: '1002', skillName: 'Finishing Blow' }
+];
+
+const PASSIVE_SKILL_OPTIONS = [
+  { passiveId: '2001', skillName: 'Eagle Eye' },
+  { passiveId: '2002', skillName: 'Executioner Focus' }
+];
 
 export default function HomePage() {
   const [userId, setUserId] = useState('');
   const [characterId, setCharacterId] = useState('');
   const [name, setName] = useState('Rookie');
-  const [activeSkills, setActiveSkills] = useState<string[]>(['VOLT_STRIKE', 'FINISHING_BLOW']);
-  const [passiveSkills, setPassiveSkills] = useState<string[]>(['EAGLE_EYE', 'EXECUTIONER_FOCUS']);
+  const [activeSkills, setActiveSkills] = useState<string[]>(['1001', '1002']);
+  const [passiveSkills, setPassiveSkills] = useState<string[]>(['2001', '2002']);
   const [status, setStatus] = useState('Idle.');
 
   const canEquip = useMemo(
@@ -129,9 +136,9 @@ export default function HomePage() {
           value={activeSkills[0]}
           onChange={(event) => setActiveSkills([event.target.value, activeSkills[1]])}
         >
-          {ALLOWED_ACTIVE_SKILLS.map((skillId) => (
-            <option key={`active-1-${skillId}`} value={skillId}>
-              {skillId}
+          {ACTIVE_SKILL_OPTIONS.map((skill) => (
+            <option key={`active-1-${skill.skillId}`} value={skill.skillId}>
+              {skill.skillName}
             </option>
           ))}
         </select>
@@ -142,9 +149,9 @@ export default function HomePage() {
           value={activeSkills[1]}
           onChange={(event) => setActiveSkills([activeSkills[0], event.target.value])}
         >
-          {ALLOWED_ACTIVE_SKILLS.map((skillId) => (
-            <option key={`active-2-${skillId}`} value={skillId}>
-              {skillId}
+          {ACTIVE_SKILL_OPTIONS.map((skill) => (
+            <option key={`active-2-${skill.skillId}`} value={skill.skillId}>
+              {skill.skillName}
             </option>
           ))}
         </select>
@@ -155,9 +162,9 @@ export default function HomePage() {
           value={passiveSkills[0]}
           onChange={(event) => setPassiveSkills([event.target.value, passiveSkills[1]])}
         >
-          {ALLOWED_PASSIVE_SKILLS.map((passiveId) => (
-            <option key={`passive-1-${passiveId}`} value={passiveId}>
-              {passiveId}
+          {PASSIVE_SKILL_OPTIONS.map((passive) => (
+            <option key={`passive-1-${passive.passiveId}`} value={passive.passiveId}>
+              {passive.skillName}
             </option>
           ))}
         </select>
@@ -168,9 +175,9 @@ export default function HomePage() {
           value={passiveSkills[1]}
           onChange={(event) => setPassiveSkills([passiveSkills[0], event.target.value])}
         >
-          {ALLOWED_PASSIVE_SKILLS.map((passiveId) => (
-            <option key={`passive-2-${passiveId}`} value={passiveId}>
-              {passiveId}
+          {PASSIVE_SKILL_OPTIONS.map((passive) => (
+            <option key={`passive-2-${passive.passiveId}`} value={passive.passiveId}>
+              {passive.skillName}
             </option>
           ))}
         </select>

@@ -16,6 +16,7 @@ export type SkillTag = 'execute' | 'stun' | 'shieldbreak';
  */
 export type SkillDef = {
   skillId: string;
+  skillName: string;
   basePower: number;
   accuracyModBP: number;
   cooldownTurns: number;
@@ -31,10 +32,13 @@ export type SkillDef = {
  * This constant is used by systems that need a guaranteed fallback
  * action when no specialized skill is selected.
  */
-export const BASIC_ATTACK_SKILL_ID = 'BASIC_ATTACK';
+export const BASIC_ATTACK_SKILL_ID = '1000';
+export const VOLT_STRIKE_SKILL_ID = '1001';
+export const FINISHING_BLOW_SKILL_ID = '1002';
 
 const BASIC_ATTACK: SkillDef = {
   skillId: BASIC_ATTACK_SKILL_ID,
+  skillName: 'Basic Attack',
   basePower: 100,
   accuracyModBP: 0,
   cooldownTurns: 0,
@@ -44,7 +48,8 @@ const BASIC_ATTACK: SkillDef = {
 };
 
 const VOLT_STRIKE: SkillDef = {
-  skillId: 'VOLT_STRIKE',
+  skillId: VOLT_STRIKE_SKILL_ID,
+  skillName: 'Volt Strike',
   basePower: 170,
   accuracyModBP: 0,
   cooldownTurns: 2,
@@ -54,7 +59,8 @@ const VOLT_STRIKE: SkillDef = {
 };
 
 const FINISHING_BLOW: SkillDef = {
-  skillId: 'FINISHING_BLOW',
+  skillId: FINISHING_BLOW_SKILL_ID,
+  skillName: 'Finishing Blow',
   basePower: 140,
   accuracyModBP: 300,
   cooldownTurns: 3,
@@ -69,6 +75,8 @@ const SKILL_REGISTRY: Record<string, SkillDef> = {
   [VOLT_STRIKE.skillId]: VOLT_STRIKE,
   [FINISHING_BLOW.skillId]: FINISHING_BLOW
 };
+
+export const ALL_SKILL_IDS = Object.keys(SKILL_REGISTRY).sort();
 
 /**
  * Resolves a skill definition by its identifier.

@@ -23,7 +23,7 @@ type RuntimeState = {
 };
 
 function activeLoadouts(): [string, string][] {
-  const skills = ['BASIC_ATTACK', 'VOLT_STRIKE', 'FINISHING_BLOW'];
+  const skills = ['1000', '1001', '1002'];
   const result: [string, string][] = [];
 
   for (const left of skills) {
@@ -36,7 +36,7 @@ function activeLoadouts(): [string, string][] {
 }
 
 function passiveLoadouts(): (undefined | [string, string])[] {
-  return [undefined, ['EAGLE_EYE', 'EAGLE_EYE'], ['EXECUTIONER_FOCUS', 'EXECUTIONER_FOCUS'], ['EAGLE_EYE', 'EXECUTIONER_FOCUS']];
+  return [undefined, ['2001', '2001'], ['2002', '2002'], ['2001', '2002']];
 }
 
 function combatantProfiles(): Array<Omit<CombatantSnapshot, 'entityId' | 'activeSkillIds'>> {
@@ -180,7 +180,7 @@ function validateBattle(input: BattleInput, events: BattleEvent[]): string[] {
 
         actor.initiative -= 100;
 
-        if (skill.skillId !== 'BASIC_ATTACK') {
+        if (skill.skillId !== '1000') {
           const maybeCooldown = events[i + 1];
           if (maybeCooldown?.type !== 'COOLDOWN_SET' || maybeCooldown.actorId !== actor.entityId || maybeCooldown.skillId !== skill.skillId) {
             errors.push(`missing cooldown set after action idx ${i}`);

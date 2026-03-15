@@ -47,19 +47,25 @@ export type ConditionalPassiveModifier = {
  */
 export type PassiveDef = {
   passiveId: string;
+  skillName: string;
   flatStats?: PassiveStatModifiers;
   conditional?: ConditionalPassiveModifier[];
 };
 
+export const EAGLE_EYE_PASSIVE_ID = '2001';
+export const EXECUTIONER_FOCUS_PASSIVE_ID = '2002';
+
 const PASSIVE_REGISTRY: Record<string, PassiveDef> = {
-  EAGLE_EYE: {
-    passiveId: 'EAGLE_EYE',
+  [EAGLE_EYE_PASSIVE_ID]: {
+    passiveId: EAGLE_EYE_PASSIVE_ID,
+    skillName: 'Eagle Eye',
     flatStats: {
       accuracyBP: 1000
     }
   },
-  EXECUTIONER_FOCUS: {
-    passiveId: 'EXECUTIONER_FOCUS',
+  [EXECUTIONER_FOCUS_PASSIVE_ID]: {
+    passiveId: EXECUTIONER_FOCUS_PASSIVE_ID,
+    skillName: 'Executioner Focus',
     conditional: [
       {
         when: {
@@ -71,6 +77,8 @@ const PASSIVE_REGISTRY: Record<string, PassiveDef> = {
     ]
   }
 };
+
+export const ALL_PASSIVE_IDS = Object.keys(PASSIVE_REGISTRY).sort();
 
 /**
  * Resolves a passive definition by its identifier.

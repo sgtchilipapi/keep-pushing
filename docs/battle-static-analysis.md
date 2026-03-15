@@ -228,7 +228,7 @@ Mutated:
 - Files/functions: `aiDecision.ts` / `chooseAction`.
 - Trigger: non-stunned actor turn.
 - Resolution:
-  1. Candidate list starts with `BASIC_ATTACK` always.
+  1. Candidate list starts with `1000` always.
   2. Add each active skill where cooldown is exactly `0`.
 - State change: none.
 - Outputs/events: chosen skill returned.
@@ -427,7 +427,7 @@ Mutated:
 
 ## 4) Supported Actions / Commands
 
-### A1. Basic attack (`BASIC_ATTACK`)
+### A1. Basic attack (`1000`)
 - Preconditions:
   - Actor has turn and is not stunned.
   - Always candidate regardless of cooldowns.
@@ -442,7 +442,7 @@ Mutated:
 - Rejection/failure:
   - None specific.
 
-### A2. Active skill: `VOLT_STRIKE`
+### A2. Active skill: `1001`
 - Preconditions:
   - In actor `activeSkillIds` and cooldown exactly 0.
 - Execution path:
@@ -457,7 +457,7 @@ Mutated:
 - Rejection/failure:
   - Excluded from candidates while cooldown > 0.
 
-### A3. Active skill: `FINISHING_BLOW`
+### A3. Active skill: `1002`
 - Preconditions:
   - In actor `activeSkillIds` and cooldown exactly 0.
 - Execution path:
@@ -626,7 +626,7 @@ Exact sequence in one round:
 2. Stun with duration 1 applied during a round will typically be decremented at same round end, expiring before next round (depending on apply timing), which can produce immediate `STATUS_EXPIRE` after apply.
 3. Battle can process multiple actions by same actor in one round if initiative remains >=100 after spending (high speed accumulation effect).
 4. Timeout winner can be decided by lexicographically smaller `entityId` when hp and initiative tie.
-5. `BASIC_ATTACK` always available ensures an action choice always exists for non-stunned actors.
+5. `1000` always available ensures an action choice always exists for non-stunned actors.
 6. Passive conditional effects do not persist to entity base stats; they affect only current attack resolution snapshot.
 7. If both entities start with hp <=0, action loop effectively does nothing and timeout winner rules decide outcome.
 8. API accepts any numeric seed (including non-integer); RNG constructor coerces to 32-bit int.

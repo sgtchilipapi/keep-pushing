@@ -9,8 +9,8 @@ type CreateCharacterPayload = {
   name?: string;
 };
 
-const STARTER_ACTIVE_SKILLS = ['VOLT_STRIKE', 'FINISHING_BLOW'];
-const STARTER_PASSIVES = ['EAGLE_EYE', 'EXECUTIONER_FOCUS'];
+const STARTER_ACTIVE_SKILLS = ['1001', '1002'];
+const STARTER_PASSIVES = ['2001', '2002'];
 
 export async function POST(request: Request) {
   let body: Partial<CreateCharacterPayload>;

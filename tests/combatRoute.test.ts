@@ -12,7 +12,7 @@ function buildPayload(overrides: Record<string, unknown> = {}) {
       spd: 110,
       accuracyBP: 9000,
       evadeBP: 1000,
-      activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW']
+      activeSkillIds: ['1001', '1002']
     },
     enemyInitial: {
       entityId: '202',
@@ -23,7 +23,7 @@ function buildPayload(overrides: Record<string, unknown> = {}) {
       spd: 105,
       accuracyBP: 8800,
       evadeBP: 1100,
-      activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW']
+      activeSkillIds: ['1001', '1002']
     },
     ...overrides
   };
@@ -85,12 +85,26 @@ describe('POST /api/combat', () => {
     expect(response.status).toBe(400);
   });
 
+
+  it('rejects non-numeric string skill IDs in snapshots', async () => {
+    const response = await postCombat(
+      buildPayload({
+        playerInitial: {
+          ...buildPayload().playerInitial,
+          activeSkillIds: ['1001', 'bad-skill']
+        }
+      })
+    );
+
+    expect(response.status).toBe(400);
+  });
+
   it('rejects malformed skill tuple shapes', async () => {
     const response = await postCombat(
       buildPayload({
         playerInitial: {
           ...buildPayload().playerInitial,
-          activeSkillIds: ['VOLT_STRIKE']
+          activeSkillIds: ['1001']
         }
       })
     );
