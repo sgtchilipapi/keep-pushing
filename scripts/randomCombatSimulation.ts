@@ -67,13 +67,23 @@ function colorize(text: string, color: keyof typeof COLORS): string {
   return `${COLORS[color]}${text}${COLORS.reset}`;
 }
 
+function getActionTargetLabel(event: Extract<BattleEvent, { type: 'ACTION' }>): string {
+  const skill = getSkillDef(event.skillId);
+  const isSelfTargetSkill =
+    skill.basePower === 0 &&
+    (skill.appliesStatusIds?.length ?? 0) === 0 &&
+    (skill.selfAppliesStatusIds?.length ?? 0) > 0;
+
+  return isSelfTargetSkill ? 'self' : event.targetId;
+}
+
 function formatEvent(event: BattleEvent): { message: string; color: keyof typeof COLORS } {
   switch (event.type) {
     case 'ROUND_START':
       return { message: `Round ${event.round} start`, color: 'round' };
     case 'ACTION':
       return {
-        message: `${event.actorId} uses ${getSkillDef(event.skillId).skillName} on ${event.targetId}`,
+        message: `${event.actorId} uses ${getSkillDef(event.skillId).skillName} on ${getActionTargetLabel(event)}`,
         color: 'action'
       };
     case 'COOLDOWN_SET':
