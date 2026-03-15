@@ -21,8 +21,8 @@ describe('status resolution phase', () => {
     const result = simulateBattle({
       battleId: 'status-on-apply',
       seed: 1,
-      playerInitial: makeCombatant({ entityId: 'alpha' }),
-      enemyInitial: makeCombatant({ entityId: 'beta', hp: 500, hpMax: 2000 }),
+      playerInitial: makeCombatant({ entityId: 'alpha', activeSkillIds: ['1001', '1001'] }),
+      enemyInitial: makeCombatant({ entityId: 'beta', hp: 2500, hpMax: 2500, activeSkillIds: ['1000', '1000'] }),
       maxRounds: 1
     });
 
@@ -39,8 +39,8 @@ describe('status resolution phase', () => {
     const result = simulateBattle({
       battleId: 'status-round-start',
       seed: 1,
-      playerInitial: makeCombatant({ entityId: 'alpha' }),
-      enemyInitial: makeCombatant({ entityId: 'beta', hp: 500, hpMax: 2000 }),
+      playerInitial: makeCombatant({ entityId: 'alpha', activeSkillIds: ['1005', '1005'], hp: 1500, hpMax: 2000 }),
+      enemyInitial: makeCombatant({ entityId: 'beta', hp: 2500, hpMax: 2500, activeSkillIds: ['1000', '1000'], atk: 40 }),
       maxRounds: 3
     });
 

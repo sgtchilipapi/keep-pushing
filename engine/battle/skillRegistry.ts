@@ -8,6 +8,8 @@ import type { StatusId } from './statuses/statusRegistry';
  */
 export type SkillTag = 'execute' | 'stun' | 'shieldbreak';
 
+export type SkillResolutionMode = 'attack' | 'self_utility';
+
 /**
  * Canonical skill definition consumed by battle resolution systems.
  *
@@ -17,6 +19,7 @@ export type SkillTag = 'execute' | 'stun' | 'shieldbreak';
 export type SkillDef = {
   skillId: string;
   skillName: string;
+  resolutionMode: SkillResolutionMode;
   basePower: number;
   accuracyModBP: number;
   cooldownTurns: number;
@@ -42,6 +45,7 @@ export const REPAIR_SKILL_ID = '1005';
 const BASIC_ATTACK: SkillDef = {
   skillId: BASIC_ATTACK_SKILL_ID,
   skillName: 'Basic Attack',
+  resolutionMode: 'attack',
   basePower: 100,
   accuracyModBP: 0,
   cooldownTurns: 0,
@@ -53,6 +57,7 @@ const BASIC_ATTACK: SkillDef = {
 const VOLT_STRIKE: SkillDef = {
   skillId: VOLT_STRIKE_SKILL_ID,
   skillName: 'Volt Strike',
+  resolutionMode: 'attack',
   basePower: 170,
   accuracyModBP: 0,
   cooldownTurns: 2,
@@ -64,6 +69,7 @@ const VOLT_STRIKE: SkillDef = {
 const FINISHING_BLOW: SkillDef = {
   skillId: FINISHING_BLOW_SKILL_ID,
   skillName: 'Finishing Blow',
+  resolutionMode: 'attack',
   basePower: 140,
   accuracyModBP: 300,
   cooldownTurns: 3,
@@ -76,6 +82,7 @@ const FINISHING_BLOW: SkillDef = {
 const SURGE: SkillDef = {
   skillId: SURGE_SKILL_ID,
   skillName: 'Surge',
+  resolutionMode: 'attack',
   basePower: 120,
   accuracyModBP: 100,
   cooldownTurns: 2,
@@ -87,6 +94,7 @@ const SURGE: SkillDef = {
 const BARRIER: SkillDef = {
   skillId: BARRIER_SKILL_ID,
   skillName: 'Barrier',
+  resolutionMode: 'self_utility',
   basePower: 0,
   accuracyModBP: 0,
   cooldownTurns: 2,
@@ -98,6 +106,7 @@ const BARRIER: SkillDef = {
 const REPAIR: SkillDef = {
   skillId: REPAIR_SKILL_ID,
   skillName: 'Repair',
+  resolutionMode: 'self_utility',
   basePower: 0,
   accuracyModBP: 0,
   cooldownTurns: 2,
@@ -136,3 +145,21 @@ export function getSkillDef(skillId: string): SkillDef {
 
   return skill;
 }
+
+
+export function validateSkillDef(skill: SkillDef): void {
+  if (skill.resolutionMode === 'self_utility') {
+    if ((skill.appliesStatusIds?.length ?? 0) > 0) {
+      throw new Error(`Self utility skill ${skill.skillId} cannot apply enemy statuses.`);
+    }
+
+    if (skill.tags.length > 0) {
+      throw new Error(`Self utility skill ${skill.skillId} cannot use offensive tags.`);
+    }
+  }
+}
+
+for (const skillDef of Object.values(SKILL_REGISTRY)) {
+  validateSkillDef(skillDef);
+}
+

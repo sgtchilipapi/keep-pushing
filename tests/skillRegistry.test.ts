@@ -17,19 +17,19 @@ describe('skill registry status mappings', () => {
     );
 
     expect(getSkillDef(BARRIER_SKILL_ID)).toEqual(
-      expect.objectContaining({ appliesStatusIds: [], selfAppliesStatusIds: ['shielded'] })
+      expect.objectContaining({ resolutionMode: 'self_utility', appliesStatusIds: [], selfAppliesStatusIds: ['shielded'] })
     );
 
     expect(getSkillDef(REPAIR_SKILL_ID)).toEqual(
-      expect.objectContaining({ appliesStatusIds: [], selfAppliesStatusIds: ['recovering'] })
+      expect.objectContaining({ resolutionMode: 'self_utility', appliesStatusIds: [], selfAppliesStatusIds: ['recovering'] })
     );
 
     expect(getSkillDef(VOLT_STRIKE_SKILL_ID)).toEqual(
-      expect.objectContaining({ appliesStatusIds: ['stunned'], selfAppliesStatusIds: [] })
+      expect.objectContaining({ resolutionMode: 'attack', appliesStatusIds: ['stunned'], selfAppliesStatusIds: [] })
     );
 
     expect(getSkillDef(FINISHING_BLOW_SKILL_ID)).toEqual(
-      expect.objectContaining({ appliesStatusIds: ['broken_armor'], selfAppliesStatusIds: [] })
+      expect.objectContaining({ resolutionMode: 'attack', appliesStatusIds: ['broken_armor'], selfAppliesStatusIds: [] })
     );
   });
 });

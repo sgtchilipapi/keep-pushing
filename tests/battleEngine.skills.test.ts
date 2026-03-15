@@ -60,4 +60,36 @@ describe('battleEngine skills', () => {
       expect.objectContaining({ type: 'ACTION', skillId: '1002', round: 1 })
     );
   });
+
+  it('treats self utility skills as self-targeted non-damaging actions', () => {
+    const result = simulateBattle({
+      battleId: 'self-utility-no-attack',
+      seed: 17,
+      playerInitial: buildCombatant({ entityId: 'player', activeSkillIds: ['1005', '1005'], hp: 1500, hpMax: 2000 }),
+      enemyInitial: buildCombatant({ entityId: 'enemy', activeSkillIds: ['1004', '1004'], hp: 2100, hpMax: 2100 }),
+      maxRounds: 2
+    });
+
+    const repairActions = result.events.filter(
+      (event): event is Extract<(typeof result.events)[number], { type: 'ACTION' }> =>
+        event.type === 'ACTION' && event.actorId === 'player' && event.skillId === '1005'
+    );
+    expect(repairActions.length).toBeGreaterThan(0);
+    expect(repairActions.every((event) => event.targetId === 'player')).toBe(true);
+
+    const playerHitOrDamage = result.events.filter(
+      (event) =>
+        (event.type === 'HIT_RESULT' || event.type === 'DAMAGE') &&
+        event.actorId === 'player' &&
+        event.skillId === '1005'
+    );
+    expect(playerHitOrDamage).toEqual([]);
+
+    const enemyDamageFromPlayer = result.events.filter(
+      (event): event is Extract<(typeof result.events)[number], { type: 'DAMAGE' }> =>
+        event.type === 'DAMAGE' && event.actorId === 'player' && event.targetId === 'enemy'
+    );
+    expect(enemyDamageFromPlayer).toEqual([]);
+  });
+
 });

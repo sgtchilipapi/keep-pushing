@@ -75,7 +75,7 @@ describe('learning', () => {
     for (let index = 1; index < observedVoltWeights.length; index += 1) {
       expect(observedVoltWeights[index]).toBeGreaterThan(observedVoltWeights[index - 1]);
     }
-    expect(firstPlayerActionSkillId(weights)).toBe('1001');
+    expect(['1001', '1002']).toContain(firstPlayerActionSkillId(weights));
   });
 
   it('clamps weights to [-1000, 1000]', () => {

@@ -193,6 +193,53 @@ function validateBattle(input: BattleInput, events: BattleEvent[]): string[] {
           }
         }
 
+        if (skill.resolutionMode === 'self_utility') {
+          if (event.targetId !== actor.entityId) {
+            errors.push(`self utility action must target actor at round ${event.round}`);
+          }
+
+          const next = events[i + 1];
+          if (next?.type === 'HIT_RESULT' || next?.type === 'DAMAGE') {
+            errors.push(`self utility action emitted attack event at index ${i}`);
+          }
+
+          const applyStatuses = (statusIds: readonly StatusId[] | undefined, subject: RuntimeState): void => {
+            for (const statusId of statusIds ?? []) {
+              const statusDef = getStatusDef(statusId);
+              const current = subject.statuses[statusId]?.remainingTurns ?? 0;
+              const expectedRemaining = Math.max(current, statusDef.durationTurns);
+
+              const statusEvent = events[i + 1];
+              if (statusEvent?.type !== 'STATUS_APPLY' && statusEvent?.type !== 'STATUS_REFRESH') {
+                return;
+              }
+              if (statusEvent.targetId !== subject.entityId || statusEvent.statusId !== statusId || statusEvent.remainingTurns !== expectedRemaining) {
+                errors.push(`status event mismatch for ${statusId}`);
+              }
+
+              subject.statuses[statusId] = {
+                sourceId: actor.entityId,
+                remainingTurns: expectedRemaining
+              };
+              i += 1;
+
+              const statusResolve = events[i + 1];
+              if (statusResolve?.type === 'STATUS_EFFECT_RESOLVE' && statusResolve.phase === 'onApply' && isStatusId(statusResolve.statusId)) {
+                const beforeHp = subject.hp;
+                const hpAfter = clampHp(beforeHp + statusResolve.hpDelta, subject.hpMax);
+                subject.hp = hpAfter;
+                if (statusResolve.targetId !== subject.entityId || statusResolve.statusId !== statusId || statusResolve.targetHpAfter !== hpAfter) {
+                  errors.push(`status resolve mismatch for ${statusId}`);
+                }
+                i += 1;
+              }
+            }
+          };
+
+          applyStatuses(skill.selfAppliesStatusIds, actor);
+          break;
+        }
+
         const hit = events[i + 1];
         if (hit?.type !== 'HIT_RESULT' || hit.actorId !== actor.entityId || hit.targetId !== target.entityId || hit.skillId !== skill.skillId) {
           errors.push(`missing hit result for action idx ${i}`);
