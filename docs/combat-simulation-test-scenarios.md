@@ -117,11 +117,34 @@ This document enumerates the complete set of combat simulation scenario categori
 - **Stun:** actor loses action, initiative already spent, emits skip event.
 - **Shielded:** mitigation/interaction behavior validated across hit/miss and damage values.
 - **Broken Armor:** defense reduction effect and duration behavior.
-- **Silenced:** action restriction behavior (active-skill lockout if applicable).
-- **Resist:** reduced chance/effect interaction for incoming statuses.
+- **Overheated:** DOT tick timing/value (negative `roundStartHpDelta`) and lethal/tie interactions.
+- **Recovering:** HOT tick timing/value (positive `roundStartHpDelta`) and HP clamping to `hpMax`.
 - Interaction matrix of status vs status (e.g., shieldbreak vs shielded, stun reapply while stunned).
 
-## 13) Passive Skill Mechanics
+## 13) Skill-Specific Coverage (Added + Rebalanced Skills)
+
+- **`1001` Volt Strike (changed):**
+  - Applies only `stunned` on successful hit.
+  - Does not apply `broken_armor` or any legacy secondary status.
+  - Cooldown, stun duration, and AI anti-stun scoring interaction remain deterministic.
+- **`1002` Finishing Blow (changed):**
+  - Applies only `broken_armor` on successful hit.
+  - Execute threshold path still selects this skill below configured target HP%.
+  - Shield-break tag interactions continue to work with `shielded` targets.
+- **`1003` Surge (added):**
+  - Applies only `overheated` to target on hit.
+  - Verifies DOT tick events and expiry behavior from this source skill.
+- **`1004` Barrier (added):**
+  - Applies only `shielded` to self (`selfAppliesStatusIds` path).
+  - Verifies self-targeted status events (`STATUS_APPLY` / `STATUS_REFRESH`) and mitigation effect.
+- **`1005` Repair (added):**
+  - Applies only `recovering` to self (`selfAppliesStatusIds` path).
+  - Verifies HOT ticks, refresh semantics, and no target-side status contamination.
+- Registry/contract checks for all active IDs:
+  - New skills resolve from registry and survive API validation/equip flows.
+  - Unknown IDs around the new range (`1003+`) fail fast with stable error contracts.
+
+## 14) Passive Skill Mechanics
 
 - Flat passives applied once at battle initialization.
 - Conditional passives activated only when condition is met.
@@ -129,7 +152,7 @@ This document enumerates the complete set of combat simulation scenario categori
 - Multiple passives stack order and cumulative math.
 - Passive effects reflected in attack snapshots and event outcomes.
 
-## 14) Learning/Adaptation Hooks
+## 15) Learning/Adaptation Hooks
 
 - Skill contribution attribution from event log is correct.
 - Post-battle weight update is deterministic for same battle log.
@@ -137,7 +160,7 @@ This document enumerates the complete set of combat simulation scenario categori
 - Learning updates do not mutate original input weight maps.
 - Updated weights influence future action choice in expected direction.
 
-## 15) Event Log Integrity & Contract Stability
+## 16) Event Log Integrity & Contract Stability
 
 - Every emitted event matches schema and required fields.
 - Event chronology is valid (no impossible ordering).
@@ -145,21 +168,21 @@ This document enumerates the complete set of combat simulation scenario categori
 - Event count sanity (no duplicate terminal events, no missing starts/ends).
 - Backward compatibility snapshots for public event contract changes.
 
-## 16) API Route Integration
+## 17) API Route Integration
 
 - Route accepts valid payload and returns successful result shape.
 - Route rejects invalid payload with stable error contract/status code.
 - API→engine mapping preserves values and canonical IDs.
 - Engine exceptions transformed into expected server responses.
 
-## 17) Performance & Stability
+## 18) Performance & Stability
 
 - Large batch simulation smoke tests complete under acceptable time.
 - Max-round battles complete without memory growth anomalies.
 - No infinite loops in initiative/action processing.
 - Deterministic performance under repeated seeded runs.
 
-## 18) Regression & Fuzz Suites
+## 19) Regression & Fuzz Suites
 
 - Golden replay snapshots for representative archetype matchups.
 - Seed sweep/property-based tests for invariant checking:
@@ -169,14 +192,14 @@ This document enumerates the complete set of combat simulation scenario categori
   - No actions by dead entities.
 - Historical bug reproductions locked as regression tests.
 
-## 19) Security & Trust Boundaries
+## 20) Security & Trust Boundaries
 
 - Client-provided snapshot tampering is validated/sanitized per API policy.
 - Prevent impossible stat/skill injections from client payload.
 - No reliance on client-reported outcomes.
 - Deterministic server-only simulation remains authoritative.
 
-## 20) Recommended Coverage Strategy
+## 21) Recommended Coverage Strategy
 
 - **Unit tests:** pure math/ordering modules (initiative, damage, status helpers).
 - **Integration tests:** full engine simulations with scenario-specific seeds.
