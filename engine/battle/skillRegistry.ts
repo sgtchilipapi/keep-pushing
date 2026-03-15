@@ -35,6 +35,9 @@ export type SkillDef = {
 export const BASIC_ATTACK_SKILL_ID = '1000';
 export const VOLT_STRIKE_SKILL_ID = '1001';
 export const FINISHING_BLOW_SKILL_ID = '1002';
+export const SURGE_SKILL_ID = '1003';
+export const BARRIER_SKILL_ID = '1004';
+export const REPAIR_SKILL_ID = '1005';
 
 const BASIC_ATTACK: SkillDef = {
   skillId: BASIC_ATTACK_SKILL_ID,
@@ -53,9 +56,9 @@ const VOLT_STRIKE: SkillDef = {
   basePower: 170,
   accuracyModBP: 0,
   cooldownTurns: 2,
-  tags: ['shieldbreak'],
-  appliesStatusIds: ['broken_armor', 'overheated'],
-  selfAppliesStatusIds: ['shielded']
+  tags: ['stun'],
+  appliesStatusIds: ['stunned'],
+  selfAppliesStatusIds: []
 };
 
 const FINISHING_BLOW: SkillDef = {
@@ -64,16 +67,52 @@ const FINISHING_BLOW: SkillDef = {
   basePower: 140,
   accuracyModBP: 300,
   cooldownTurns: 3,
-  tags: ['execute', 'stun'],
+  tags: ['execute', 'shieldbreak'],
   executeThresholdBP: 3000,
-  appliesStatusIds: ['stunned'],
+  appliesStatusIds: ['broken_armor'],
+  selfAppliesStatusIds: []
+};
+
+const SURGE: SkillDef = {
+  skillId: SURGE_SKILL_ID,
+  skillName: 'Surge',
+  basePower: 120,
+  accuracyModBP: 100,
+  cooldownTurns: 2,
+  tags: [],
+  appliesStatusIds: ['overheated'],
+  selfAppliesStatusIds: []
+};
+
+const BARRIER: SkillDef = {
+  skillId: BARRIER_SKILL_ID,
+  skillName: 'Barrier',
+  basePower: 0,
+  accuracyModBP: 0,
+  cooldownTurns: 2,
+  tags: [],
+  appliesStatusIds: [],
+  selfAppliesStatusIds: ['shielded']
+};
+
+const REPAIR: SkillDef = {
+  skillId: REPAIR_SKILL_ID,
+  skillName: 'Repair',
+  basePower: 0,
+  accuracyModBP: 0,
+  cooldownTurns: 2,
+  tags: [],
+  appliesStatusIds: [],
   selfAppliesStatusIds: ['recovering']
 };
 
 const SKILL_REGISTRY: Record<string, SkillDef> = {
   [BASIC_ATTACK.skillId]: BASIC_ATTACK,
   [VOLT_STRIKE.skillId]: VOLT_STRIKE,
-  [FINISHING_BLOW.skillId]: FINISHING_BLOW
+  [FINISHING_BLOW.skillId]: FINISHING_BLOW,
+  [SURGE.skillId]: SURGE,
+  [BARRIER.skillId]: BARRIER,
+  [REPAIR.skillId]: REPAIR
 };
 
 export const ALL_SKILL_IDS = Object.keys(SKILL_REGISTRY).sort();
