@@ -16,7 +16,10 @@ type CharacterResponse = {
 
 const ACTIVE_SKILL_OPTIONS = [
   { skillId: '1001', skillName: 'Volt Strike' },
-  { skillId: '1002', skillName: 'Finishing Blow' }
+  { skillId: '1002', skillName: 'Finishing Blow' },
+  { skillId: '1003', skillName: 'Surge' },
+  { skillId: '1004', skillName: 'Barrier' },
+  { skillId: '1005', skillName: 'Repair' }
 ];
 
 const PASSIVE_SKILL_OPTIONS = [
