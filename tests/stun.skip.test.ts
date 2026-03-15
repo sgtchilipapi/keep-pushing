@@ -20,8 +20,8 @@ describe('stun skip action gate', () => {
     const input = {
       battleId: 'stun-skip',
       seed: 1,
-      playerInitial: makeCombatant({ entityId: 'alpha' }),
-      enemyInitial: makeCombatant({ entityId: 'beta', hp: 500, hpMax: 2000 })
+      playerInitial: makeCombatant({ entityId: 'alpha', activeSkillIds: ['1001', '1001'] }),
+      enemyInitial: makeCombatant({ entityId: 'beta', hp: 2000, hpMax: 2000, activeSkillIds: ['1001', '1001'] })
     };
 
     const first = simulateBattle(input);

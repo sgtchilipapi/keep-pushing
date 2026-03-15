@@ -2,7 +2,7 @@ import { applyRoundInitiative, hasReadyActor, nextActorIndex, timeoutWinner } fr
 import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
 import { chooseAction } from './aiDecision';
-import { BASIC_ATTACK_SKILL_ID, getSkillDef } from './skillRegistry';
+import { BASIC_ATTACK_SKILL_ID, getSkillDef, validateSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
 import { getStatusDef, isStatusId, type StatusId } from './statuses/statusRegistry';
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
@@ -201,11 +201,14 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }, actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}));
       const selectedSkill = getSkillDef(selectedAction.skillId);
 
+      validateSkillDef(selectedSkill);
+
+      const actionTarget = selectedSkill.resolutionMode === 'self_utility' ? actor : target;
       events.push({
         type: 'ACTION',
         round,
         actorId: actor.entityId,
-        targetId: target.entityId,
+        targetId: actionTarget.entityId,
         skillId: selectedSkill.skillId
       });
 
@@ -220,47 +223,77 @@ export function simulateBattle(input: BattleInput): BattleResult {
         });
       }
 
-      const attackContext = applyConditionalPassives({ actor, target, skill: selectedSkill });
-      const attack = resolveAttack(attackContext.actor, attackContext.target, attackContext.skill, rng);
-      events.push({
-        type: 'HIT_RESULT',
-        round,
-        actorId: actor.entityId,
-        targetId: target.entityId,
-        skillId: selectedSkill.skillId,
-        hitChanceBP: attack.hitChanceBP,
-        rollBP: attack.rollBP,
-        didHit: attack.didHit
-      });
-
-      if (attack.didHit) {
-        const adjustedDamage = adjustDamageForStatuses(attack.damage, getActiveStatusIds(target));
-        target.hp = Math.max(0, target.hp - adjustedDamage);
+      if (selectedSkill.resolutionMode === 'attack') {
+        const attackContext = applyConditionalPassives({ actor, target, skill: selectedSkill });
+        const attack = resolveAttack(attackContext.actor, attackContext.target, attackContext.skill, rng);
         events.push({
-          type: 'DAMAGE',
+          type: 'HIT_RESULT',
           round,
           actorId: actor.entityId,
           targetId: target.entityId,
           skillId: selectedSkill.skillId,
-          amount: adjustedDamage,
-          targetHpAfter: target.hp
+          hitChanceBP: attack.hitChanceBP,
+          rollBP: attack.rollBP,
+          didHit: attack.didHit
         });
 
-        for (const statusId of selectedSkill.appliesStatusIds ?? []) {
-          const statusEvent = applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round);
-          events.push(statusEvent);
+        if (attack.didHit) {
+          const adjustedDamage = adjustDamageForStatuses(attack.damage, getActiveStatusIds(target));
+          target.hp = Math.max(0, target.hp - adjustedDamage);
+          events.push({
+            type: 'DAMAGE',
+            round,
+            actorId: actor.entityId,
+            targetId: target.entityId,
+            skillId: selectedSkill.skillId,
+            amount: adjustedDamage,
+            targetHpAfter: target.hp
+          });
 
-          if (statusEvent.type !== 'STATUS_APPLY_FAILED') {
-            emitStatusEffectResolution(events, 'onApply', round, statusId, actor.entityId, target);
-            if (target.hp <= 0) {
-              events.push({ type: 'DEATH', round, entityId: target.entityId });
-              winner = actor;
-              reason = 'death';
-              break;
+          for (const statusId of selectedSkill.appliesStatusIds ?? []) {
+            const statusEvent = applyStatus(target.statuses, statusId, actor.entityId, target.entityId, round);
+            events.push(statusEvent);
+
+            if (statusEvent.type !== 'STATUS_APPLY_FAILED') {
+              emitStatusEffectResolution(events, 'onApply', round, statusId, actor.entityId, target);
+              if (target.hp <= 0) {
+                events.push({ type: 'DEATH', round, entityId: target.entityId });
+                winner = actor;
+                reason = 'death';
+                break;
+              }
             }
           }
-        }
 
+          for (const statusId of selectedSkill.selfAppliesStatusIds ?? []) {
+            const statusEvent = applyStatus(actor.statuses, statusId, actor.entityId, actor.entityId, round);
+            events.push(statusEvent);
+
+            if (statusEvent.type !== 'STATUS_APPLY_FAILED') {
+              emitStatusEffectResolution(events, 'onApply', round, statusId, actor.entityId, actor);
+              if (actor.hp <= 0) {
+                events.push({ type: 'DEATH', round, entityId: actor.entityId });
+                winner = target;
+                reason = 'death';
+                break;
+              }
+            }
+          }
+
+          if (winner !== null) {
+            break;
+          }
+
+          if (target.hp === 0) {
+            events.push({ type: 'DEATH', round, entityId: target.entityId });
+            winner = actor;
+            reason = 'death';
+            break;
+          }
+        }
+      }
+
+      if (selectedSkill.resolutionMode === 'self_utility') {
         for (const statusId of selectedSkill.selfAppliesStatusIds ?? []) {
           const statusEvent = applyStatus(actor.statuses, statusId, actor.entityId, actor.entityId, round);
           events.push(statusEvent);
@@ -277,13 +310,6 @@ export function simulateBattle(input: BattleInput): BattleResult {
         }
 
         if (winner !== null) {
-          break;
-        }
-
-        if (target.hp === 0) {
-          events.push({ type: 'DEATH', round, entityId: target.entityId });
-          winner = actor;
-          reason = 'death';
           break;
         }
       }

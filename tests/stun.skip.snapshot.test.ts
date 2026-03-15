@@ -20,8 +20,8 @@ describe('stun skip battle snapshot', () => {
     const result = simulateBattle({
       battleId: 'stun-snapshot',
       seed: 1,
-      playerInitial: makeCombatant({ entityId: 'alpha' }),
-      enemyInitial: makeCombatant({ entityId: 'beta', hp: 500, hpMax: 2000 })
+      playerInitial: makeCombatant({ entityId: 'alpha', activeSkillIds: ['1001', '1001'] }),
+      enemyInitial: makeCombatant({ entityId: 'beta', hp: 2000, hpMax: 2000, activeSkillIds: ['1001', '1001'] })
     });
 
     expect(result.events).toMatchSnapshot();
