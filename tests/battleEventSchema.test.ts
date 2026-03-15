@@ -10,7 +10,7 @@ function baseEntity(overrides: Partial<CombatantSnapshot> = {}): CombatantSnapsh
     spd: 100,
     accuracyBP: 8500,
     evadeBP: 1200,
-    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
+    activeSkillIds: ['1001', '1002'],
     ...overrides
   };
 }

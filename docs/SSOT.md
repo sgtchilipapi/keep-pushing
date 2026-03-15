@@ -233,6 +233,17 @@ Available combat actions:
 
 Passives apply modifiers automatically.
 
+
+## 6.1 Skill Identity Contract
+
+Skill and passive identities are canonical numeric-string IDs.
+
+- Active skill IDs use the `1000+` range and remain `string` values at all boundaries.
+- Passive skill IDs use the `2000+` range and remain `string` values at all boundaries.
+- `skillId`/`passiveId` are immutable identities used for runtime joins, persistence, and event payloads.
+- `skillName` is mutable display metadata and must not be used as an identity key.
+- Clients should submit/store IDs while rendering names for UX.
+
 ---
 
 # 7. Numeric System

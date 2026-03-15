@@ -5,7 +5,7 @@ const canonicalAction: BattleEvent = {
   round: 1,
   actorId: 'alpha',
   targetId: 'beta',
-  skillId: 'VOLT_STRIKE'
+  skillId: '1001'
 };
 
 void canonicalAction;
@@ -15,7 +15,7 @@ const legacyAction: BattleEvent = {
   round: 1,
   actorId: 'alpha',
   targetId: 'beta',
-  skillId: 'VOLT_STRIKE',
+  skillId: '1001',
   // @ts-expect-error actorEntityId is removed from canonical ACTION payloads.
   actorEntityId: 'alpha'
 };
@@ -27,7 +27,7 @@ const legacyHitResult: BattleEvent = {
   round: 1,
   actorId: 'alpha',
   targetId: 'beta',
-  skillId: 'BASIC_ATTACK',
+  skillId: '1000',
   rollBP: 1234,
   hitChanceBP: 8000,
   didHit: true,

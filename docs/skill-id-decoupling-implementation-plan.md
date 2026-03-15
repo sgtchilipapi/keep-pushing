@@ -19,7 +19,7 @@ Scope for this pass is **documentation/plan only**.
 
 ## Problem Statement
 
-Current data flow treats string literals like `"VOLT_STRIKE"` and `"EAGLE_EYE"` as both:
+Current data flow treats string literals like `"1001"` and `"2001"` as both:
 
 - identity keys used by registries, loadouts, events, persistence, and tests, and
 - user/design-facing names.

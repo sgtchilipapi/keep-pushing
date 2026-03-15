@@ -10,7 +10,7 @@ function buildCombatant(overrides: Partial<CombatantSnapshot> = {}): CombatantSn
     spd: 110,
     accuracyBP: 8500,
     evadeBP: 1200,
-    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
+    activeSkillIds: ['1001', '1002'],
     ...overrides
   };
 }
@@ -33,7 +33,7 @@ describe('battleEngine combatant snapshot contract', () => {
     const withPassives = simulateBattle({
       battleId: 'with-passives',
       seed: 101,
-      playerInitial: buildCombatant({ entityId: '11', passiveSkillIds: ['EAGLE_EYE', 'EXECUTIONER_FOCUS'] }),
+      playerInitial: buildCombatant({ entityId: '11', passiveSkillIds: ['2001', '2002'] }),
       enemyInitial: buildCombatant({ entityId: '22' }),
       maxRounds: 2
     });

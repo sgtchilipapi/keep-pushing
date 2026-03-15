@@ -15,7 +15,7 @@ const playerInitial: CombatantSnapshot = {
   spd: 120,
   accuracyBP: 8500,
   evadeBP: 1400,
-  activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW']
+  activeSkillIds: ['1001', '1002']
 };
 
 const enemyInitial: CombatantSnapshot = {
@@ -27,7 +27,7 @@ const enemyInitial: CombatantSnapshot = {
   spd: 110,
   accuracyBP: 8000,
   evadeBP: 1200,
-  activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW']
+  activeSkillIds: ['1001', '1002']
 };
 
 export default function BattlePage() {

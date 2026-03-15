@@ -10,8 +10,8 @@ function buildCombatant(overrides: Partial<CombatantSnapshot>): CombatantSnapsho
     spd: 100,
     accuracyBP: 6500,
     evadeBP: 6000,
-    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
-    passiveSkillIds: ['EAGLE_EYE', 'EXECUTIONER_FOCUS'],
+    activeSkillIds: ['1001', '1002'],
+    passiveSkillIds: ['2001', '2002'],
     ...overrides
   };
 }
@@ -36,7 +36,7 @@ describe('passives', () => {
     const withPassive = simulateBattle({
       battleId: 'with-passive',
       seed: 27,
-      playerInitial: buildCombatant({ entityId: 'player', passiveSkillIds: ['EAGLE_EYE', 'EXECUTIONER_FOCUS'] }),
+      playerInitial: buildCombatant({ entityId: 'player', passiveSkillIds: ['2001', '2002'] }),
       enemyInitial: buildCombatant({ entityId: 'enemy', passiveSkillIds: undefined }),
       maxRounds: 1
     });

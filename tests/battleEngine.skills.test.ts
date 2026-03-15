@@ -10,7 +10,7 @@ function buildCombatant(overrides: Partial<CombatantSnapshot>): CombatantSnapsho
     spd: 100,
     accuracyBP: 9000,
     evadeBP: 1000,
-    activeSkillIds: ['VOLT_STRIKE', 'FINISHING_BLOW'],
+    activeSkillIds: ['1001', '1002'],
     ...overrides
   };
 }
@@ -31,14 +31,14 @@ describe('battleEngine skills', () => {
     );
 
     const voltStrikeRounds = playerRoundActions
-      .filter((event) => event.skillId === 'VOLT_STRIKE')
+      .filter((event) => event.skillId === '1001')
       .map((event) => event.round);
 
     expect(voltStrikeRounds).toEqual([1, 3]);
 
     const cooldownSet = result.events.filter(
       (event): event is Extract<(typeof result.events)[number], { type: 'COOLDOWN_SET' }> =>
-        event.type === 'COOLDOWN_SET' && event.actorId === 'player' && event.skillId === 'VOLT_STRIKE'
+        event.type === 'COOLDOWN_SET' && event.actorId === 'player' && event.skillId === '1001'
     );
 
     expect(cooldownSet.length).toBeGreaterThanOrEqual(2);
@@ -62,7 +62,7 @@ describe('battleEngine skills', () => {
     );
 
     expect(firstAction).toEqual(
-      expect.objectContaining({ type: 'ACTION', skillId: 'FINISHING_BLOW', round: 1 })
+      expect.objectContaining({ type: 'ACTION', skillId: '1002', round: 1 })
     );
   });
 });
