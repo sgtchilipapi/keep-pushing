@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts"
   },
   "dependencies": {
     "@prisma/client": "^7.4.2",
