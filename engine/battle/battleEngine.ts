@@ -1,7 +1,7 @@
 import { applyRoundInitiative, hasReadyActor, nextActorIndex, timeoutWinner } from './initiative';
 import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
-import { chooseAction } from './aiDecision';
+import { chooseAction, type DecisionTrace } from './aiDecision';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, validateSkillDef } from './skillRegistry';
 import { applyStatus, decrementStatusesAtRoundEnd, type ActiveStatuses } from './resolveStatus';
 import { getStatusDef, isStatusId, type StatusId } from './statuses/statusRegistry';
@@ -22,6 +22,7 @@ export type BattleInput = {
   playerSkillWeights?: ArchetypeSkillWeights;
   enemySkillWeights?: ArchetypeSkillWeights;
   maxRounds?: number;
+  decisionLogger?: (decision: { round: number; actorId: string; targetId: string; trace: DecisionTrace }) => void;
 };
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
@@ -194,11 +195,24 @@ export function simulateBattle(input: BattleInput): BattleResult {
         continue;
       }
 
-      const selectedAction = chooseAction(actor.activeSkillIds, actor.cooldowns, {
-        hp: target.hp,
-        hpMax: target.hpMax,
-        statuses: getActiveStatusIds(target)
-      }, actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}));
+      const selectedAction = chooseAction(
+        actor.activeSkillIds,
+        actor.cooldowns,
+        {
+          hp: target.hp,
+          hpMax: target.hpMax,
+          statuses: getActiveStatusIds(target)
+        },
+        actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}),
+        (trace) => {
+          input.decisionLogger?.({
+            round,
+            actorId: actor.entityId,
+            targetId: target.entityId,
+            trace
+          });
+        }
+      );
       const selectedSkill = getSkillDef(selectedAction.skillId);
 
       validateSkillDef(selectedSkill);

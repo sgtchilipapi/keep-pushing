@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { simulateBattle, type CombatantSnapshot } from '../engine/battle/battleEngine';
+import type { DecisionTrace } from '../engine/battle/aiDecision';
 import { ALL_SKILL_IDS, BASIC_ATTACK_SKILL_ID, getSkillDef } from '../engine/battle/skillRegistry';
 import { ALL_PASSIVE_IDS, getPassiveDef } from '../engine/battle/passiveRegistry';
 import type { BattleEvent } from '../types/battle';
@@ -21,6 +22,13 @@ type RuntimeResources = {
   statuses: Record<string, { remainingTurns: number; sourceId: string }>;
   cooldowns: Record<string, number>;
   activeSkillIds: [string, string];
+};
+
+type DecisionLogEntry = {
+  round: number;
+  actorId: string;
+  targetId: string;
+  trace: DecisionTrace;
 };
 
 function randomInt(min: number, max: number): number {
@@ -206,8 +214,9 @@ function applyEvent(resourcesByEntityId: Record<string, RuntimeResources>, event
   }
 }
 
-function printRoundResources(round: number, entities: CombatantSnapshot[], resourcesByEntityId: Record<string, RuntimeResources>): void {
-  console.log(colorize(`Resources after round ${round}:`, 'summary'));
+function formatRoundResources(round: number, entities: CombatantSnapshot[], resourcesByEntityId: Record<string, RuntimeResources>): string[] {
+  const lines = [`Resources after round ${round}:`];
+
   for (const entity of entities) {
     const resources = resourcesByEntityId[entity.entityId];
     const cooldownSummary = entity.activeSkillIds
@@ -217,10 +226,12 @@ function printRoundResources(round: number, entities: CombatantSnapshot[], resou
       .map(([statusId, status]) => `${statusId}(${status.remainingTurns})`)
       .join(', ');
 
-    console.log(
+    lines.push(
       `  - ${entity.name ?? entity.entityId} | HP ${resources.hp}/${resources.hpMax} | CD [${cooldownSummary}] | Status [${statusSummary || 'none'}]`
     );
   }
+
+  return lines;
 }
 
 function printCharacter(label: string, character: CombatantSnapshot): void {
@@ -239,17 +250,112 @@ function printCharacter(label: string, character: CombatantSnapshot): void {
   console.log(`  Passives: ${passives || 'none'}`);
 }
 
+function hasDecisionLogFlag(argv: readonly string[]): boolean {
+  return argv.includes('--decisionlog');
+}
+
+function formatDecisionTrace(decision: DecisionLogEntry): string[] {
+  const lines: string[] = [];
+  const { round, actorId, targetId, trace } = decision;
+  const statusSummary = trace.target.statuses.length > 0 ? trace.target.statuses.join(', ') : 'none';
+  const actorCooldownSummary = Object.entries(trace.actorCooldowns)
+    .map(([skillId, cooldown]) => `${getSkillDef(skillId).skillName}:${cooldown}`)
+    .join(', ');
+
+  lines.push(`[R${round}] ${actorId} AI decision against ${targetId}`);
+  lines.push(`  target snapshot: hp ${trace.target.hp}/${trace.target.hpMax}, statuses: ${statusSummary}`);
+  lines.push(`  actor cooldowns: ${actorCooldownSummary || 'none'}`);
+  lines.push(`  candidate skills: ${trace.candidateSkillIds.join(', ')}`);
+
+  for (const score of trace.scores) {
+    lines.push(
+      `  - ${getSkillDef(score.skillId).skillName} (${score.skillId}) => total ${score.totalScore} ` +
+        `[base ${score.basePower}, active ${score.activeSkillBonus}, execute ${score.executeBonus}, ` +
+        `stun ${score.stunPenalty}, shieldbreak ${score.shieldbreakBonus}, learned ${score.learnedWeight}]`
+    );
+  }
+
+  lines.push(`  selected: ${getSkillDef(trace.selectedSkillId).skillName} (${trace.selectedSkillId})`);
+
+  return lines;
+}
+
+function buildDecisionDocument(
+  seed: number,
+  player: CombatantSnapshot,
+  enemy: CombatantSnapshot,
+  decisionLogs: DecisionLogEntry[],
+  battleEvents: BattleEvent[],
+  winnerEntityId: string,
+  roundsPlayed: number
+): string {
+  const lines: string[] = [];
+  const entities = [player, enemy];
+  const resourcesByEntityId: Record<string, RuntimeResources> = {
+    [player.entityId]: initializeResources(player),
+    [enemy.entityId]: initializeResources(enemy)
+  };
+
+  lines.push('# Random Combat Simulation Decision Document');
+  lines.push('');
+  lines.push(`Seed: ${seed}`);
+  lines.push(`Player: ${player.name} (${player.entityId})`);
+  lines.push(`Enemy: ${enemy.name} (${enemy.entityId})`);
+  lines.push('');
+  lines.push('## AI Decision Trace');
+
+  if (decisionLogs.length === 0) {
+    lines.push('No decision logs captured.');
+  }
+
+  for (const decision of decisionLogs) {
+    lines.push(...formatDecisionTrace(decision));
+    lines.push('');
+  }
+
+  lines.push('## Battle Event Timeline');
+  for (const event of battleEvents) {
+    applyEvent(resourcesByEntityId, event);
+    lines.push(`[R${event.round}] ${formatEvent(event).message}`);
+
+    if (event.type === 'ROUND_END') {
+      lines.push(...formatRoundResources(event.round, entities, resourcesByEntityId));
+    }
+  }
+
+  lines.push('');
+  lines.push(`Winner: ${winnerEntityId}`);
+  lines.push(`Rounds Played: ${roundsPlayed}`);
+
+  return lines.join('\n');
+}
+
 function main(): void {
+  const decisionLogEnabled = hasDecisionLogFlag(process.argv.slice(2));
   const seed = randomInt(1, 0x7fffffff);
   const player = createRandomCharacter('player', 'Random Vanguard');
   const enemy = createRandomCharacter('enemy', 'Random Marauder');
+
+  const decisionLogs: DecisionLogEntry[] = [];
 
   const battle = simulateBattle({
     battleId: randomUUID(),
     seed,
     playerInitial: player,
-    enemyInitial: enemy
+    enemyInitial: enemy,
+    decisionLogger: decisionLogEnabled
+      ? (decision) => {
+          decisionLogs.push(decision);
+        }
+      : undefined
   });
+
+  if (decisionLogEnabled) {
+    console.log(
+      buildDecisionDocument(seed, player, enemy, decisionLogs, battle.events, battle.winnerEntityId, battle.roundsPlayed)
+    );
+    return;
+  }
 
   console.log(colorize(`\n=== Random Combat Simulation ===`, 'summary'));
   console.log(`Seed: ${seed}`);
@@ -269,7 +375,9 @@ function main(): void {
     console.log(colorize(`[R${event.round}] ${message}`, color));
 
     if (event.type === 'ROUND_END') {
-      printRoundResources(event.round, entities, resourcesByEntityId);
+      for (const resourceLine of formatRoundResources(event.round, entities, resourcesByEntityId)) {
+        console.log(colorize(resourceLine, 'summary'));
+      }
     }
   }
 

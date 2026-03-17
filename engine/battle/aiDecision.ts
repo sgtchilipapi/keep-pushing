@@ -33,6 +33,28 @@ export type CandidateAction = {
   skillId: string;
 };
 
+export type SkillScoreBreakdown = {
+  skillId: string;
+  basePower: number;
+  activeSkillBonus: number;
+  executeBonus: number;
+  stunPenalty: number;
+  shieldbreakBonus: number;
+  learnedWeight: number;
+  totalScore: number;
+};
+
+export type DecisionTrace = {
+  actorActiveSkillIds: readonly [string, string];
+  actorCooldowns: Record<string, number>;
+  target: DecisionCombatantSnapshot;
+  candidateSkillIds: readonly string[];
+  scores: readonly SkillScoreBreakdown[];
+  selectedSkillId: string;
+};
+
+export type DecisionLogger = (trace: DecisionTrace) => void;
+
 /**
  * @todo: Where did we get these hardcoded values from? As far as I know, we dont want hardcoded bonuses and organically let the combatants learn
  *        and choose on their own.
@@ -61,19 +83,24 @@ function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
  * The score combines static skill power, context-sensitive tag bonuses/penalties,
  * and learned archetype preferences.
  */
-function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): number {
+function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): SkillScoreBreakdown {
   /** Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
    * @todo: Why we use skill.basePower as a base? I gues this only applies when the combatant decides to execute an offensive action.
    *        Decide where to create a decision point between offensive or defensive. Before specific skill weights? Or after skill weights?
    *        Re-design.
    */
   let score = skill.basePower;
+  let activeSkillBonus = 0;
+  let executeBonus = 0;
+  let stunPenalty = 0;
+  let shieldbreakBonus = 0;
 
   /**
    * @see: We dont want to influence with hardcoded bonuses. Re-design.
    */
   if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
-    score += ACTIVE_AVAILABLE_BONUS;
+    activeSkillBonus = ACTIVE_AVAILABLE_BONUS;
+    score += activeSkillBonus;
   }
 
   /**
@@ -84,7 +111,8 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
     const threshold = skill.executeThresholdBP ?? 0;
 
     if (targetHpBP <= threshold) {
-      score += EXECUTE_BONUS;
+      executeBonus = EXECUTE_BONUS;
+      score += executeBonus;
     }
   }
 
@@ -97,19 +125,31 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
    */
   if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
     // Reapplying stun is heavily penalized to avoid wasting turns on non-stacking control effects.
-    score -= WASTED_STUN_PENALTY;
+    stunPenalty = -WASTED_STUN_PENALTY;
+    score += stunPenalty;
   }
 
   /**
    * @todo: Another hardcoded influence. Re-design.
    */
   if (skill.tags.includes('shieldbreak') && target.statuses.includes('shielded')) {
-    score += SHIELDBREAK_BONUS;
+    shieldbreakBonus = SHIELDBREAK_BONUS;
+    score += shieldbreakBonus;
   }
 
-  score += scoreLearnedWeightTerm(skillWeights, skill.skillId);
+  const learnedWeight = scoreLearnedWeightTerm(skillWeights, skill.skillId);
+  score += learnedWeight;
 
-  return score;
+  return {
+    skillId: skill.skillId,
+    basePower: skill.basePower,
+    activeSkillBonus,
+    executeBonus,
+    stunPenalty,
+    shieldbreakBonus,
+    learnedWeight,
+    totalScore: score
+  };
 }
 
 /**
@@ -132,7 +172,8 @@ export function chooseAction(
   actorActiveSkillIds: readonly [string, string],
   actorCooldowns: Record<string, number>,
   target: DecisionCombatantSnapshot,
-  skillWeights: ArchetypeSkillWeights = {}
+  skillWeights: ArchetypeSkillWeights = {},
+  decisionLogger?: DecisionLogger
 ): CandidateAction {
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
@@ -153,13 +194,22 @@ export function chooseAction(
   const ordered = candidateSkillIds
     .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), target, skillWeights) }))
     .sort((a, b) => {
-      if (a.score !== b.score) {
-        return b.score - a.score;
+      if (a.score.totalScore !== b.score.totalScore) {
+        return b.score.totalScore - a.score.totalScore;
       }
 
       // Lexical tie-break keeps action selection deterministic for replay and test consistency.
       return a.skillId.localeCompare(b.skillId);
     });
+
+  decisionLogger?.({
+    actorActiveSkillIds,
+    actorCooldowns: { ...actorCooldowns },
+    target,
+    candidateSkillIds,
+    scores: ordered.map((entry) => entry.score),
+    selectedSkillId: ordered[0].skillId
+  });
 
   return { skillId: ordered[0].skillId };
 }
