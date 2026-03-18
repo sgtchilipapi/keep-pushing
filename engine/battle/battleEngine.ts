@@ -196,12 +196,28 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       const selectedAction = chooseAction(
-        actor.activeSkillIds,
-        actor.cooldowns,
         {
-          hp: target.hp,
-          hpMax: target.hpMax,
-          statuses: getActiveStatusIds(target)
+          actor: {
+            entityId: actor.entityId,
+            hp: actor.hp,
+            hpMax: actor.hpMax,
+            statuses: getActiveStatusIds(actor),
+            activeSkillIds: actor.activeSkillIds,
+            cooldowns: { ...actor.cooldowns }
+          },
+          target: {
+            entityId: target.entityId,
+            hp: target.hp,
+            hpMax: target.hpMax,
+            statuses: getActiveStatusIds(target),
+            activeSkillIds: target.activeSkillIds,
+            cooldowns: { ...target.cooldowns }
+          },
+          battle: {
+            round,
+            maxRounds,
+            roundsRemaining: Math.max(0, maxRounds - round)
+          }
         },
         actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}),
         (trace) => {
