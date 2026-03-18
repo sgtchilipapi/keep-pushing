@@ -347,6 +347,48 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 - `docs/ai-decision-design-trajectory.md`
   - architecture and rationale summary.
 
+## Future Add-On Backlog
+
+These are intentionally **post-slice** follow-ons, not part of the current Slice 2 delivery scope. They should build on the existing feature/intent scaffolding without replacing the Option B weak-prior + learning direction.
+
+### Add-on A — Personality templates for prior weights
+
+**Goal**: allow authored style presets to shape the initial feature-prior layer while remaining weak enough for learning to dominate over time.
+
+**Expected shape**:
+- add a `personalityTemplate` concept at archetype or combatant configuration level,
+- map each template to low-magnitude offsets over the default feature prior table,
+- keep learned residuals separate from those authored offsets,
+- surface template-derived prior contributions in decision traces.
+
+**Examples**:
+- aggressive → slightly higher finish/offense-related prior weights,
+- cautious → slightly higher defensive prior weights,
+- controller → slightly higher control-oriented prior weights,
+- attrition → slightly higher setup/attrition prior weights.
+
+### Add-on B — Strategy templates for intent thresholds
+
+**Goal**: allow authored tactical framing to modify how context becomes intent weights without bypassing context-driven derivation.
+
+**Expected shape**:
+- add a `strategyTemplate` concept that parameterizes `deriveIntentWeights(...)`,
+- express templates as threshold/ramp adjustments rather than fixed final intent overrides,
+- keep resulting intent weights deterministic and explainable from battle context plus template parameters,
+- surface strategy-template influence in traces alongside the final intent weights.
+
+**Examples**:
+- rushdown → enter finish pressure earlier and tolerate lower survival pressure,
+- turtle → raise survival/attrition sensitivity earlier,
+- control → hold control/setup pressure higher into neutral states,
+- opportunist → sharpen finish spikes near conversion windows.
+
+**Guardrail for both add-ons**:
+- keep authored template influence low-magnitude,
+- avoid hard tactical scripts,
+- preserve deterministic tie-break behavior,
+- and ensure learning residuals can still dominate long-run policy.
+
 ## Definition of Done
 
 - Deterministic behavior verified for same seed and model version.
