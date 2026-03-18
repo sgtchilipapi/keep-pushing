@@ -20,25 +20,6 @@ export const DEFAULT_LEARNING_RATE = 150;
  */
 export type ArchetypeSkillWeights = Record<string, number>;
 
-export const WEAK_PRIOR_FEATURE_WEIGHTS = {
-  basePower: 1,
-  activeSkillPreference: 40,
-  executeOpportunity: 120,
-  stunRedundancy: 150,
-  shieldbreakOpportunity: 90,
-  survivalRecovery: 140,
-  survivalShield: 120,
-  controlOpportunity: 80,
-  setupPressure: 55,
-  attritionPressure: 45
-} as const;
-
-export type WeakPriorFeatureWeightId = keyof typeof WEAK_PRIOR_FEATURE_WEIGHTS;
-
-export function getWeakPriorWeight(featureId: WeakPriorFeatureWeightId): number {
-  return WEAK_PRIOR_FEATURE_WEIGHTS[featureId];
-}
-
 /**
  * Aggregated impact metrics attributed to one skill over a battle.
  */
