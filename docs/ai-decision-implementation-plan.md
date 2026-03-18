@@ -51,126 +51,129 @@ In other words:
 
 This keeps the architecture legible while avoiding a delivery plan that only moves horizontally through subsystems.
 
+**Important**: WS1-WS6 are **not** the execution order for implementation tickets. They are reference buckets describing the capability surface. Implementation should be planned, assigned, and shipped by the vertical slices defined later in this document.
+
 ## Capability Map (Workstreams)
 
 ## WS1 — Contracts and data plumbing
 
-### Tasks
+### Capability intent
 
-1. Add AI-facing context contracts in `engine/battle/aiDecision.ts` (or extracted file):
-   - `DecisionContext`, `DecisionActorState`, `DecisionTargetState`, `DecisionBattleState`.
-2. Update battle engine `chooseAction(...)` call to pass full context:
-   - actor state, target state, round/max rounds.
-3. Extend optional `decisionLogger` payload with context versioning metadata.
+WS1 defines the shared decision-time contracts and plumbing required to move battle state into the AI layer in a deterministic, read-only form.
 
-### Acceptance criteria
+### Includes
+
+- AI-facing context contracts such as `DecisionContext`, `DecisionActorState`, `DecisionTargetState`, and `DecisionBattleState`.
+- Battle-engine plumbing that passes actor state, target state, and round/max-round context into decision selection.
+- Decision-log payload structure and versioning metadata for trace consumers.
+
+### Capability is present when
 
 - AI receives actor + target + battle context without reading mutable runtime objects directly.
 - TypeScript compilation passes.
 - Existing battle simulations remain deterministic.
 
-### Tests
+### Evidence
 
-- Add/adjust unit test to assert decision trace includes new context fields.
-- Add regression test proving same selected skill under default parity weights.
+- Unit/regression coverage proves decision traces include the new context fields.
+- Parity checks prove the richer context does not change action selection under transitional defaults.
 
 ## WS2 — Feature extraction + weak-prior parity layer
 
-### Tasks
+### Capability intent
 
-1. Introduce `extractSkillFeatures(skill, context)` returning named feature map.
-2. Introduce `scoreSkillWithWeights(features, weights, learnedResidual)`.
-3. Map old hardcoded terms to equivalent transitional weights/features while preparing to reduce them toward weak priors:
-   - active skill bonus,
-   - execute opportunity,
-   - stun redundancy,
-   - shieldbreak opportunity.
-4. Keep tie-break behavior unchanged.
+WS2 defines the feature-scoring foundation that replaces hardcoded action bonuses with explicit, inspectable scoring terms while preserving a transitional parity mode.
 
-### Acceptance criteria
+### Includes
 
-- Under transitional defaults, selected actions match legacy scorer for existing scenario matrix.
-- Decision trace includes per-feature contributions.
-- The weight system supports a later reduction from parity defaults to weak-prior defaults without API redesign.
+- Feature extraction primitives such as `extractSkillFeatures(skill, context)`.
+- Weighted scoring primitives such as `scoreSkillWithWeights(features, weights, learnedResidual)`.
+- Transitional mappings from current hardcoded behavior into named features like active-skill preference, execute opportunity, stun redundancy, and shieldbreak opportunity.
+- Deterministic tie-break preservation.
 
-### Tests
+### Capability is present when
 
-- Parity test set for representative combinations:
-   - low target HP + execute,
-   - target stunned + stun-tagged skill,
-   - target shielded + shieldbreak-tagged skill,
-   - cooldown-gated candidate set.
+- Under transitional defaults, selected actions match the legacy scorer in the existing scenario matrix.
+- Decision traces expose per-feature contributions.
+- The scoring system can later reduce transitional defaults toward weak-prior defaults without API redesign.
+
+### Evidence
+
+- Parity tests cover representative combinations such as low target HP + execute, target stunned + stun-tagged skill, target shielded + shieldbreak-tagged skill, and cooldown-gated candidate sets.
 
 ## WS3 — Intent-conditioned scoring
 
-### Tasks
+### Capability intent
 
-1. Define intent set and context-driven intent weights:
-   - `finish`, `survive`, `control`, `setup`, `attrition`.
-2. Add per-intent utility mapping from features.
-3. Compose final score as intent-weighted utility + residual.
-4. Add config object for archetype-level intent/feature weights, keeping priors intentionally low-magnitude by default.
+WS3 defines the intent layer that converts raw features into context-sensitive tactical pressure such as finishing, surviving, controlling, setting up, or playing attrition.
 
-### Acceptance criteria
+### Includes
+
+- Intent sets such as `finish`, `survive`, `control`, `setup`, and `attrition`.
+- Context-driven intent-weight derivation.
+- Per-intent utility mapping from extracted features.
+- Final score composition that combines intent utilities with learned residuals and low-magnitude priors.
+
+### Capability is present when
 
 - Intent weights are deterministic and explainable from context.
 - Utility skills can outrank pure damage in high-survival-pressure contexts.
 - Intent weighting still allows learning residuals to become the dominant long-run policy term.
 
-### Tests
+### Evidence
 
-- Behavior tests:
-   - low self HP chooses defensive utility over minor damage,
-   - low target HP prefers finisher behavior,
-   - setup/control chosen when immediate damage is lower but next-turn value is higher.
+- Behavior tests demonstrate low-self-HP defensive choices, low-target-HP finishing choices, and setup/control choices when near-future value exceeds immediate damage.
 
 ## WS4 — Opponent probable-action and one-turn projections
 
-### Tasks
+### Capability intent
 
-1. Build deterministic opponent action predictor:
-   - mirror scoring with opponent-as-actor, self-as-target,
-   - expose top-1 or top-k probability-like normalized scores.
-2. Add one-turn projection helpers:
-   - expected outgoing damage/recovery,
-   - expected incoming damage/recovery (from predicted opponent action),
-   - simple status continuation effects.
-3. Add projection features into scoring with bounded weights.
+WS4 defines lightweight anticipation: the system's ability to estimate likely opponent action and project one-turn incoming/outgoing value without escalating to deep search.
 
-### Acceptance criteria
+### Includes
+
+- Deterministic opponent-action prediction based on mirrored scoring.
+- One-turn projection helpers for outgoing damage/recovery, incoming damage/recovery, and simple status continuation effects.
+- Projection-derived features that can influence action selection with bounded weight contribution.
+
+### Capability is present when
 
 - Projections are deterministic and bounded.
-- AI trace logs projected values and selected rationale.
+- AI traces expose projected values and the rationale they contributed to.
 
-### Tests
+### Evidence
 
-- Unit tests for projection arithmetic and clamping.
-- Scenario tests where projected incoming damage changes chosen action.
+- Unit tests validate projection arithmetic and clamping.
+- Scenario tests prove projected incoming pressure changes action choice in expected situations.
 
 ## WS5 — Learning model integration
 
-### Tasks
+### Capability intent
 
-1. Preserve current per-skill residual (`scoreLearnedWeightTerm`) behavior.
-2. Add optional feature-level residual adjustment with bounded numeric update rules.
-3. Add confidence/decay logic to reduce short-streak overreaction.
-4. Initialize new agents with near-neutral (very low-magnitude) prior weights to encourage learning-led policy formation.
+WS5 defines how weak priors and repeated combat experience produce long-run policy improvement without abandoning determinism or numeric stability.
 
-### Acceptance criteria
+### Includes
+
+- Preservation of current per-skill residual behavior as a compatibility baseline.
+- Optional feature-level residual adjustment with bounded numeric update rules.
+- Confidence/decay logic to reduce short-streak overreaction.
+- Near-neutral initial priors that encourage learning-led policy formation.
+
+### Capability is present when
 
 - Learning updates remain bounded and deterministic.
 - Legacy skill-level learning mode remains available as fallback.
 - Agents with near-neutral priors improve win-rate over repeated deterministic training batches in benchmark scenarios.
 
-### Tests
+### Evidence
 
-- Clamp/cap tests for update steps.
-- Stability tests over repeated simulated battles.
-- Progression tests comparing early-batch and late-batch win-rate for at least 3 matchup archetype pairs.
+- Clamp/cap tests validate update boundaries.
+- Stability tests validate repeated simulated battles do not drift destructively.
+- Progression tests compare early-batch and late-batch win-rate across multiple matchup archetype pairs.
 
 ### Clarification on “guardrails”
 
-This plan avoids hard tactical scripting (for example, forcing specific skills under fixed HP thresholds). Instead, it uses numeric safety constraints only:
+This capability avoids hard tactical scripting (for example, forcing specific skills under fixed HP thresholds). Instead, it uses numeric safety constraints only:
 
 - bounded update sizes,
 - bounded parameter ranges,
@@ -180,25 +183,30 @@ These constraints preserve organic self-tuning while preventing destructive drif
 
 ## WS6 — Traceability, migration, and rollout
 
-### Tasks
+### Capability intent
 
-1. Version decision trace schema (e.g., `decisionTraceVersion: 2`).
-2. Keep backward-compatible fields during migration window.
-3. Add feature flag / config gate:
-   - `aiModel: 'legacy' | 'feature_v1' | 'intent_v1'`.
-4. Document balancing/tuning playbook.
+WS6 defines the observability, compatibility, and controlled-rollout surface required to ship the new AI safely.
 
-### Acceptance criteria
+### Includes
+
+- Versioned decision-trace schemas.
+- Backward-compatible migration fields during transition periods.
+- Model/config gates such as `aiModel: 'legacy' | 'feature_v1' | 'intent_v1'`.
+- Balancing and tuning playbook documentation.
+
+### Capability is present when
 
 - Legacy and new models can be toggled without code changes.
-- Replay output remains stable under same model version + seed.
+- Replay output remains stable under the same model version and seed.
 
-### Tests
+### Evidence
 
-- Snapshot tests by model version.
-- Determinism test repeated N runs with same seed/context.
+- Snapshot tests cover model-version trace outputs.
+- Determinism tests repeat identical seeds/contexts and prove stable outcomes.
 
 ## Vertical Slice Delivery Plan
+
+The slices below are the **only intended execution model** for implementation work. A coding agent should not pick up WS1-WS6 one-by-one as a horizontal sequence. Instead, each implementation increment should be framed as one of these slices and may touch multiple workstreams at once.
 
 ### Slice 1 — Rich decision context with parity behavior
 
