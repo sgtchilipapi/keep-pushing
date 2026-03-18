@@ -208,6 +208,8 @@ WS6 defines the observability, compatibility, and controlled-rollout surface req
 
 The slices below are the **only intended execution model** for implementation work. A coding agent should not pick up WS1-WS6 one-by-one as a horizontal sequence. Instead, each implementation increment should be framed as one of these slices and may touch multiple workstreams at once.
 
+Each slice below contains the **actual implementation tasks** for a coding agent. WS1-WS6 remain reference material for comparing the delivered behavior against the intended capability surface.
+
 ### Slice 1 — Rich decision context with parity behavior
 
 **Goal**: deliver a richer end-to-end `DecisionContext` and trace model while preserving current action selection.
@@ -216,6 +218,19 @@ The slices below are the **only intended execution model** for implementation wo
 - WS1 contracts and plumbing,
 - WS2 parity scoring foundation,
 - WS6 trace/versioning support.
+
+**Implementation tasks**:
+1. Add `DecisionContext`-family types to `engine/battle/aiDecision.ts` or a dedicated AI decision contract module.
+2. Update `engine/battle/battleEngine.ts` to construct and pass actor/target/battle context into `chooseAction(...)`.
+3. Expand the decision trace payload to include the richer context and version metadata.
+4. Preserve legacy selection behavior by using transitional parity defaults.
+5. Update `tests/aiDecision.decisionLog.test.ts` and related parity coverage to assert the richer trace shape without changing chosen actions.
+
+**Primary files**:
+- `engine/battle/aiDecision.ts`
+- `engine/battle/battleEngine.ts`
+- `tests/aiDecision.decisionLog.test.ts`
+- `tests/combatSimulation.scenarioMatrix.test.ts`
 
 **Done when**:
 - AI receives actor/target/battle context,
@@ -231,6 +246,19 @@ The slices below are the **only intended execution model** for implementation wo
 - WS3 intent-conditioned scoring,
 - WS6 rollout/testing gates.
 
+**Implementation tasks**:
+1. Introduce explicit feature extraction helpers and migrate existing hardcoded bonuses into named transitional features.
+2. Add deterministic intent weights for `finish`, `survive`, `control`, `setup`, and `attrition`.
+3. Compose final scores from feature contributions, intent utility, weak priors, and learned residuals.
+4. Extend decision traces so they explain both feature contributions and intent influence.
+5. Add behavior tests proving low-HP defense, low-target-HP finishing, and setup/control decisions behave as intended.
+
+**Primary files**:
+- `engine/battle/aiDecision.ts`
+- `engine/battle/learning.ts`
+- `tests/aiDecision.decisionLog.test.ts`
+- `tests/combatSimulation.scenarioMatrix.test.ts`
+
 **Done when**:
 - behavior tests demonstrate improved survival/finish/control choices,
 - traces explain intent influence,
@@ -245,6 +273,19 @@ The slices below are the **only intended execution model** for implementation wo
 - WS4 opponent prediction and one-turn projections,
 - WS6 determinism and trace coverage.
 
+**Implementation tasks**:
+1. Add deterministic opponent-action prediction using mirrored scoring against the current context.
+2. Implement one-turn projection helpers for incoming/outgoing damage, recovery, and simple status continuation.
+3. Feed those projections back into the decision feature set with bounded influence.
+4. Extend traces to record projected values and which projection terms affected ranking.
+5. Add scenario tests where projected pressure changes the chosen action versus immediate-damage-only scoring.
+
+**Primary files**:
+- `engine/battle/aiDecision.ts`
+- `engine/battle/battleEngine.ts`
+- `tests/combatSimulation.scenarioMatrix.test.ts`
+- `tests/aiDecision.decisionLog.test.ts`
+
 **Done when**:
 - AI can estimate probable opponent next action,
 - projected incoming/outgoing damage/recovery appears in traces,
@@ -258,6 +299,19 @@ The slices below are the **only intended execution model** for implementation wo
 - WS5 learning integration,
 - WS6 rollout/model-gating,
 - plus the already-landed scoring and projection foundations.
+
+**Implementation tasks**:
+1. Keep current per-skill residual learning as compatibility baseline while adding bounded feature-level residual updates.
+2. Add confidence/decay logic and near-neutral prior initialization.
+3. Create deterministic training/progression harnesses that evaluate policy improvement over repeated batches.
+4. Add rollout gates that check parity, tactical behavior, and learning progression together before enabling `feature_v1` by default.
+5. Add regression-league coverage so learning improvement is measured against stable reference opponents rather than only self-play.
+
+**Primary files**:
+- `engine/battle/learning.ts`
+- `engine/battle/aiDecision.ts`
+- `tests/learning.test.ts`
+- `tests/combatSimulation.scenarioMatrix.test.ts`
 
 **Done when**:
 - deterministic training batches show measurable improvement from near-neutral priors,
