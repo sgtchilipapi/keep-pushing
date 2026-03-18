@@ -187,9 +187,7 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
  *
  * This function does not mutate cooldown state or battle entities.
  *
- * @param actorActiveSkillIds - The actor's equipped active skill identifiers.
- * @param actorCooldowns - Remaining cooldown turns keyed by skill identifier.
- * @param target - Read-only snapshot of the current enemy target.
+ * @param context - Read-only actor/target/battle snapshot for deterministic scoring.
  * @param skillWeights - Learned per-skill preference weights for the actor archetype.
  * @returns The single highest-priority action candidate.
  * @throws If a candidate skill identifier has no registered definition.
