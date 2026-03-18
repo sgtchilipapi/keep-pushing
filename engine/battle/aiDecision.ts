@@ -1,83 +1,75 @@
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
 import type { StatusId } from './statuses/statusRegistry';
-import { getWeakPriorWeight, scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
+import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
 
+/**
+ * Read-only combat snapshot used by the AI scorer when evaluating candidate skills.
+ *
+ * This shape intentionally contains only data required by heuristics so decision-making
+ * remains deterministic and independent from mutable battle engine state.
+ * 
+ * @todo: So as for now, a combatant only uses enemy hp and statuses? That is too shallow for MVP.
+ *       To have a meaningful combat agent, they should have need to be able to factor in multiple information and weigh the possible actions to take.
+ *       For example, skills might be for offense or self-preservation. Or skills might be to set a trap hence the agent understands timing.
+ *       Moreover, the agent must have the ability to anticipate even if crude at first which it improves over time through weights as well.
+ *       
+ *       Idea: Should agents decide based on ratios or levels of multiple stats? Like for example, combatantHp, enemyHp, skillDamageOutput, hitChance, etc?
+ *             So agents actually decide based on the current situation rather than just decide based on skill weights alone?
+ * 
+ *       Re-design.
+ */
 export type DecisionCombatantSnapshot = {
-  entityId: string;
   hp: number;
   hpMax: number;
   statuses: readonly StatusId[];
-  activeSkillIds: readonly [string, string];
-  cooldowns: Record<string, number>;
 };
 
-export type DecisionBattleSnapshot = {
-  round: number;
-  maxRounds: number;
-  roundsRemaining: number;
-};
-
-export type DecisionContext = {
-  actor: DecisionCombatantSnapshot;
-  target: DecisionCombatantSnapshot;
-  battle: DecisionBattleSnapshot;
-};
-
+/**
+ * Action selected by the AI decision phase.
+ *
+ * The battle engine resolves the referenced skill as the actor's next command.
+ */
 export type CandidateAction = {
   skillId: string;
 };
 
-export type IntentId = 'finish' | 'survive' | 'control' | 'setup' | 'attrition';
-export type SkillFeatureId =
-  | 'basePower'
-  | 'activeSkillPreference'
-  | 'executeOpportunity'
-  | 'stunRedundancy'
-  | 'shieldbreakOpportunity'
-  | 'survivalRecovery'
-  | 'survivalShield'
-  | 'controlOpportunity'
-  | 'setupPressure'
-  | 'attritionPressure';
-
-export type FeatureContribution = {
-  featureId: SkillFeatureId;
-  value: number;
-  weight: number;
-  contribution: number;
-};
-
-export type IntentContribution = {
-  intentId: IntentId;
-  weight: number;
-  utility: number;
-  contribution: number;
-};
-
 export type SkillScoreBreakdown = {
   skillId: string;
-  featureContributions: readonly FeatureContribution[];
-  intentContributions: readonly IntentContribution[];
-  priorScore: number;
+  basePower: number;
+  activeSkillBonus: number;
+  executeBonus: number;
+  stunPenalty: number;
+  shieldbreakBonus: number;
   learnedWeight: number;
   totalScore: number;
 };
 
 export type DecisionTrace = {
-  version: 'intent_v1';
-  context: DecisionContext;
+  actorActiveSkillIds: readonly [string, string];
+  actorCooldowns: Record<string, number>;
+  target: DecisionCombatantSnapshot;
   candidateSkillIds: readonly string[];
-  intentWeights: Record<IntentId, number>;
   scores: readonly SkillScoreBreakdown[];
   selectedSkillId: string;
 };
 
 export type DecisionLogger = (trace: DecisionTrace) => void;
 
-type SkillFeatures = Record<SkillFeatureId, number>;
-type IntentUtilities = Record<IntentId, number>;
+/**
+ * @todo: Where did we get these hardcoded values from? As far as I know, we dont want hardcoded bonuses and organically let the combatants learn
+ *        and choose on their own.
+ *        
+ *        Re-design.
+ */
+const ACTIVE_AVAILABLE_BONUS = 200;
+const EXECUTE_BONUS = 500;
+const SHIELDBREAK_BONUS = 350;
+const WASTED_STUN_PENALTY = 10_000;
 
-function hpPercentBP(combatant: Pick<DecisionCombatantSnapshot, 'hp' | 'hpMax'>): number {
+/**
+ * Converts current HP into basis points to avoid floating-point comparisons in heuristics.
+ */
+function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
   if (combatant.hpMax <= 0) {
     return 0;
   }
@@ -85,191 +77,136 @@ function hpPercentBP(combatant: Pick<DecisionCombatantSnapshot, 'hp' | 'hpMax'>)
   return Math.floor((combatant.hp * 10000) / combatant.hpMax);
 }
 
-function extractSkillFeatures(skill: SkillDef, context: DecisionContext): SkillFeatures {
-  const actorHpBP = hpPercentBP(context.actor);
-  const targetHpBP = hpPercentBP(context.target);
-  const targetStatuses = new Set(context.target.statuses);
-  const actorStatuses = new Set(context.actor.statuses);
+/**
+ * Computes a deterministic priority score for a skill against the current target snapshot.
+ *
+ * The score combines static skill power, context-sensitive tag bonuses/penalties,
+ * and learned archetype preferences.
+ */
+function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): SkillScoreBreakdown {
+  /** Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
+   * @todo: Why we use skill.basePower as a base? I gues this only applies when the combatant decides to execute an offensive action.
+   *        Decide where to create a decision point between offensive or defensive. Before specific skill weights? Or after skill weights?
+   *        Re-design.
+   */
+  let score = skill.basePower;
+  let activeSkillBonus = 0;
+  let executeBonus = 0;
+  let stunPenalty = 0;
+  let shieldbreakBonus = 0;
 
-  return {
-    basePower: skill.basePower,
-    activeSkillPreference: skill.skillId === BASIC_ATTACK_SKILL_ID ? 0 : 1,
-    executeOpportunity:
-      skill.tags.includes('execute') && targetHpBP <= (skill.executeThresholdBP ?? 0) ? 1 : 0,
-    stunRedundancy: skill.tags.includes('stun') && targetStatuses.has('stunned') ? -1 : 0,
-    shieldbreakOpportunity: skill.tags.includes('shieldbreak') && targetStatuses.has('shielded') ? 1 : 0,
-    survivalRecovery:
-      skill.selfAppliesStatusIds?.includes('recovering') === true && actorHpBP < 10000 && !actorStatuses.has('recovering')
-        ? 1
-        : 0,
-    survivalShield:
-      skill.selfAppliesStatusIds?.includes('shielded') === true && actorHpBP < 10000 && !actorStatuses.has('shielded')
-        ? 1
-        : 0,
-    controlOpportunity: skill.tags.includes('stun') && !targetStatuses.has('stunned') && targetHpBP > 3000 ? 1 : 0,
-    setupPressure:
-      skill.appliesStatusIds?.includes('overheated') === true && !targetStatuses.has('overheated') && context.battle.roundsRemaining > 1
-        ? 1
-        : 0,
-    attritionPressure:
-      skill.appliesStatusIds?.includes('overheated') === true && context.battle.roundsRemaining > 1 ? 1 : 0
-  };
-}
-
-function deriveIntentWeights(context: DecisionContext): Record<IntentId, number> {
-  const actorHpBP = hpPercentBP(context.actor);
-  const targetHpBP = hpPercentBP(context.target);
-  const roundsRemaining = context.battle.roundsRemaining;
-
-  return {
-    finish: targetHpBP <= 3000 ? 700 : targetHpBP <= 5000 ? 250 : 0,
-    survive: actorHpBP <= 2500 ? 850 : actorHpBP <= 4500 ? 300 : 0,
-    control: targetHpBP > 3000 && !context.target.statuses.includes('stunned') ? 325 : 0,
-    setup: roundsRemaining > 2 && targetHpBP > 3500 ? 180 : 0,
-    attrition: roundsRemaining > 1 ? 120 : 0
-  };
-}
-
-function deriveIntentUtilities(skill: SkillDef, features: SkillFeatures): IntentUtilities {
-  return {
-    finish: features.executeOpportunity * 5 + Math.floor(features.basePower / 70),
-    survive: features.survivalRecovery * 6 + features.survivalShield * 5,
-    control: features.controlOpportunity * 4 + (skill.tags.includes('stun') ? 1 : 0),
-    setup: features.setupPressure * 4 + ((skill.selfAppliesStatusIds?.length ?? 0) > 0 ? 1 : 0),
-    attrition: features.attritionPressure * 3 + features.shieldbreakOpportunity * 2
-  };
-}
-
-function scoreSkill(skill: SkillDef, context: DecisionContext, skillWeights: ArchetypeSkillWeights): SkillScoreBreakdown {
-  const features = extractSkillFeatures(skill, context);
-  const featureContributions: FeatureContribution[] = [];
-  let priorScore = 0;
-
-  for (const featureId of Object.keys(features) as SkillFeatureId[]) {
-    const value = features[featureId];
-    const weight = getWeakPriorWeight(featureId);
-    const contribution = value * weight;
-    priorScore += contribution;
-    featureContributions.push({ featureId, value, weight, contribution });
+  /**
+   * @see: We dont want to influence with hardcoded bonuses. Re-design.
+   */
+  if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
+    activeSkillBonus = ACTIVE_AVAILABLE_BONUS;
+    score += activeSkillBonus;
   }
 
-  const intentWeights = deriveIntentWeights(context);
-  const intentUtilities = deriveIntentUtilities(skill, features);
-  const intentContributions: IntentContribution[] = [];
+  /**
+   * @see: This is yet another hardcoded bonus to influence the agent's decision making. We dont want this. Re-design.
+   */
+  if (skill.tags.includes('execute')) {
+    const targetHpBP = hpPercentBP(target);
+    const threshold = skill.executeThresholdBP ?? 0;
 
-  for (const intentId of Object.keys(intentWeights) as IntentId[]) {
-    const weight = intentWeights[intentId];
-    const utility = intentUtilities[intentId];
-    const contribution = Math.floor((weight * utility) / 100);
-    priorScore += contribution;
-    intentContributions.push({ intentId, weight, utility, contribution });
+    if (targetHpBP <= threshold) {
+      executeBonus = EXECUTE_BONUS;
+      score += executeBonus;
+    }
+  }
+
+  /**
+   * @todo: This is hardcoded influence about how a combatant should be efficient. We dont want this.
+   *       Imagine a combatant almost winning if only it uses a high-damage high-hit-chance skill for the last time on a stunned enemy.
+   *       But it doesnt because such skill includes a 'stun' tag? That is undesirable. We want organic learning even if it is rule-based.
+   * 
+   *       Re-design.
+   */
+  if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
+    // Reapplying stun is heavily penalized to avoid wasting turns on non-stacking control effects.
+    stunPenalty = -WASTED_STUN_PENALTY;
+    score += stunPenalty;
+  }
+
+  /**
+   * @todo: Another hardcoded influence. Re-design.
+   */
+  if (skill.tags.includes('shieldbreak') && target.statuses.includes('shielded')) {
+    shieldbreakBonus = SHIELDBREAK_BONUS;
+    score += shieldbreakBonus;
   }
 
   const learnedWeight = scoreLearnedWeightTerm(skillWeights, skill.skillId);
+  score += learnedWeight;
 
   return {
     skillId: skill.skillId,
-    featureContributions,
-    intentContributions,
-    priorScore,
+    basePower: skill.basePower,
+    activeSkillBonus,
+    executeBonus,
+    stunPenalty,
+    shieldbreakBonus,
     learnedWeight,
-    totalScore: priorScore + learnedWeight
+    totalScore: score
   };
 }
 
-export function chooseAction(
-  context: DecisionContext,
-  skillWeights?: ArchetypeSkillWeights,
-  decisionLogger?: DecisionLogger
-): CandidateAction;
+/**
+ * Chooses the next skill the actor should use against the current target.
+ *
+ * The selector always includes the basic attack and only includes active skills whose
+ * cooldown is currently zero. Candidate skills are scored deterministically; when scores
+ * tie, lexical ordering is used so replay output and test runs remain stable.
+ *
+ * This function does not mutate cooldown state or battle entities.
+ *
+ * @param actorActiveSkillIds - The actor's equipped active skill identifiers.
+ * @param actorCooldowns - Remaining cooldown turns keyed by skill identifier.
+ * @param target - Read-only snapshot of the current enemy target.
+ * @param skillWeights - Learned per-skill preference weights for the actor archetype.
+ * @returns The single highest-priority action candidate.
+ * @throws If a candidate skill identifier has no registered definition.
+ */
 export function chooseAction(
   actorActiveSkillIds: readonly [string, string],
   actorCooldowns: Record<string, number>,
-  target: Pick<DecisionCombatantSnapshot, 'hp' | 'hpMax' | 'statuses'>,
-  skillWeights?: ArchetypeSkillWeights,
+  target: DecisionCombatantSnapshot,
+  skillWeights: ArchetypeSkillWeights = {},
   decisionLogger?: DecisionLogger
-): CandidateAction;
-export function chooseAction(
-  contextOrActorSkills: DecisionContext | readonly [string, string],
-  actorCooldownsOrSkillWeights: Record<string, number> | ArchetypeSkillWeights = {},
-  targetOrDecisionLogger?: Pick<DecisionCombatantSnapshot, 'hp' | 'hpMax' | 'statuses'> | DecisionLogger,
-  skillWeightsOrUndefined: ArchetypeSkillWeights = {},
-  decisionLoggerOrUndefined?: DecisionLogger
 ): CandidateAction {
-  let context: DecisionContext;
-  let skillWeights: ArchetypeSkillWeights;
-  let decisionLogger: DecisionLogger | undefined;
-
-  if (Array.isArray(contextOrActorSkills)) {
-    const legacyActorSkills = contextOrActorSkills as readonly [string, string];
-    const legacyTarget = targetOrDecisionLogger as Pick<DecisionCombatantSnapshot, 'hp' | 'hpMax' | 'statuses'>;
-    context = {
-      actor: {
-        entityId: 'actor',
-        hp: 1,
-        hpMax: 1,
-        statuses: [],
-        activeSkillIds: legacyActorSkills,
-        cooldowns: actorCooldownsOrSkillWeights as Record<string, number>
-      },
-      target: {
-        entityId: 'target',
-        hp: legacyTarget.hp,
-        hpMax: legacyTarget.hpMax,
-        statuses: legacyTarget.statuses,
-        activeSkillIds: [BASIC_ATTACK_SKILL_ID, BASIC_ATTACK_SKILL_ID],
-        cooldowns: {}
-      },
-      battle: {
-        round: 1,
-        maxRounds: 1,
-        roundsRemaining: 0
-      }
-    };
-    skillWeights = skillWeightsOrUndefined;
-    decisionLogger = typeof targetOrDecisionLogger === 'function' ? targetOrDecisionLogger : decisionLoggerOrUndefined;
-  } else {
-    context = contextOrActorSkills as DecisionContext;
-    skillWeights = actorCooldownsOrSkillWeights as ArchetypeSkillWeights;
-    decisionLogger = targetOrDecisionLogger as DecisionLogger | undefined;
-  }
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
-  for (const activeSkillId of context.actor.activeSkillIds) {
-    if ((context.actor.cooldowns[activeSkillId] ?? 0) === 0) {
+  /**
+   * @see: It is worth mentioning but not implementing now for the initial MVP or aiDecision version that agents should be able to think ahead.
+   *        Think ahead in the sense that they factor in future availability of other actions. Like for example, they can see that in the next
+   *        turn, their high damage skill but with low-hit chance is going to be available, they might prioritize using a 'stun' skill for this
+   *        turn so the next turn they can use such high-damage skill successfully.
+   * 
+   *        This might sound interesting but might be too complex for MVP. But leaving a note for this.
+   */
+  for (const activeSkillId of actorActiveSkillIds) {
+    if ((actorCooldowns[activeSkillId] ?? 0) === 0) {
       candidateSkillIds.push(activeSkillId);
     }
   }
 
   const ordered = candidateSkillIds
-    .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), context, skillWeights) }))
+    .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), target, skillWeights) }))
     .sort((a, b) => {
       if (a.score.totalScore !== b.score.totalScore) {
         return b.score.totalScore - a.score.totalScore;
       }
 
+      // Lexical tie-break keeps action selection deterministic for replay and test consistency.
       return a.skillId.localeCompare(b.skillId);
     });
 
   decisionLogger?.({
-    version: 'intent_v1',
-    context: {
-      actor: {
-        ...context.actor,
-        activeSkillIds: [...context.actor.activeSkillIds] as [string, string],
-        cooldowns: { ...context.actor.cooldowns },
-        statuses: [...context.actor.statuses]
-      },
-      target: {
-        ...context.target,
-        activeSkillIds: [...context.target.activeSkillIds] as [string, string],
-        cooldowns: { ...context.target.cooldowns },
-        statuses: [...context.target.statuses]
-      },
-      battle: { ...context.battle }
-    },
+    actorActiveSkillIds,
+    actorCooldowns: { ...actorCooldowns },
+    target,
     candidateSkillIds,
-    intentWeights: deriveIntentWeights(context),
     scores: ordered.map((entry) => entry.score),
     selectedSkillId: ordered[0].skillId
   });

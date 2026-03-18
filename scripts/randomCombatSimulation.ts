@@ -257,30 +257,21 @@ function hasDecisionLogFlag(argv: readonly string[]): boolean {
 function formatDecisionTrace(decision: DecisionLogEntry): string[] {
   const lines: string[] = [];
   const { round, actorId, targetId, trace } = decision;
-  const statusSummary = trace.context.target.statuses.length > 0 ? trace.context.target.statuses.join(', ') : 'none';
-  const actorCooldownSummary = Object.entries(trace.context.actor.cooldowns)
+  const statusSummary = trace.target.statuses.length > 0 ? trace.target.statuses.join(', ') : 'none';
+  const actorCooldownSummary = Object.entries(trace.actorCooldowns)
     .map(([skillId, cooldown]) => `${getSkillDef(skillId).skillName}:${cooldown}`)
     .join(', ');
 
   lines.push(`[R${round}] ${actorId} AI decision against ${targetId}`);
-  lines.push(`  target snapshot: hp ${trace.context.target.hp}/${trace.context.target.hpMax}, statuses: ${statusSummary}`);
+  lines.push(`  target snapshot: hp ${trace.target.hp}/${trace.target.hpMax}, statuses: ${statusSummary}`);
   lines.push(`  actor cooldowns: ${actorCooldownSummary || 'none'}`);
   lines.push(`  candidate skills: ${trace.candidateSkillIds.join(', ')}`);
-  lines.push(`  intent weights: ${Object.entries(trace.intentWeights).map(([intentId, weight]) => `${intentId}:${weight}`).join(', ')}`);
 
   for (const score of trace.scores) {
-    const featureSummary = score.featureContributions
-      .filter((entry) => entry.contribution !== 0)
-      .map((entry) => `${entry.featureId}:${entry.contribution}`)
-      .join(', ');
-    const intentSummary = score.intentContributions
-      .filter((entry) => entry.contribution !== 0)
-      .map((entry) => `${entry.intentId}:${entry.contribution}`)
-      .join(', ');
-
     lines.push(
       `  - ${getSkillDef(score.skillId).skillName} (${score.skillId}) => total ${score.totalScore} ` +
-        `[prior ${score.priorScore}, learned ${score.learnedWeight}, features ${featureSummary || 'none'}, intents ${intentSummary || 'none'}]`
+        `[base ${score.basePower}, active ${score.activeSkillBonus}, execute ${score.executeBonus}, ` +
+        `stun ${score.stunPenalty}, shieldbreak ${score.shieldbreakBonus}, learned ${score.learnedWeight}]`
     );
   }
 
