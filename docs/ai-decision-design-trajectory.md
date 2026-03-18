@@ -135,6 +135,19 @@ Add dynamic intent weights (`finish`, `survive`, `control`, `setup`, `attrition`
 ### 5) Opponent action likelihood (lightweight)
 Estimate probable next opponent action via mirrored deterministic scoring (top-1 or top-k normalized ranking), then reuse it for projected incoming damage/recovery proxies.
 
+### Future add-on: personality priors and strategy templates
+Two future extensions fit the current Option B direction well if they remain low-magnitude and fully traceable:
+
+- **Personality templates as base priors**: personality presets such as aggressive, cautious, controller, or attrition-focused can provide small feature-prior offsets on top of the neutral/default weight table. This should affect the prior layer only, so learning can still dominate long-run behavior.
+- **Strategy templates as intent-derivation presets**: strategy presets such as rushdown, turtle, control, or opportunist can adjust the thresholds and ramps used by `deriveIntentWeights(...)` rather than directly hardcoding final intent weights. This preserves deterministic, context-explainable intent outputs while allowing authored tactical framing.
+
+Recommended constraint for both add-ons:
+
+- keep templates additive and low-magnitude,
+- keep them separate from learned residuals,
+- expose their contribution in decision traces,
+- and avoid using them as hard tactical scripts.
+
 ## Delivery Phases and Cost Envelope
 
 ### Phase 0 — Structural refactor, no behavior change
