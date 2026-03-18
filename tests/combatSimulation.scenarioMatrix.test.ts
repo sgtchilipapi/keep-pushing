@@ -1,4 +1,5 @@
 import { simulateBattle, type BattleInput, type CombatantSnapshot } from '../engine/battle/battleEngine';
+import { chooseAction, type DecisionContext } from '../engine/battle/aiDecision';
 import { calculateHitChanceBP } from '../engine/battle/resolveDamage';
 import { getSkillDef } from '../engine/battle/skillRegistry';
 import type { BattleEvent } from '../types/battle';
@@ -204,5 +205,110 @@ describe('combat simulation scenario matrix', () => {
       expect(end.reason).toBe('timeout');
       expect(result.roundsPlayed).toBe(0);
     });
+  });
+});
+
+
+describe('intent-aware tactical behavior', () => {
+  function createDecisionContext(overrides: Partial<DecisionContext> = {}): DecisionContext {
+    return {
+      actor: {
+        entityId: '101',
+        hp: 2200,
+        hpMax: 2200,
+        statuses: [],
+        activeSkillIds: ['1001', '1002'],
+        cooldowns: { 1001: 0, 1002: 0 }
+      },
+      target: {
+        entityId: '202',
+        hp: 2100,
+        hpMax: 2100,
+        statuses: [],
+        activeSkillIds: ['1003', '1000'],
+        cooldowns: { 1003: 0, 1000: 0 }
+      },
+      battle: {
+        round: 2,
+        maxRounds: 8,
+        roundsRemaining: 6
+      },
+      ...overrides
+    };
+  }
+
+  it('prefers finishing blow when the target is in execute range', () => {
+    const choice = chooseAction(
+      createDecisionContext({
+        target: {
+          entityId: '202',
+          hp: 500,
+          hpMax: 2100,
+          statuses: ['shielded'],
+          activeSkillIds: ['1003', '1000'],
+          cooldowns: { 1003: 0, 1000: 0 }
+        }
+      })
+    );
+
+    expect(choice.skillId).toBe('1002');
+  });
+
+  it('prefers repair over offense when self survival pressure is high', () => {
+    const choice = chooseAction({
+      actor: {
+        entityId: '101',
+        hp: 400,
+        hpMax: 2200,
+        statuses: [],
+        activeSkillIds: ['1004', '1005'],
+        cooldowns: { 1004: 0, 1005: 0 }
+      },
+      target: {
+        entityId: '202',
+        hp: 1800,
+        hpMax: 2100,
+        statuses: [],
+        activeSkillIds: ['1003', '1000'],
+        cooldowns: { 1003: 0, 1000: 0 }
+      },
+      battle: {
+        round: 3,
+        maxRounds: 8,
+        roundsRemaining: 5
+      }
+    });
+
+    expect(choice.skillId).toBe('1005');
+  });
+
+  it('prefers control/setup over raw damage when the fight still has runway', () => {
+    const controlChoice = chooseAction(createDecisionContext());
+    const setupChoice = chooseAction({
+      actor: {
+        entityId: '101',
+        hp: 2200,
+        hpMax: 2200,
+        statuses: [],
+        activeSkillIds: ['1003', '1000'],
+        cooldowns: { 1003: 0, 1000: 0 }
+      },
+      target: {
+        entityId: '202',
+        hp: 2100,
+        hpMax: 2100,
+        statuses: [],
+        activeSkillIds: ['1005', '1000'],
+        cooldowns: { 1005: 0, 1000: 0 }
+      },
+      battle: {
+        round: 1,
+        maxRounds: 8,
+        roundsRemaining: 7
+      }
+    });
+
+    expect(controlChoice.skillId).toBe('1001');
+    expect(setupChoice.skillId).toBe('1003');
   });
 });
