@@ -46,13 +46,30 @@ Desired: current round / total rounds.
 - **Available today**: round index and max-round limit exist in battle loop.
 - **Missing/partial**: not currently provided as explicit AI context fields.
 
+## Preferred Direction: Option B (Weak-Prior + Learning Hybrid)
+
+This trajectory should favor **Option B**: start combatants with weak, near-neutral priors and let repeated combat experience drive most policy improvement.
+
+Option B is the best fit for the current codebase because it preserves deterministic scoring and debuggability while avoiding both extremes:
+
+- **Not Option A (pure self-tuning)**: pure self-tuning is attractive philosophically, but in the current architecture it would make early variance, credit-assignment errors, and local optima too influential.
+- **Not Option C (designer-weighted but learnable)**: heavily authored priors would keep behavior stable, but would weaken the goal of agents genuinely learning their own combat preferences.
+
+Under Option B:
+
+- authored weights exist only as weak priors or tie-break helpers,
+- learning is expected to dominate long-run behavior,
+- hard tactical scripts are avoided,
+- and numeric stability controls exist only to keep learning from collapsing.
+
 ## Design Principles
 
 1. **Determinism first**: same inputs must produce the same action and trace.
 2. **Feature transparency**: every decision score must be explainable by named terms.
-3. **Policy by configuration**: tune behavior through weights, not hardcoded logic branches.
-4. **Shallow foresight before deep search**: add one-turn deterministic proxies before any branching planner.
-5. **Backwards-safe migration**: each phase ships with parity/behavior tests and trace compatibility strategy.
+3. **Weak priors, strong learning**: initial weights should be small enough that repeated combat experience meaningfully reshapes policy.
+4. **No hard tactical scripts**: avoid authoring fixed behavior rules except where required for legality or deterministic replay.
+5. **Shallow foresight before deep search**: add one-turn deterministic proxies before any branching planner.
+6. **Backwards-safe migration**: each phase ships with parity/behavior tests and trace compatibility strategy.
 
 ## Proposed Architecture
 
@@ -99,13 +116,15 @@ Move scoring signals into explicit features, e.g.:
 - `cooldownOpportunityCost`
 - `nextTurnSynergyEstimate` (deterministic one-turn proxy)
 
-### 3) Weight-based scoring
-Replace fixed constants with weight tables:
+### 3) Weight-based scoring with weak priors
+Replace fixed constants with weight tables, but treat authored weights as weak priors rather than durable hand-authored strategy:
 
 ```ts
-score(skill) = Σ(featureValue(feature, skill, context) * weight(feature, archetype))
+score(skill) = Σ(featureValue(feature, skill, context) * priorWeight(feature, archetype))
              + learnedResidual(skill)
 ```
+
+In Option B, the prior term should be intentionally low-magnitude so that repeated combat outcomes can outweigh it over time.
 
 ### 4) Intent layer (phase-gated)
 Add dynamic intent weights (`finish`, `survive`, `control`, `setup`, `attrition`) derived from context. Skill score becomes weighted utility across intents plus residual.
@@ -148,7 +167,7 @@ Estimate probable next opponent action via mirrored deterministic scoring (top-1
 **Effort**: ~5–10 engineering days.
 
 ### Total practical MVP window
-For the requested richer decision information (without deep planner): **~2–4 weeks** for one engineer, including tuning and tests.
+For the requested richer decision information under **Option B** (without deep planner): **~2–4 weeks** for one engineer, including learning calibration and tests.
 
 ## Non-Obvious Costs and Risks
 
@@ -158,6 +177,60 @@ For the requested richer decision information (without deep planner): **~2–4 w
 4. **Projection drift risk** if forecast proxies diverge from actual resolver outcomes.
 5. **Complexity creep** if multi-turn lookahead is attempted before single-turn model stabilizes.
 
+### Why balance/tuning overhead can dominate implementation time
+
+The coding work is mostly finite (new context types, scoring functions, projection helpers). The tuning work is open-ended because each new feature creates an interaction surface with every other feature.
+
+Illustrative example with 8 features:
+
+- At implementation time, we add 8 weight values and deterministic formulas.
+- At tuning time, we must validate behavior across many tactical states (high HP, low HP, cooldown windows, status stacks, speed mismatch, mirror matchups, etc.).
+- A small change to one weight (for example, survival pressure) can unexpectedly flip decisions in several other states where setup/control also has influence.
+
+In practice, one extra feature often implies:
+
+- more scenario tests,
+- more simulation re-runs,
+- and more iteration cycles to avoid regressions in previously good behaviors.
+
+This is why balancing cost can exceed raw coding cost even in a deterministic model.
+
+### Self-tuning vision within Option B
+
+Your direction is valid, and Option B is exactly the compromise this plan should favor: start agents with weak priors and let repeated combat push policy toward better outcomes.
+
+Recommended interpretation of “no guardrails” for this system:
+
+- **No hard tactical scripts** (e.g., always use X below Y HP).
+- **No fixed hand-authored policy tree**.
+- **Learning drives policy movement** through outcome-linked updates.
+
+However, we should still keep **numerical safety constraints** (not tactical constraints):
+
+- bounded update magnitudes,
+- bounded weight ranges,
+- deterministic tie-breaks.
+
+These are not behavior guardrails; they are stability rails to prevent irreversible collapse from noisy short-term outcomes.
+
+### Illustration: how natural improvement can still fail without numeric safety
+
+Suppose all feature weights initialize near `0` and learning updates are fully unconstrained:
+
+1. Early random streak favors high-variance stun usage.
+2. Large positive updates over-credit stun features after a few wins.
+3. Agent over-commits to stun loops even when damage race requires finishing.
+4. Policy drifts into local optimum and win-rate falls versus resilient archetypes.
+
+With bounded updates + many-match averaging, the same system can still self-tune organically while avoiding unstable swings.
+
+So the Option B goal is:
+
+- **organic policy emergence** from play outcomes,
+- with **weak authored priors** instead of strong designer strategy,
+- with **numerical stability controls**,
+- and without hardcoded tactical behavior constraints.
+
 ## Guardrails
 
 - Do not introduce stochastic policy sampling.
@@ -165,14 +238,16 @@ For the requested richer decision information (without deep planner): **~2–4 w
 - Any new feature must have at least one direct unit test and one scenario-level behavior test.
 - Gate expensive foresight behind deterministic budget limits.
 - Keep an easy fallback path to single-step scorer.
+- Prefer soft numeric safety (bounded ranges/step sizes) over hard tactical rules so self-tuning remains organic.
 
 ## Immediate Next Steps
 
 1. Land `DecisionContext` plumbing and AI trace v2 fields.
-2. Implement feature extraction that mirrors current behavior under default weights.
-3. Add parity tests proving no behavior regression with default weights.
+2. Implement feature extraction that mirrors current behavior under **weak-prior defaults**.
+3. Add parity tests proving no behavior regression with the transitional defaults.
 4. Add a focused behavior suite for finish/survive/control/setup choices.
-5. Implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
+5. Implement learning calibration batches that verify long-run policy movement away from priors.
+6. Implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
 
 ## Related Documents
 
