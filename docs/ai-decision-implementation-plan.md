@@ -38,7 +38,20 @@ This implementation plan explicitly favors **Option B**:
 
 This means the implementation should optimize for **learnability and observability**, not for hand-authoring a strong static policy.
 
-## Workstreams
+## Execution Model
+
+The current documents should remain the **capability map**: WS1-WS6 still describe the major technical concerns that must exist in the final system.
+
+However, delivery should execute those capabilities as **vertical slices**. Each slice should cut through contracts, scoring, tests, logging, and rollout concerns to produce an end-to-end usable increment.
+
+In other words:
+
+- **WS1-WS6 answer _what capabilities we need_.**
+- **Vertical slices answer _how we should ship them_.**
+
+This keeps the architecture legible while avoiding a delivery plan that only moves horizontally through subsystems.
+
+## Capability Map (Workstreams)
 
 ## WS1 — Contracts and data plumbing
 
@@ -185,13 +198,71 @@ These constraints preserve organic self-tuning while preventing destructive drif
 - Snapshot tests by model version.
 - Determinism test repeated N runs with same seed/context.
 
+## Vertical Slice Delivery Plan
+
+### Slice 1 — Rich decision context with parity behavior
+
+**Goal**: deliver a richer end-to-end `DecisionContext` and trace model while preserving current action selection.
+
+**Touches capabilities**:
+- WS1 contracts and plumbing,
+- WS2 parity scoring foundation,
+- WS6 trace/versioning support.
+
+**Done when**:
+- AI receives actor/target/battle context,
+- decision traces expose the richer context,
+- legacy-equivalent action selection is preserved under transitional defaults.
+
+### Slice 2 — Intent-aware tactical behavior
+
+**Goal**: deliver the first visible decision-quality improvement, especially around finish/survive/control tradeoffs.
+
+**Touches capabilities**:
+- WS2 feature extraction,
+- WS3 intent-conditioned scoring,
+- WS6 rollout/testing gates.
+
+**Done when**:
+- behavior tests demonstrate improved survival/finish/control choices,
+- traces explain intent influence,
+- weak priors still allow learned residuals to dominate over time.
+
+### Slice 3 — Opponent-aware one-turn forecasting
+
+**Goal**: deliver lightweight anticipation so setup/control can be valued for near-future payoff.
+
+**Touches capabilities**:
+- WS2 feature extraction updates,
+- WS4 opponent prediction and one-turn projections,
+- WS6 determinism and trace coverage.
+
+**Done when**:
+- AI can estimate probable opponent next action,
+- projected incoming/outgoing damage/recovery appears in traces,
+- scenario tests prove projections change decisions in expected spots.
+
+### Slice 4 — Weak-prior learning progression
+
+**Goal**: deliver the Option B promise that repeated combat meaningfully improves policy from near-neutral priors.
+
+**Touches capabilities**:
+- WS5 learning integration,
+- WS6 rollout/model-gating,
+- plus the already-landed scoring and projection foundations.
+
+**Done when**:
+- deterministic training batches show measurable improvement from near-neutral priors,
+- learning remains bounded and stable,
+- rollout gates check parity, behavior, and progression together.
+
 ## Milestones and Timeline (single engineer estimate)
 
-1. **M1 (Week 1)**: WS1 + WS2 transitional parity foundation complete.
-2. **M2 (Week 2)**: WS3 intent scoring complete with behavior tests.
-3. **M3 (Week 3)**: WS4 one-turn projection complete.
-4. **M4 (Week 4)**: WS5 learning upgrades + weak-prior calibration complete.
-5. **M5 (Week 5, optional)**: run deterministic training leagues to confirm Option B policy improvement over priors.
+1. **M1 (Week 1)**: Slice 1 complete (WS1 + WS2 + WS6 parity plumbing).
+2. **M2 (Week 2)**: Slice 2 complete (WS2 + WS3 tactical behavior improvements).
+3. **M3 (Week 3)**: Slice 3 complete (WS2 + WS4 one-turn forecasting).
+4. **M4 (Week 4)**: Slice 4 complete (WS5 + WS6 learning progression gates).
+5. **M5 (Week 5, optional)**: extended deterministic training leagues and rebalance pass.
 
 ## File-Level Change Plan (expected)
 
@@ -244,7 +315,8 @@ These constraints preserve organic self-tuning while preventing destructive drif
 ## Rollout Strategy
 
 1. Ship `feature_v1` behind config flag, default to legacy.
-2. Run CI scenario matrix comparing legacy vs transitional parity.
-3. Enable `feature_v1` in test environment with trace logging.
-4. Reduce priors toward weak-prior defaults and validate deterministic training improvement.
-5. Promote `feature_v1` to default when parity, behavior, and learning-progression gates are green.
+2. Land Slice 1 and run CI scenario matrix comparing legacy vs transitional parity.
+3. Land Slice 2 and require behavior gates for finish/survive/control scenarios.
+4. Land Slice 3 and require projection-aware determinism and trace coverage.
+5. Land Slice 4, reduce priors toward weak-prior defaults, and validate deterministic learning progression.
+6. Promote `feature_v1` to default when parity, behavior, projection, and learning-progression gates are green.
