@@ -184,6 +184,39 @@ describe('combat simulation scenario matrix', () => {
     });
   });
 
+
+  describe('slice 2 tactical behavior', () => {
+    it('opens with a finishing action when the target is in execute range', () => {
+      const decisions: { round: number; actorId: string; targetId: string; trace: { selectedSkillId: string } }[] = [];
+      simulateBattle(
+        createInput({
+          seed: 1,
+          maxRounds: 1,
+          playerInitial: createCombatant({ entityId: '101', activeSkillIds: ['1001', '1002'] }),
+          enemyInitial: createCombatant({ entityId: '202', hp: 600, hpMax: 2100, activeSkillIds: ['1000', '1003'] }),
+          decisionLogger: (decision) => decisions.push(decision)
+        })
+      );
+
+      expect(decisions.find((decision) => decision.actorId === '101' && decision.round === 1)?.trace.selectedSkillId).toBe('1002');
+    });
+
+    it('opens with repair when the actor starts in a critical survival state', () => {
+      const decisions: { round: number; actorId: string; targetId: string; trace: { selectedSkillId: string } }[] = [];
+      simulateBattle(
+        createInput({
+          seed: 1,
+          maxRounds: 1,
+          playerInitial: createCombatant({ entityId: '101', hp: 500, hpMax: 2200, activeSkillIds: ['1004', '1005'] }),
+          enemyInitial: createCombatant({ entityId: '202', activeSkillIds: ['1001', '1002'] }),
+          decisionLogger: (decision) => decisions.push(decision)
+        })
+      );
+
+      expect(decisions.find((decision) => decision.actorId === '101' && decision.round === 1)?.trace.selectedSkillId).toBe('1005');
+    });
+  });
+
   describe('input contract and error handling', () => {
     it('fails fast for unknown skill identifiers in loadout', () => {
       expect(() =>
