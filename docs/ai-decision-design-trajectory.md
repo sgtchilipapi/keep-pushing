@@ -77,6 +77,8 @@ Under Option B:
 ### 1) Decision context expansion
 Introduce a read-only `DecisionContext` passed from battle engine to AI scorer.
 
+**Status**: completed on the current branch for the Slice 1 parity increment; actor/target/battle snapshots now flow into `chooseAction(...)`, and decision traces include a versioned `context` payload.
+
 ```ts
 export type DecisionContext = {
   actor: {
@@ -243,12 +245,12 @@ So the Option B goal is:
 
 ## Immediate Next Steps
 
-1. Land `DecisionContext` plumbing and AI trace v2 fields.
-2. Implement feature extraction that mirrors current behavior under **weak-prior defaults**.
-3. Add parity tests proving no behavior regression with the transitional defaults.
-4. Add a focused behavior suite for finish/survive/control/setup choices.
-5. Implement learning calibration batches that verify long-run policy movement away from priors.
-6. Implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
+1. ✅ Landed `DecisionContext` plumbing and AI trace v2 fields on the current branch.
+2. Next: implement feature extraction that mirrors current behavior under **weak-prior defaults**.
+3. Next: add parity tests proving no behavior regression with the transitional defaults.
+4. Next: add a focused behavior suite for finish/survive/control/setup choices.
+5. Next: implement learning calibration batches that verify long-run policy movement away from priors.
+6. Next: implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
 
 ## Related Documents
 

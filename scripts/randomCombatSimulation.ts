@@ -257,13 +257,19 @@ function hasDecisionLogFlag(argv: readonly string[]): boolean {
 function formatDecisionTrace(decision: DecisionLogEntry): string[] {
   const lines: string[] = [];
   const { round, actorId, targetId, trace } = decision;
-  const statusSummary = trace.target.statuses.length > 0 ? trace.target.statuses.join(', ') : 'none';
-  const actorCooldownSummary = Object.entries(trace.actorCooldowns)
+  const statusSummary = trace.context.target.statuses.length > 0 ? trace.context.target.statuses.join(', ') : 'none';
+  const actorCooldownSummary = Object.entries(trace.context.actor.cooldowns)
     .map(([skillId, cooldown]) => `${getSkillDef(skillId).skillName}:${cooldown}`)
     .join(', ');
 
   lines.push(`[R${round}] ${actorId} AI decision against ${targetId}`);
-  lines.push(`  target snapshot: hp ${trace.target.hp}/${trace.target.hpMax}, statuses: ${statusSummary}`);
+  lines.push(
+    `  trace ${trace.traceVersion} | round ${trace.context.battle.round}/${trace.context.battle.maxRounds} ` +
+      `(remaining ${trace.context.battle.roundsRemaining})`
+  );
+  lines.push(
+    `  target snapshot: ${trace.context.target.entityId} hp ${trace.context.target.hp}/${trace.context.target.hpMax}, statuses: ${statusSummary}`
+  );
   lines.push(`  actor cooldowns: ${actorCooldownSummary || 'none'}`);
   lines.push(`  candidate skills: ${trace.candidateSkillIds.join(', ')}`);
 

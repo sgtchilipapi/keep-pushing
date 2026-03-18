@@ -19,9 +19,33 @@ import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
  *       Re-design.
  */
 export type DecisionCombatantSnapshot = {
+  entityId: string;
+  archetypeId?: string;
   hp: number;
   hpMax: number;
   statuses: readonly StatusId[];
+  activeSkillIds?: readonly [string, string];
+  cooldowns?: Readonly<Record<string, number>>;
+};
+
+export type DecisionBattleSnapshot = {
+  round: number;
+  maxRounds: number;
+  roundsRemaining: number;
+};
+
+export type DecisionContext = {
+  actor: {
+    entityId: string;
+    archetypeId?: string;
+    hp: number;
+    hpMax: number;
+    statuses: readonly StatusId[];
+    activeSkillIds: readonly [string, string];
+    cooldowns: Readonly<Record<string, number>>;
+  };
+  target: DecisionCombatantSnapshot;
+  battle: DecisionBattleSnapshot;
 };
 
 /**
@@ -45,9 +69,11 @@ export type SkillScoreBreakdown = {
 };
 
 export type DecisionTrace = {
+  traceVersion: 'decision-trace.v2';
   actorActiveSkillIds: readonly [string, string];
   actorCooldowns: Record<string, number>;
   target: DecisionCombatantSnapshot;
+  context: DecisionContext;
   candidateSkillIds: readonly string[];
   scores: readonly SkillScoreBreakdown[];
   selectedSkillId: string;
@@ -161,20 +187,17 @@ function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWei
  *
  * This function does not mutate cooldown state or battle entities.
  *
- * @param actorActiveSkillIds - The actor's equipped active skill identifiers.
- * @param actorCooldowns - Remaining cooldown turns keyed by skill identifier.
- * @param target - Read-only snapshot of the current enemy target.
+ * @param context - Read-only actor/target/battle snapshot for deterministic scoring.
  * @param skillWeights - Learned per-skill preference weights for the actor archetype.
  * @returns The single highest-priority action candidate.
  * @throws If a candidate skill identifier has no registered definition.
  */
 export function chooseAction(
-  actorActiveSkillIds: readonly [string, string],
-  actorCooldowns: Record<string, number>,
-  target: DecisionCombatantSnapshot,
+  context: DecisionContext,
   skillWeights: ArchetypeSkillWeights = {},
   decisionLogger?: DecisionLogger
 ): CandidateAction {
+  const { actor, target } = context;
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
   /**
@@ -185,8 +208,8 @@ export function chooseAction(
    * 
    *        This might sound interesting but might be too complex for MVP. But leaving a note for this.
    */
-  for (const activeSkillId of actorActiveSkillIds) {
-    if ((actorCooldowns[activeSkillId] ?? 0) === 0) {
+  for (const activeSkillId of actor.activeSkillIds) {
+    if ((actor.cooldowns[activeSkillId] ?? 0) === 0) {
       candidateSkillIds.push(activeSkillId);
     }
   }
@@ -203,9 +226,11 @@ export function chooseAction(
     });
 
   decisionLogger?.({
-    actorActiveSkillIds,
-    actorCooldowns: { ...actorCooldowns },
+    traceVersion: 'decision-trace.v2',
+    actorActiveSkillIds: actor.activeSkillIds,
+    actorCooldowns: { ...actor.cooldowns },
     target,
+    context,
     candidateSkillIds,
     scores: ordered.map((entry) => entry.score),
     selectedSkillId: ordered[0].skillId

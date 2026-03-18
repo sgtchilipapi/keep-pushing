@@ -4,7 +4,7 @@ This document tracks candidate future improvements across combat architecture, A
 
 ## Entry Index
 - [ ] Entry 1: Canonical Combatant Contract and Adapter Layer
-- [ ] Entry 2: AI Decision System Redesign Trajectory
+- [~] Entry 2: AI Decision System Redesign Trajectory
 
 ## Entry 1: Split Accuracy and Evade Roll Resolution
 
@@ -35,9 +35,9 @@ Consider replacing the single combined hit-threshold check with two independent 
 Summarize and execute a phased redesign of battle AI decision-making so scoring is feature-driven, intent-aware, and still deterministic/testable. For full rationale and detailed phase breakdown, see `docs/ai-decision-design-trajectory.md`.
 
 ### Current State
-- AI uses a single-pass heuristic score over available skills.
-- Skill ranking relies on `basePower`, hardcoded bonuses/penalties, and a learned residual term.
-- Tactical context is shallow (mostly target-centric), with limited support for setup/future-turn value.
+- Slice 1 is complete on the current branch: AI now receives a deterministic `DecisionContext` containing actor, target, and battle snapshots, and emits `decision-trace.v2` logs with the richer context payload.
+- Skill ranking still relies on `basePower`, hardcoded bonuses/penalties, and a learned residual term, so the scoring model is still in the parity phase.
+- Tactical behavior is still shallow overall, with no explicit intent layer or one-turn foresight yet.
 
 ### Desired Implementation
 - Expand to a richer deterministic `DecisionContext` (actor, target, cooldowns, statuses, turn/tempo).

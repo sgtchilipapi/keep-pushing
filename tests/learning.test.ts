@@ -141,9 +141,27 @@ describe('learning', () => {
     );
 
     const weightedChoice = chooseAction(
-      ['1001', '1002'],
-      { 1001: 0, 1002: 0 },
-      { hp: 4000, hpMax: 6000, statuses: [] },
+      {
+        actor: {
+          entityId: 'player',
+          hp: 6000,
+          hpMax: 6000,
+          statuses: [],
+          activeSkillIds: ['1001', '1002'],
+          cooldowns: { 1001: 0, 1002: 0 }
+        },
+        target: {
+          entityId: 'enemy',
+          hp: 4000,
+          hpMax: 6000,
+          statuses: []
+        },
+        battle: {
+          round: 1,
+          maxRounds: 10,
+          roundsRemaining: 9
+        }
+      },
       { 1001: 100, 1002: -100 }
     );
 
