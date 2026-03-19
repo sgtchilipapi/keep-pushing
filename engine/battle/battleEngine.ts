@@ -201,6 +201,10 @@ export function simulateBattle(input: BattleInput): BattleResult {
             entityId: actor.entityId,
             hp: actor.hp,
             hpMax: actor.hpMax,
+            atk: actor.atk,
+            def: actor.def,
+            accuracyBP: actor.accuracyBP,
+            evadeBP: actor.evadeBP,
             statuses: getActiveStatusIds(actor),
             activeSkillIds: actor.activeSkillIds,
             cooldowns: { ...actor.cooldowns }
@@ -209,6 +213,10 @@ export function simulateBattle(input: BattleInput): BattleResult {
             entityId: target.entityId,
             hp: target.hp,
             hpMax: target.hpMax,
+            atk: target.atk,
+            def: target.def,
+            accuracyBP: target.accuracyBP,
+            evadeBP: target.evadeBP,
             statuses: getActiveStatusIds(target),
             activeSkillIds: target.activeSkillIds,
             cooldowns: { ...target.cooldowns }
