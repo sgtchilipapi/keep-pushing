@@ -333,8 +333,9 @@ function formatDecisionTrace(decision: DecisionLogEntry): string[] {
     lines.push(formatScoreHeadline(score, trace.selectedSkillId));
     lines.push(
       colorize(
-        `    totals | prior=${score.weightBreakdown.priorContributionTotal} intent=${score.weightBreakdown.intentContributionTotal} ` +
-          `learned=${score.weightBreakdown.learnedWeight} feature=${score.weightBreakdown.featureContributionTotal} total=${score.weightBreakdown.totalScore}`,
+        `    totals | feature subtotal=${score.weightBreakdown.featureContributionTotal} ` +
+          `[prior=${score.weightBreakdown.priorContributionTotal} + intent=${score.weightBreakdown.intentContributionTotal}] ` +
+          `| learned=${score.weightBreakdown.learnedWeight} | total=${score.weightBreakdown.totalScore}`,
         score.skillId === trace.selectedSkillId ? 'selected' : 'neutral'
       )
     );
