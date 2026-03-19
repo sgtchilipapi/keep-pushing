@@ -274,6 +274,8 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 
 **Goal**: deliver lightweight anticipation so setup/control can be valued for near-future payoff.
 
+**Status**: completed on the current branch via deterministic mirrored opponent prediction, bounded projection-derived features, and `decision-trace.v4` logging/test coverage.
+
 **Touches capabilities**:
 - WS2 feature extraction updates,
 - WS4 opponent prediction and one-turn projections,

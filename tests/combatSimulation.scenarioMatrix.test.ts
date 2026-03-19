@@ -185,6 +185,59 @@ describe('combat simulation scenario matrix', () => {
   });
 
 
+
+  describe('slice 3 forecast behavior', () => {
+    it('uses barrier to blunt a predicted incoming finishing blow', () => {
+      const decisions: { round: number; actorId: string; targetId: string; trace: { selectedSkillId: string; predictedOpponentSkillId: string } }[] = [];
+      simulateBattle(
+        createInput({
+          seed: 1,
+          maxRounds: 1,
+          playerInitial: createCombatant({
+            entityId: '101',
+            hp: 700,
+            hpMax: 2200,
+            activeSkillIds: ['1004', '1000']
+          }),
+          enemyInitial: createCombatant({
+            entityId: '202',
+            hp: 2100,
+            hpMax: 2100,
+            activeSkillIds: ['1002', '1000']
+          }),
+          decisionLogger: (decision) => decisions.push(decision)
+        })
+      );
+
+      expect(decisions.find((decision) => decision.actorId === '101' && decision.round === 1)?.trace).toEqual(
+        expect.objectContaining({
+          selectedSkillId: '1004',
+          predictedOpponentSkillId: '1002'
+        })
+      );
+    });
+
+    it('uses volt strike to deny a predicted high-damage attack on the next turn', () => {
+      const decisions: { round: number; actorId: string; targetId: string; trace: { selectedSkillId: string; predictedOpponentSkillId: string } }[] = [];
+      simulateBattle(
+        createInput({
+          seed: 1,
+          maxRounds: 1,
+          playerInitial: createCombatant({ entityId: '101', activeSkillIds: ['1001', '1000'] }),
+          enemyInitial: createCombatant({ entityId: '202', activeSkillIds: ['1002', '1000'] }),
+          decisionLogger: (decision) => decisions.push(decision)
+        })
+      );
+
+      expect(decisions.find((decision) => decision.actorId === '101' && decision.round === 1)?.trace).toEqual(
+        expect.objectContaining({
+          selectedSkillId: '1001',
+          predictedOpponentSkillId: '1002'
+        })
+      );
+    });
+  });
+
   describe('slice 2 tactical behavior', () => {
     it('opens with a finishing action when the target is in execute range', () => {
       const decisions: { round: number; actorId: string; targetId: string; trace: { selectedSkillId: string } }[] = [];
