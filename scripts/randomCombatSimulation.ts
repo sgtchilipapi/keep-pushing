@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { simulateBattle, type CombatantSnapshot } from '../engine/battle/battleEngine';
-import type { DecisionTrace } from '../engine/battle/aiDecision';
+import type { DecisionTrace, FeatureContribution, IntentId, SkillScoreBreakdown } from '../engine/battle/aiDecision';
 import { ALL_SKILL_IDS, BASIC_ATTACK_SKILL_ID, getSkillDef } from '../engine/battle/skillRegistry';
 import { ALL_PASSIVE_IDS, getPassiveDef } from '../engine/battle/passiveRegistry';
 import type { BattleEvent } from '../types/battle';
@@ -13,6 +13,14 @@ const COLORS = {
   cooldown: '\x1b[33m',
   death: '\x1b[90m',
   summary: '\x1b[32m',
+  decision: '\x1b[96m',
+  selected: '\x1b[92m',
+  positive: '\x1b[32m',
+  negative: '\x1b[31m',
+  neutral: '\x1b[37m',
+  intent: '\x1b[94m',
+  projection: '\x1b[95m',
+  dim: '\x1b[2m',
   reset: '\x1b[0m'
 } as const;
 
@@ -73,6 +81,49 @@ function createRandomCharacter(entityId: string, name: string): CombatantSnapsho
 
 function colorize(text: string, color: keyof typeof COLORS): string {
   return `${COLORS[color]}${text}${COLORS.reset}`;
+}
+
+function colorizeSignedNumber(value: number): string {
+  if (value > 0) {
+    return colorize(`${value}`, 'positive');
+  }
+
+  if (value < 0) {
+    return colorize(`${value}`, 'negative');
+  }
+
+  return colorize('0', 'dim');
+}
+
+function formatIntentTotals(perIntentTotals: Record<IntentId, number>): string {
+  return (Object.entries(perIntentTotals) as [IntentId, number][])
+    .map(([intentId, value]) => `${colorize(intentId, 'intent')}=${colorizeSignedNumber(value)}`)
+    .join(', ');
+}
+
+function formatContributionLine(featureContribution: FeatureContribution): string {
+  const intentDetails = Object.entries(featureContribution.intentBreakdown)
+    .map(([intentId, contribution]) => `${colorize(intentId, 'intent')}:${colorizeSignedNumber(contribution ?? 0)}`)
+    .join(', ');
+
+  return [
+    `      • ${featureContribution.featureId}`,
+    `value=${featureContribution.value}`,
+    `prior=${colorizeSignedNumber(featureContribution.priorContribution)}`,
+    `intent=${colorizeSignedNumber(featureContribution.intentContribution)}`,
+    `total=${colorizeSignedNumber(featureContribution.totalContribution)}`,
+    intentDetails ? `| ${intentDetails}` : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function formatScoreHeadline(score: SkillScoreBreakdown, selectedSkillId: string): string {
+  const skillLabel = `${getSkillDef(score.skillId).skillName} (${score.skillId})`;
+  const prefix = score.skillId === selectedSkillId ? colorize('  ★', 'selected') : colorize('  -', 'dim');
+  const total = score.skillId === selectedSkillId ? colorizeSignedNumber(score.totalScore) : `${score.totalScore}`;
+
+  return `${prefix} ${skillLabel} => total ${total}`;
 }
 
 function getActionTargetLabel(event: Extract<BattleEvent, { type: 'ACTION' }>): string {
@@ -215,7 +266,7 @@ function applyEvent(resourcesByEntityId: Record<string, RuntimeResources>, event
 }
 
 function formatRoundResources(round: number, entities: CombatantSnapshot[], resourcesByEntityId: Record<string, RuntimeResources>): string[] {
-  const lines = [`Resources after round ${round}:`];
+  const lines = [colorize(`Resources after round ${round}:`, 'summary')];
 
   for (const entity of entities) {
     const resources = resourcesByEntityId[entity.entityId];
@@ -227,7 +278,10 @@ function formatRoundResources(round: number, entities: CombatantSnapshot[], reso
       .join(', ');
 
     lines.push(
-      `  - ${entity.name ?? entity.entityId} | HP ${resources.hp}/${resources.hpMax} | CD [${cooldownSummary}] | Status [${statusSummary || 'none'}]`
+      colorize(
+        `  - ${entity.name ?? entity.entityId} | HP ${resources.hp}/${resources.hpMax} | CD [${cooldownSummary}] | Status [${statusSummary || 'none'}]`,
+        'summary'
+      )
     );
   }
 
@@ -246,8 +300,8 @@ function printCharacter(label: string, character: CombatantSnapshot): void {
       'summary'
     )
   );
-  console.log(`  Skills: ${skills}`);
-  console.log(`  Passives: ${passives || 'none'}`);
+  console.log(colorize(`  Skills: ${skills}`, 'neutral'));
+  console.log(colorize(`  Passives: ${passives || 'none'}`, 'neutral'));
 }
 
 function hasDecisionLogFlag(argv: readonly string[]): boolean {
@@ -262,26 +316,49 @@ function formatDecisionTrace(decision: DecisionLogEntry): string[] {
     .map(([skillId, cooldown]) => `${getSkillDef(skillId).skillName}:${cooldown}`)
     .join(', ');
 
-  lines.push(`[R${round}] ${actorId} AI decision against ${targetId}`);
+  lines.push(colorize(`[R${round}] ${actorId} AI decision against ${targetId}`, 'decision'));
   lines.push(
-    `  trace ${trace.traceVersion} | round ${trace.context.battle.round}/${trace.context.battle.maxRounds} ` +
-      `(remaining ${trace.context.battle.roundsRemaining})`
+    colorize(
+      `  trace ${trace.traceVersion} | round ${trace.context.battle.round}/${trace.context.battle.maxRounds} ` +
+        `(remaining ${trace.context.battle.roundsRemaining})`,
+      'dim'
+    )
   );
-  lines.push(
-    `  target snapshot: ${trace.context.target.entityId} hp ${trace.context.target.hp}/${trace.context.target.hpMax}, statuses: ${statusSummary}`
-  );
-  lines.push(`  actor cooldowns: ${actorCooldownSummary || 'none'}`);
-  lines.push(`  candidate skills: ${trace.candidateSkillIds.join(', ')}`);
+  lines.push(colorize(`  target snapshot: ${trace.context.target.entityId} hp ${trace.context.target.hp}/${trace.context.target.hpMax}, statuses: ${statusSummary}`, 'neutral'));
+  lines.push(colorize(`  actor cooldowns: ${actorCooldownSummary || 'none'}`, 'neutral'));
+  lines.push(colorize(`  predicted opponent skill: ${getSkillDef(trace.predictedOpponentSkillId).skillName} (${trace.predictedOpponentSkillId})`, 'projection'));
+  lines.push(colorize(`  candidate skills: ${trace.candidateSkillIds.join(', ')}`, 'neutral'));
 
   for (const score of trace.scores) {
+    lines.push(formatScoreHeadline(score, trace.selectedSkillId));
     lines.push(
-      `  - ${getSkillDef(score.skillId).skillName} (${score.skillId}) => total ${score.totalScore} ` +
-        `[base ${score.basePower}, active ${score.activeSkillBonus}, execute ${score.executeBonus}, ` +
-        `stun ${score.stunPenalty}, shieldbreak ${score.shieldbreakBonus}, learned ${score.learnedWeight}]`
+      colorize(
+        `    totals | prior=${score.weightBreakdown.priorContributionTotal} intent=${score.weightBreakdown.intentContributionTotal} ` +
+          `learned=${score.weightBreakdown.learnedWeight} feature=${score.weightBreakdown.featureContributionTotal} total=${score.weightBreakdown.totalScore}`,
+        score.skillId === trace.selectedSkillId ? 'selected' : 'neutral'
+      )
     );
+    lines.push(`    intents | ${formatIntentTotals(score.weightBreakdown.perIntentContributionTotals)}`);
+    lines.push(
+      colorize(
+        `    projections | outgoing=${score.projections.projectedOutgoingDamage} incoming=${score.projections.projectedIncomingDamage} ` +
+          `recovery=${score.projections.projectedRecovery} net=${score.projections.projectedNetPressure} ` +
+          `statusSwing=${score.projections.projectedStatusSwing}`,
+        'projection'
+      )
+    );
+
+    for (const featureContribution of score.featureContributions) {
+      lines.push(formatContributionLine(featureContribution));
+    }
   }
 
-  lines.push(`  selected: ${getSkillDef(trace.selectedSkillId).skillName} (${trace.selectedSkillId})`);
+  lines.push(
+    colorize(
+      `  selected: ${getSkillDef(trace.selectedSkillId).skillName} (${trace.selectedSkillId}) => ${trace.selectedScore.totalScore}`,
+      'selected'
+    )
+  );
 
   return lines;
 }
@@ -302,16 +379,16 @@ function buildDecisionDocument(
     [enemy.entityId]: initializeResources(enemy)
   };
 
-  lines.push('# Random Combat Simulation Decision Document');
+  lines.push(colorize('# Random Combat Simulation Decision Document', 'summary'));
   lines.push('');
-  lines.push(`Seed: ${seed}`);
-  lines.push(`Player: ${player.name} (${player.entityId})`);
-  lines.push(`Enemy: ${enemy.name} (${enemy.entityId})`);
+  lines.push(colorize(`Seed: ${seed}`, 'summary'));
+  lines.push(colorize(`Player: ${player.name} (${player.entityId})`, 'neutral'));
+  lines.push(colorize(`Enemy: ${enemy.name} (${enemy.entityId})`, 'neutral'));
   lines.push('');
-  lines.push('## AI Decision Trace');
+  lines.push(colorize('## AI Decision Trace', 'decision'));
 
   if (decisionLogs.length === 0) {
-    lines.push('No decision logs captured.');
+    lines.push(colorize('No decision logs captured.', 'death'));
   }
 
   for (const decision of decisionLogs) {
@@ -319,10 +396,11 @@ function buildDecisionDocument(
     lines.push('');
   }
 
-  lines.push('## Battle Event Timeline');
+  lines.push(colorize('## Battle Event Timeline', 'summary'));
   for (const event of battleEvents) {
     applyEvent(resourcesByEntityId, event);
-    lines.push(`[R${event.round}] ${formatEvent(event).message}`);
+    const { message, color } = formatEvent(event);
+    lines.push(colorize(`[R${event.round}] ${message}`, color));
 
     if (event.type === 'ROUND_END') {
       lines.push(...formatRoundResources(event.round, entities, resourcesByEntityId));
@@ -330,8 +408,8 @@ function buildDecisionDocument(
   }
 
   lines.push('');
-  lines.push(`Winner: ${winnerEntityId}`);
-  lines.push(`Rounds Played: ${roundsPlayed}`);
+  lines.push(colorize(`Winner: ${winnerEntityId}`, 'summary'));
+  lines.push(colorize(`Rounds Played: ${roundsPlayed}`, 'summary'));
 
   return lines.join('\n');
 }
@@ -364,7 +442,7 @@ function main(): void {
   }
 
   console.log(colorize(`\n=== Random Combat Simulation ===`, 'summary'));
-  console.log(`Seed: ${seed}`);
+  console.log(colorize(`Seed: ${seed}`, 'summary'));
   printCharacter('Player', player);
   printCharacter('Enemy', enemy);
   console.log(colorize(`\n=== Battle Log ===`, 'summary'));
@@ -382,7 +460,7 @@ function main(): void {
 
     if (event.type === 'ROUND_END') {
       for (const resourceLine of formatRoundResources(event.round, entities, resourcesByEntityId)) {
-        console.log(colorize(resourceLine, 'summary'));
+        console.log(resourceLine);
       }
     }
   }
