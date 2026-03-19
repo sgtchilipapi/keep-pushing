@@ -301,6 +301,8 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 
 ### Slice 4 — Weak-prior learning progression
 
+**Status**: completed on the current branch via near-neutral learning-state initialization, bounded feature-residual updates with confidence/decay, `decision-trace.v6` learned-feature accounting, and deterministic regression-league progression coverage.
+
 **Goal**: deliver the Option B promise that repeated combat meaningfully improves policy from near-neutral priors.
 
 **Touches capabilities**:
@@ -396,8 +398,8 @@ These are intentionally **post-slice** follow-ons, not part of the current Slice
 - Deterministic behavior verified for same seed and model version.
 - Transitional parity achieved for `feature_v1` defaults in baseline scenarios.
 - Intent behavior tests cover at least 5 tactical scenarios.
-- Trace output explains selected action with named feature contributions.
-- Documentation updated with tuning guidance and migration notes.
+- Trace output explains selected action with named feature contributions, including learned feature residuals in `decision-trace.v6`.
+- Documentation updated with tuning guidance and migration notes, including Slice 4 weak-prior progression notes.
 
 ## Risks and Mitigations
 
@@ -430,5 +432,5 @@ These are intentionally **post-slice** follow-ons, not part of the current Slice
 2. ✅ Slice 1 landed: context + trace v2 plumbing and scenario-matrix parity checks are complete on the current branch.
 3. Land Slice 2 and require behavior gates for finish/survive/control scenarios.
 4. Land Slice 3 and require projection-aware determinism and trace coverage.
-5. Land Slice 4, reduce priors toward weak-prior defaults, and validate deterministic learning progression.
+5. ✅ Slice 4 landed: weak-prior learning state, bounded feature residuals, and deterministic learning-progression gates are complete on the current branch.
 6. Promote `feature_v1` to default when parity, behavior, projection, and learning-progression gates are green.

@@ -47,7 +47,7 @@ describe('ai decision logging', () => {
     expect(traces).toHaveLength(1);
 
     const [trace] = traces;
-    expect(trace.traceVersion).toBe('decision-trace.v5');
+    expect(trace.traceVersion).toBe('decision-trace.v6');
     expect(trace.candidateSkillIds).toEqual(['1000', '1001', '1002']);
     expect(trace.selectedSkillId).toBe('1002');
     expect(trace.selectedScore.skillId).toBe('1002');
@@ -81,6 +81,7 @@ describe('ai decision logging', () => {
           priorContributionTotal: expect.any(Number),
           intentContributionTotal: expect.any(Number),
           learnedWeight: expect.any(Number),
+          learnedFeatureContributionTotal: expect.any(Number),
           perIntentContributionTotals: expect.objectContaining({
             finish: expect.any(Number),
             survive: expect.any(Number),
@@ -107,7 +108,8 @@ describe('ai decision logging', () => {
           value: 1,
           priorContribution: 120,
           intentBreakdown: expect.objectContaining({ finish: 1120 }),
-          intentContribution: 1120
+          intentContribution: 1120,
+          learnedContribution: expect.any(Number)
         }),
         expect.objectContaining({
           featureId: 'projectedOutgoingPressure',
