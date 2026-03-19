@@ -9,9 +9,33 @@ export const MIN_LEARNING_WEIGHT = -1000;
  */
 export const MAX_LEARNING_WEIGHT = 1000;
 /**
+ * Lower saturation bound applied to learned feature residual values.
+ */
+export const MIN_FEATURE_LEARNING_WEIGHT = -250;
+/**
+ * Upper saturation bound applied to learned feature residual values.
+ */
+export const MAX_FEATURE_LEARNING_WEIGHT = 250;
+/**
  * Default per-match adjustment strength used when updating skill weights.
  */
 export const DEFAULT_LEARNING_RATE = 150;
+/**
+ * Default per-match adjustment strength used when updating feature residuals.
+ */
+export const DEFAULT_FEATURE_LEARNING_RATE = 60;
+/**
+ * Default decay applied to learned values between training batches.
+ */
+export const DEFAULT_LEARNING_DECAY_BP = 9750;
+/**
+ * Default confidence gain applied when a feature is reinforced during training.
+ */
+export const DEFAULT_CONFIDENCE_STEP_BP = 2000;
+/**
+ * Near-neutral authored-weight scale used by Slice 4 feature-model training harnesses.
+ */
+export const DEFAULT_WEAK_PRIOR_SCALE_BP = 2500;
 
 /**
  * Persistent preference weights keyed by skill identifier for a combat archetype.
@@ -19,6 +43,20 @@ export const DEFAULT_LEARNING_RATE = 150;
  * Positive values increase AI selection score, while negative values suppress usage.
  */
 export type ArchetypeSkillWeights = Record<string, number>;
+export type LearnedFeatureWeights = Record<string, number>;
+export type LearnedFeatureConfidence = Record<string, number>;
+
+export type ArchetypeDecisionModel = ArchetypeSkillWeights | ArchetypeLearningState;
+
+export type ArchetypeLearningState = {
+  skillWeights: ArchetypeSkillWeights;
+  featureWeights: LearnedFeatureWeights;
+  featureConfidence: LearnedFeatureConfidence;
+  priorWeightScaleBP: number;
+  decayBP: number;
+  featureLearningRate: number;
+  confidenceStepBP: number;
+};
 
 /**
  * Aggregated impact metrics attributed to one skill over a battle.
@@ -33,48 +71,91 @@ export type SkillContribution = {
  */
 export type SkillContributions = Record<string, SkillContribution>;
 
-/**
- * Clamps a weight value into the supported learning range.
- */
+export type FeatureContribution = {
+  totalValue: number;
+  selections: number;
+};
+
+export type FeatureContributions = Record<string, FeatureContribution>;
+
+function isLearningState(model: ArchetypeDecisionModel): model is ArchetypeLearningState {
+  return (
+    typeof model === 'object' &&
+    model !== null &&
+    'skillWeights' in model &&
+    'featureWeights' in model &&
+    'featureConfidence' in model
+  );
+}
+
 function clampWeight(weight: number): number {
   return Math.min(MAX_LEARNING_WEIGHT, Math.max(MIN_LEARNING_WEIGHT, weight));
 }
 
-/**
- * Reads a learned weight for a skill and normalizes it to valid bounds.
- *
- * Missing entries are treated as neutral preference.
- *
- * @param skillWeights - Stored archetype weight table.
- * @param skillId - Skill identifier to look up.
- * @returns The clamped learned preference for the requested skill.
- */
+function clampFeatureWeight(weight: number): number {
+  return Math.min(MAX_FEATURE_LEARNING_WEIGHT, Math.max(MIN_FEATURE_LEARNING_WEIGHT, weight));
+}
+
+function clampBasisPoints(value: number): number {
+  return Math.min(10000, Math.max(0, value));
+}
+
+function applyDecay(value: number, decayBP: number): number {
+  return Math.trunc((value * decayBP) / 10000);
+}
+
+export function createLearningState(overrides: Partial<ArchetypeLearningState> = {}): ArchetypeLearningState {
+  return {
+    skillWeights: overrides.skillWeights ?? {},
+    featureWeights: overrides.featureWeights ?? {},
+    featureConfidence: overrides.featureConfidence ?? {},
+    priorWeightScaleBP: overrides.priorWeightScaleBP ?? DEFAULT_WEAK_PRIOR_SCALE_BP,
+    decayBP: overrides.decayBP ?? DEFAULT_LEARNING_DECAY_BP,
+    featureLearningRate: overrides.featureLearningRate ?? DEFAULT_FEATURE_LEARNING_RATE,
+    confidenceStepBP: overrides.confidenceStepBP ?? DEFAULT_CONFIDENCE_STEP_BP
+  };
+}
+
+export function getSkillWeights(model: ArchetypeDecisionModel): ArchetypeSkillWeights {
+  return isLearningState(model) ? model.skillWeights : model;
+}
+
+export function getFeatureWeights(model: ArchetypeDecisionModel): LearnedFeatureWeights {
+  return isLearningState(model) ? model.featureWeights : {};
+}
+
+export function getFeatureConfidence(model: ArchetypeDecisionModel): LearnedFeatureConfidence {
+  return isLearningState(model) ? model.featureConfidence : {};
+}
+
+export function getPriorWeightScaleBP(model: ArchetypeDecisionModel): number {
+  return isLearningState(model) ? clampBasisPoints(model.priorWeightScaleBP) : 10000;
+}
+
 export function getLearnedWeight(skillWeights: ArchetypeSkillWeights, skillId: string): number {
   return clampWeight(skillWeights[skillId] ?? 0);
 }
 
-/**
- * Produces the additive AI scoring term contributed by learned preference data.
- *
- * @param skillWeights - Stored archetype weight table.
- * @param skillId - Skill identifier being scored.
- * @returns The clamped score modifier to add to heuristic skill scoring.
- */
-export function scoreLearnedWeightTerm(skillWeights: ArchetypeSkillWeights, skillId: string): number {
-  return getLearnedWeight(skillWeights, skillId);
+export function scoreLearnedWeightTerm(model: ArchetypeDecisionModel, skillId: string): number {
+  return getLearnedWeight(getSkillWeights(model), skillId);
 }
 
-/**
- * Reconstructs per-skill performance contributions from an actor's battle events.
- *
- * Damage and applied-status turns are attributed to the most recent ACTION event
- * emitted by each actor, which assumes subsequent DAMAGE/STATUS events were caused
- * by that selected skill.
- *
- * @param events - Ordered battle event stream from a completed or partial match.
- * @param actorId - Actor whose skill contributions should be extracted.
- * @returns Contribution totals keyed by skill identifier.
- */
+export function scoreLearnedFeatureTerm(
+  model: ArchetypeDecisionModel,
+  featureId: string,
+  featureValue: number
+): { learnedWeight: number; confidenceBP: number; contribution: number } {
+  if (featureValue === 0 || !isLearningState(model)) {
+    return { learnedWeight: 0, confidenceBP: 0, contribution: 0 };
+  }
+
+  const learnedWeight = clampFeatureWeight(model.featureWeights[featureId] ?? 0);
+  const confidenceBP = clampBasisPoints(model.featureConfidence[featureId] ?? 0);
+  const contribution = Math.trunc((featureValue * learnedWeight * confidenceBP) / 10000);
+
+  return { learnedWeight, confidenceBP, contribution };
+}
+
 export function buildSkillContributions(events: readonly BattleEvent[], actorId: string): SkillContributions {
   const contributions: SkillContributions = {};
   const latestActionSkillByActor: Record<string, string> = {};
@@ -106,23 +187,27 @@ export function buildSkillContributions(events: readonly BattleEvent[], actorId:
   return contributions;
 }
 
-/**
- * Updates learned skill preferences using normalized battle contributions and outcome.
- *
- * Each contributing skill receives a signed adjustment derived from dealt damage and
- * applied status duration. Winning increases preference and losing decreases it.
- * Updated weights are clamped into the configured learning bounds.
- *
- * This function is pure and returns a new weight map.
- *
- * @param params - Update inputs including current weights, contributions, and match context.
- * @param params.currentSkillWeights - Existing learned weights for the archetype.
- * @param params.skillContributions - Per-skill contribution totals from the battle.
- * @param params.enemyHpMax - Enemy maximum HP used to normalize damage influence.
- * @param params.didWin - Whether the actor won the battle.
- * @param params.learningRate - Optional override for adjustment intensity.
- * @returns A new skill-weight map with applied learning deltas.
- */
+export function buildFeatureContributions(
+  traces: ReadonlyArray<{ selectedSkillId: string; selectedScore: { skillId: string; features: Record<string, number> } }>
+): FeatureContributions {
+  const contributions: FeatureContributions = {};
+
+  for (const trace of traces) {
+    if (trace.selectedScore.skillId !== trace.selectedSkillId) {
+      continue;
+    }
+
+    for (const [featureId, value] of Object.entries(trace.selectedScore.features)) {
+      if (value === 0) continue;
+      const entry = (contributions[featureId] ??= { totalValue: 0, selections: 0 });
+      entry.totalValue += value;
+      entry.selections += 1;
+    }
+  }
+
+  return contributions;
+}
+
 export function updateSkillWeights(params: {
   currentSkillWeights: ArchetypeSkillWeights;
   skillContributions: SkillContributions;
@@ -146,4 +231,62 @@ export function updateSkillWeights(params: {
   }
 
   return nextSkillWeights;
+}
+
+export function updateLearningState(params: {
+  currentModel: ArchetypeLearningState;
+  skillContributions: SkillContributions;
+  featureContributions: FeatureContributions;
+  enemyHpMax: number;
+  didWin: boolean;
+  learningRate?: number;
+  featureLearningRate?: number;
+  decayBP?: number;
+  confidenceStepBP?: number;
+}): ArchetypeLearningState {
+  const currentModel = createLearningState(params.currentModel);
+  const decayBP = clampBasisPoints(params.decayBP ?? currentModel.decayBP);
+  const confidenceStepBP = clampBasisPoints(params.confidenceStepBP ?? currentModel.confidenceStepBP);
+  const featureLearningRate = params.featureLearningRate ?? currentModel.featureLearningRate;
+  const sign = params.didWin ? 1 : -1;
+  const nextSkillWeights = updateSkillWeights({
+    currentSkillWeights: currentModel.skillWeights,
+    skillContributions: params.skillContributions,
+    enemyHpMax: params.enemyHpMax,
+    didWin: params.didWin,
+    learningRate: params.learningRate
+  });
+  const nextFeatureWeights: LearnedFeatureWeights = {};
+  const nextFeatureConfidence: LearnedFeatureConfidence = {};
+  const featureIds = new Set([...Object.keys(currentModel.featureWeights), ...Object.keys(params.featureContributions)]);
+
+  for (const featureId of featureIds) {
+    const decayedWeight = applyDecay(currentModel.featureWeights[featureId] ?? 0, decayBP);
+    const decayedConfidence = clampBasisPoints(applyDecay(currentModel.featureConfidence[featureId] ?? 0, decayBP));
+    const contribution = params.featureContributions[featureId];
+
+    if (contribution === undefined) {
+      if (decayedWeight !== 0) nextFeatureWeights[featureId] = clampFeatureWeight(decayedWeight);
+      if (decayedConfidence !== 0) nextFeatureConfidence[featureId] = decayedConfidence;
+      continue;
+    }
+
+    const normalizedValue = Math.max(1, Math.trunc((contribution.totalValue * 1000) / Math.max(1, contribution.selections)));
+    const delta = sign * Math.trunc((featureLearningRate * normalizedValue) / 1000);
+    const nextWeight = clampFeatureWeight(decayedWeight + delta);
+    const nextConfidence = clampBasisPoints(decayedConfidence + confidenceStepBP);
+
+    if (nextWeight !== 0) nextFeatureWeights[featureId] = nextWeight;
+    if (nextConfidence !== 0) nextFeatureConfidence[featureId] = nextConfidence;
+  }
+
+  return {
+    ...currentModel,
+    skillWeights: nextSkillWeights,
+    featureWeights: nextFeatureWeights,
+    featureConfidence: nextFeatureConfidence,
+    decayBP,
+    featureLearningRate,
+    confidenceStepBP
+  };
 }

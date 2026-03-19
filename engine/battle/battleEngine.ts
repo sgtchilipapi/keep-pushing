@@ -8,7 +8,7 @@ import { getStatusDef, isStatusId, type StatusId } from './statuses/statusRegist
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/resolverRegistry';
 import type { StatusResolvePhase } from './statuses/types';
-import type { ArchetypeSkillWeights } from './learning';
+import type { ArchetypeDecisionModel } from './learning';
 import type { BattleEvent, BattleResult } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
@@ -19,8 +19,8 @@ export type BattleInput = {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
-  playerSkillWeights?: ArchetypeSkillWeights;
-  enemySkillWeights?: ArchetypeSkillWeights;
+  playerSkillWeights?: ArchetypeDecisionModel;
+  enemySkillWeights?: ArchetypeDecisionModel;
   maxRounds?: number;
   decisionLogger?: (decision: { round: number; actorId: string; targetId: string; trace: DecisionTrace }) => void;
 };
