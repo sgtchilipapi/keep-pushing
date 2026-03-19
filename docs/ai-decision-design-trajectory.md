@@ -272,4 +272,4 @@ So the Option B goal is:
 
 ## Current delivery note
 
-Slice 3 is now implemented on the current branch: the scorer predicts the opponent's most likely action with mirrored deterministic evaluation, projects one-turn outgoing/incoming pressure plus simple round-start status continuation, and records those projection terms in `decision-trace.v4`.
+Slice 3 is now implemented on the current branch: the scorer predicts the opponent's most likely action with mirrored deterministic evaluation, projects one-turn outgoing/incoming pressure plus simple round-start status continuation, and records those projection terms plus the full selected-action weight breakdown in `decision-trace.v5`.

@@ -47,9 +47,10 @@ describe('ai decision logging', () => {
     expect(traces).toHaveLength(1);
 
     const [trace] = traces;
-    expect(trace.traceVersion).toBe('decision-trace.v4');
+    expect(trace.traceVersion).toBe('decision-trace.v5');
     expect(trace.candidateSkillIds).toEqual(['1000', '1001', '1002']);
     expect(trace.selectedSkillId).toBe('1002');
+    expect(trace.selectedScore.skillId).toBe('1002');
     expect(trace.context).toEqual(createDecisionContext());
     expect(trace.actorActiveSkillIds).toEqual(['1001', '1002']);
     expect(trace.actorCooldowns).toEqual({ 1001: 0, 1002: 0 });
@@ -75,6 +76,20 @@ describe('ai decision logging', () => {
           projectedOutgoingDamage: expect.any(Number),
           projectedIncomingDamage: expect.any(Number),
           projectedRecovery: expect.any(Number)
+        }),
+        weightBreakdown: expect.objectContaining({
+          priorContributionTotal: expect.any(Number),
+          intentContributionTotal: expect.any(Number),
+          learnedWeight: expect.any(Number),
+          perIntentContributionTotals: expect.objectContaining({
+            finish: expect.any(Number),
+            survive: expect.any(Number),
+            control: expect.any(Number),
+            setup: expect.any(Number),
+            attrition: expect.any(Number)
+          }),
+          featureContributionTotal: expect.any(Number),
+          totalScore: expect.any(Number)
         })
       })
     );
@@ -91,6 +106,7 @@ describe('ai decision logging', () => {
           featureId: 'executeOpportunity',
           value: 1,
           priorContribution: 120,
+          intentBreakdown: expect.objectContaining({ finish: 1120 }),
           intentContribution: 1120
         }),
         expect.objectContaining({
