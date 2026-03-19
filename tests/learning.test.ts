@@ -146,6 +146,10 @@ describe('learning', () => {
           entityId: 'player',
           hp: 6000,
           hpMax: 6000,
+          atk: 180,
+          def: 120,
+          accuracyBP: 8600,
+          evadeBP: 1200,
           statuses: [],
           activeSkillIds: ['1001', '1002'],
           cooldowns: { 1001: 0, 1002: 0 }
@@ -154,6 +158,10 @@ describe('learning', () => {
           entityId: 'enemy',
           hp: 4000,
           hpMax: 6000,
+          atk: 170,
+          def: 130,
+          accuracyBP: 8400,
+          evadeBP: 1300,
           statuses: []
         },
         battle: {
