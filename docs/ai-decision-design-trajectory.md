@@ -77,7 +77,7 @@ Under Option B:
 ### 1) Decision context expansion
 Introduce a read-only `DecisionContext` passed from battle engine to AI scorer.
 
-**Status**: completed on the current branch for the Slice 1 parity increment; actor/target/battle snapshots now flow into `chooseAction(...)`, and decision traces include a versioned `context` payload.
+**Status**: completed on the current branch for the Slice 1 parity increment and expanded in Slice 3; actor/target/battle snapshots now flow into `chooseAction(...)`, decision traces include a versioned `context` payload, and the snapshots carry the combat stats needed for deterministic one-turn forecasting.
 
 ```ts
 export type DecisionContext = {
@@ -269,3 +269,7 @@ So the Option B goal is:
 
 - `docs/ai-decision-implementation-plan.md` (detailed execution plan)
 - `docs/planned-features.md` (portfolio-level tracking)
+
+## Current delivery note
+
+Slice 3 is now implemented on the current branch: the scorer predicts the opponent's most likely action with mirrored deterministic evaluation, projects one-turn outgoing/incoming pressure plus simple round-start status continuation, and records those projection terms in `decision-trace.v4`.

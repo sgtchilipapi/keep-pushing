@@ -7,5 +7,7 @@ This file is the canonical entrypoint for the AI decision redesign trajectory, w
 
 ## Delivery Status
 
-- Slice 1 completed on the current branch: richer `DecisionContext` plumbing and `decision-trace.v2` context logging are in place.
-- Next planned slice: intent-aware tactical behavior (`finish` / `survive` / `control` / `setup` / `attrition`).
+- Slice 1 completed on the current branch: richer `DecisionContext` plumbing and versioned context logging are in place.
+- Slice 2 completed on the current branch: intent-aware tactical behavior (`finish` / `survive` / `control` / `setup` / `attrition`) now shapes scoring.
+- Slice 3 completed on the current branch: deterministic opponent prediction and one-turn projection terms now feed `decision-trace.v4` scoring and scenario coverage.
+- Next planned slice: learning-model upgrades that keep weak priors stable while residual learning becomes the dominant long-run policy signal.
