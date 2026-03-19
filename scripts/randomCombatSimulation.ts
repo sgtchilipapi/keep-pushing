@@ -1,6 +1,15 @@
 import { randomUUID } from 'crypto';
 import { simulateBattle, type CombatantSnapshot } from '../engine/battle/battleEngine';
 import type { DecisionTrace, FeatureContribution, IntentId, SkillScoreBreakdown } from '../engine/battle/aiDecision';
+import {
+  buildFeatureContributions,
+  buildSkillContributions,
+  createLearningState,
+  updateLearningState,
+  type ArchetypeLearningState,
+  type FeatureContributions,
+  type SkillContributions
+} from '../engine/battle/learning';
 import { ALL_SKILL_IDS, BASIC_ATTACK_SKILL_ID, getSkillDef } from '../engine/battle/skillRegistry';
 import { ALL_PASSIVE_IDS, getPassiveDef } from '../engine/battle/passiveRegistry';
 import type { BattleEvent } from '../types/battle';
@@ -37,6 +46,15 @@ type DecisionLogEntry = {
   actorId: string;
   targetId: string;
   trace: DecisionTrace;
+};
+
+type LearningOutcome = {
+  actor: CombatantSnapshot;
+  didWin: boolean;
+  previousModel: ArchetypeLearningState;
+  nextModel: ArchetypeLearningState;
+  skillContributions: SkillContributions;
+  featureContributions: FeatureContributions;
 };
 
 function randomInt(min: number, max: number): number {
@@ -111,6 +129,7 @@ function formatContributionLine(featureContribution: FeatureContribution): strin
     `value=${featureContribution.value}`,
     `prior=${colorizeSignedNumber(featureContribution.priorContribution)}`,
     `intent=${colorizeSignedNumber(featureContribution.intentContribution)}`,
+    `learned=${colorizeSignedNumber(featureContribution.learnedContribution)}`,
     `total=${colorizeSignedNumber(featureContribution.totalContribution)}`,
     intentDetails ? `| ${intentDetails}` : ''
   ]
@@ -334,8 +353,8 @@ function formatDecisionTrace(decision: DecisionLogEntry): string[] {
     lines.push(
       colorize(
         `    totals | feature subtotal=${score.weightBreakdown.featureContributionTotal} ` +
-          `[prior=${score.weightBreakdown.priorContributionTotal} + intent=${score.weightBreakdown.intentContributionTotal}] ` +
-          `| learned=${score.weightBreakdown.learnedWeight} | total=${score.weightBreakdown.totalScore}`,
+          `[prior=${score.weightBreakdown.priorContributionTotal} + intent=${score.weightBreakdown.intentContributionTotal} + learnedFeature=${score.weightBreakdown.learnedFeatureContributionTotal}] ` +
+          `| learnedSkill=${score.weightBreakdown.learnedWeight} | total=${score.weightBreakdown.totalScore}`,
         score.skillId === trace.selectedSkillId ? 'selected' : 'neutral'
       )
     );
@@ -364,6 +383,113 @@ function formatDecisionTrace(decision: DecisionLogEntry): string[] {
   return lines;
 }
 
+function buildLearningOutcome(
+  actor: CombatantSnapshot,
+  winnerEntityId: string,
+  enemyHpMax: number,
+  events: readonly BattleEvent[],
+  decisionLogs: readonly DecisionLogEntry[]
+): LearningOutcome {
+  const previousModel = createLearningState();
+  const actorDecisionLogs = decisionLogs.filter((entry) => entry.actorId === actor.entityId).map((entry) => entry.trace);
+  const skillContributions = buildSkillContributions(events, actor.entityId);
+  const featureContributions = buildFeatureContributions(actorDecisionLogs);
+  const nextModel = updateLearningState({
+    currentModel: previousModel,
+    skillContributions,
+    featureContributions,
+    enemyHpMax,
+    didWin: winnerEntityId === actor.entityId
+  });
+
+  return {
+    actor,
+    didWin: winnerEntityId === actor.entityId,
+    previousModel,
+    nextModel,
+    skillContributions,
+    featureContributions
+  };
+}
+
+function formatWeightDelta(nextValue: number, previousValue: number): string {
+  return colorizeSignedNumber(nextValue - previousValue);
+}
+
+function summarizeFeatureReason(featureId: string, contribution: { totalValue: number; selections: number }, didWin: boolean): string {
+  const averageValue = Math.trunc(contribution.totalValue / Math.max(1, contribution.selections));
+  const direction = didWin ? 'reinforced' : 'suppressed';
+  return `${direction} because ${featureId} appeared ${contribution.selections} time(s) with avg value ${averageValue} in a ${didWin ? 'win' : 'loss'}`;
+}
+
+function formatLearningOutcome(outcome: LearningOutcome): string[] {
+  const lines: string[] = [];
+  const actorLabel = outcome.actor.name ?? outcome.actor.entityId;
+  lines.push(colorize(`\n=== Learning Outcome: ${actorLabel} ===`, 'summary'));
+  lines.push(
+    colorize(
+      `Result: ${outcome.didWin ? 'WIN' : 'LOSS'} | weak-prior scale=${outcome.previousModel.priorWeightScaleBP} | feature LR=${outcome.previousModel.featureLearningRate} | decay=${outcome.previousModel.decayBP}`,
+      outcome.didWin ? 'positive' : 'negative'
+    )
+  );
+
+  const skillIds = new Set([...Object.keys(outcome.skillContributions), ...Object.keys(outcome.nextModel.skillWeights)]);
+  lines.push(colorize('  Skill weight updates:', 'decision'));
+  if (skillIds.size === 0) {
+    lines.push(colorize('    none (no skill-attributed contributions captured)', 'dim'));
+  }
+  for (const skillId of [...skillIds].sort()) {
+    const previous = outcome.previousModel.skillWeights[skillId] ?? 0;
+    const next = outcome.nextModel.skillWeights[skillId] ?? 0;
+    const contribution = outcome.skillContributions[skillId];
+    if (contribution === undefined && previous === next) {
+      continue;
+    }
+
+    const skill = getSkillDef(skillId);
+    const reason = contribution === undefined
+      ? 'unchanged because the skill had no attributed damage/status contribution'
+      : `${outcome.didWin ? 'reinforced' : 'suppressed'} from ${contribution.damageDealt} damage and ${contribution.statusTurnsApplied} status-turns in a ${outcome.didWin ? 'win' : 'loss'}`;
+
+    lines.push(
+      colorize(
+        `    - ${skill.skillName} (${skillId}) | ${previous} -> ${next} | Δ ${formatWeightDelta(next, previous)} | ${reason}`,
+        next > previous ? 'positive' : next < previous ? 'negative' : 'neutral'
+      )
+    );
+  }
+
+  const featureIds = new Set([...Object.keys(outcome.featureContributions), ...Object.keys(outcome.nextModel.featureWeights)]);
+  lines.push(colorize('  Feature residual updates:', 'decision'));
+  if (featureIds.size === 0) {
+    lines.push(colorize('    none (no selected-action feature activations captured)', 'dim'));
+  }
+  for (const featureId of [...featureIds].sort()) {
+    const previousWeight = outcome.previousModel.featureWeights[featureId] ?? 0;
+    const nextWeight = outcome.nextModel.featureWeights[featureId] ?? 0;
+    const previousConfidence = outcome.previousModel.featureConfidence[featureId] ?? 0;
+    const nextConfidence = outcome.nextModel.featureConfidence[featureId] ?? 0;
+    const contribution = outcome.featureContributions[featureId];
+
+    if (contribution === undefined && previousWeight === nextWeight && previousConfidence === nextConfidence) {
+      continue;
+    }
+
+    const reason = contribution === undefined
+      ? 'decayed because the feature was not used in the selected actions this battle'
+      : summarizeFeatureReason(featureId, contribution, outcome.didWin);
+
+    lines.push(
+      colorize(
+        `    - ${featureId} | weight ${previousWeight} -> ${nextWeight} (Δ ${formatWeightDelta(nextWeight, previousWeight)}) | confidence ${previousConfidence} -> ${nextConfidence} (Δ ${formatWeightDelta(nextConfidence, previousConfidence)}) | ${reason}`,
+        nextWeight > previousWeight ? 'positive' : nextWeight < previousWeight ? 'negative' : 'neutral'
+      )
+    );
+  }
+
+  return lines;
+}
+
 function buildDecisionDocument(
   seed: number,
   player: CombatantSnapshot,
@@ -379,6 +505,10 @@ function buildDecisionDocument(
     [player.entityId]: initializeResources(player),
     [enemy.entityId]: initializeResources(enemy)
   };
+  const learningOutcomes = [
+    buildLearningOutcome(player, winnerEntityId, enemy.hpMax, battleEvents, decisionLogs),
+    buildLearningOutcome(enemy, winnerEntityId, player.hpMax, battleEvents, decisionLogs)
+  ];
 
   lines.push(colorize('# Random Combat Simulation Decision Document', 'summary'));
   lines.push('');
@@ -409,6 +539,12 @@ function buildDecisionDocument(
   }
 
   lines.push('');
+  lines.push(colorize('## Learning Outcome', 'decision'));
+  for (const outcome of learningOutcomes) {
+    lines.push(...formatLearningOutcome(outcome));
+  }
+
+  lines.push('');
   lines.push(colorize(`Winner: ${winnerEntityId}`, 'summary'));
   lines.push(colorize(`Rounds Played: ${roundsPlayed}`, 'summary'));
 
@@ -428,12 +564,14 @@ function main(): void {
     seed,
     playerInitial: player,
     enemyInitial: enemy,
-    decisionLogger: decisionLogEnabled
-      ? (decision) => {
-          decisionLogs.push(decision);
-        }
-      : undefined
+    decisionLogger: (decision) => {
+      decisionLogs.push(decision);
+    }
   });
+  const learningOutcomes = [
+    buildLearningOutcome(player, battle.winnerEntityId, enemy.hpMax, battle.events, decisionLogs),
+    buildLearningOutcome(enemy, battle.winnerEntityId, player.hpMax, battle.events, decisionLogs)
+  ];
 
   if (decisionLogEnabled) {
     console.log(
@@ -463,6 +601,12 @@ function main(): void {
       for (const resourceLine of formatRoundResources(event.round, entities, resourcesByEntityId)) {
         console.log(resourceLine);
       }
+    }
+  }
+
+  for (const outcome of learningOutcomes) {
+    for (const line of formatLearningOutcome(outcome)) {
+      console.log(line);
     }
   }
 
