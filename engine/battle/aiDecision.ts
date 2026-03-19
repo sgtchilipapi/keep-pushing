@@ -1,7 +1,12 @@
 import { calculateDamage, calculateHitChanceBP } from './resolveDamage';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
 import { getStatusDef, type StatusId } from './statuses/statusRegistry';
-import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
+import {
+  getPriorWeightScaleBP,
+  scoreLearnedFeatureTerm,
+  scoreLearnedWeightTerm,
+  type ArchetypeDecisionModel
+} from './learning';
 
 /**
  * Read-only combat snapshot used by the AI scorer when evaluating candidate skills.
@@ -90,6 +95,9 @@ export type FeatureContribution = {
   intentWeights: Partial<Record<IntentId, number>>;
   intentBreakdown: Partial<Record<IntentId, number>>;
   intentContribution: number;
+  learnedWeight: number;
+  learnedConfidenceBP: number;
+  learnedContribution: number;
   totalContribution: number;
 };
 
@@ -97,6 +105,7 @@ export type ScoreWeightBreakdown = {
   priorContributionTotal: number;
   intentContributionTotal: number;
   learnedWeight: number;
+  learnedFeatureContributionTotal: number;
   perIntentContributionTotals: Record<IntentId, number>;
   featureContributionTotal: number;
   totalScore: number;
@@ -121,7 +130,7 @@ export type SkillScoreBreakdown = {
 };
 
 export type DecisionTrace = {
-  traceVersion: 'decision-trace.v5';
+  traceVersion: 'decision-trace.v6';
   actorActiveSkillIds: readonly [string, string];
   actorCooldowns: Record<string, number>;
   target: DecisionCombatantSnapshot;
@@ -219,7 +228,7 @@ function predictOutgoingDamage(skill: SkillDef, context: DecisionContext): numbe
   return predictIncomingDamage(skill, context.actor, context.target);
 }
 
-function predictOpponentAction(context: DecisionContext, actorSkillWeights: ArchetypeSkillWeights): CandidateAction {
+function predictOpponentAction(context: DecisionContext, decisionModel: ArchetypeDecisionModel): CandidateAction {
   const opponentContext: DecisionContext = {
     actor: {
       entityId: context.target.entityId,
@@ -250,7 +259,7 @@ function predictOpponentAction(context: DecisionContext, actorSkillWeights: Arch
     battle: context.battle
   };
 
-  return chooseAction(opponentContext, actorSkillWeights, undefined, { disableForecast: true });
+  return chooseAction(opponentContext, decisionModel, undefined, { disableForecast: true });
 }
 
 function buildProjectionSnapshot(
@@ -354,12 +363,22 @@ function predictedOpponentCannotAttack(skillId: string): boolean {
   return getSkillDef(skillId).resolutionMode === 'self_utility';
 }
 
-function buildFeatureContributions(features: SkillFeatures, intentWeights: IntentWeights): readonly FeatureContribution[] {
+function buildFeatureContributions(
+  features: SkillFeatures,
+  intentWeights: IntentWeights,
+  decisionModel: ArchetypeDecisionModel
+): readonly FeatureContribution[] {
   return (Object.keys(features) as SkillFeatureId[]).map((featureId) => {
     const value = features[featureId];
-    const priorWeight = FEATURE_PRIOR_WEIGHTS[featureId];
+    const priorScaleBP = getPriorWeightScaleBP(decisionModel);
+    const priorWeight = Math.trunc((FEATURE_PRIOR_WEIGHTS[featureId] * priorScaleBP) / 10000);
     const priorContribution = value * priorWeight;
-    const perIntentWeights = FEATURE_INTENT_WEIGHTS[featureId];
+    const perIntentWeights = Object.fromEntries(
+      Object.entries(FEATURE_INTENT_WEIGHTS[featureId]).map(([intentId, featureIntentWeight]) => [
+        intentId,
+        Math.trunc((featureIntentWeight * priorScaleBP) / 10000)
+      ])
+    ) as Partial<Record<IntentId, number>>;
     const intentBreakdown: Partial<Record<IntentId, number>> = {};
     let intentContribution = 0;
 
@@ -369,6 +388,8 @@ function buildFeatureContributions(features: SkillFeatures, intentWeights: Inten
       intentContribution += contribution;
     }
 
+    const learnedFeatureTerm = scoreLearnedFeatureTerm(decisionModel, featureId, value);
+
     return {
       featureId,
       value,
@@ -377,7 +398,10 @@ function buildFeatureContributions(features: SkillFeatures, intentWeights: Inten
       intentWeights: perIntentWeights,
       intentBreakdown,
       intentContribution,
-      totalContribution: priorContribution + intentContribution
+      learnedWeight: learnedFeatureTerm.learnedWeight,
+      learnedConfidenceBP: learnedFeatureTerm.confidenceBP,
+      learnedContribution: learnedFeatureTerm.contribution,
+      totalContribution: priorContribution + intentContribution + learnedFeatureTerm.contribution
     };
   });
 }
@@ -402,29 +426,31 @@ function buildWeightBreakdown(
 
   const priorContributionTotal = featureContributions.reduce((sum, item) => sum + item.priorContribution, 0);
   const intentContributionTotal = featureContributions.reduce((sum, item) => sum + item.intentContribution, 0);
+  const learnedFeatureContributionTotal = featureContributions.reduce((sum, item) => sum + item.learnedContribution, 0);
 
   return {
     priorContributionTotal,
     intentContributionTotal,
     learnedWeight,
+    learnedFeatureContributionTotal,
     perIntentContributionTotals,
-    featureContributionTotal: priorContributionTotal + intentContributionTotal,
-    totalScore: priorContributionTotal + intentContributionTotal + learnedWeight
+    featureContributionTotal: priorContributionTotal + intentContributionTotal + learnedFeatureContributionTotal,
+    totalScore: priorContributionTotal + intentContributionTotal + learnedFeatureContributionTotal + learnedWeight
   };
 }
 
 function scoreSkill(
   skill: SkillDef,
   context: DecisionContext,
-  skillWeights: ArchetypeSkillWeights,
+  decisionModel: ArchetypeDecisionModel,
   intentWeights: IntentWeights,
   predictedOpponentSkill: SkillDef,
   options: ScoreOptions = {}
 ): SkillScoreBreakdown {
   const projections = buildProjectionSnapshot(skill, context, predictedOpponentSkill);
   const features = extractSkillFeatures(skill, context, projections, options);
-  const featureContributions = buildFeatureContributions(features, intentWeights);
-  const learnedWeight = scoreLearnedWeightTerm(skillWeights, skill.skillId);
+  const featureContributions = buildFeatureContributions(features, intentWeights, decisionModel);
+  const learnedWeight = scoreLearnedWeightTerm(decisionModel, skill.skillId);
   const weightBreakdown = buildWeightBreakdown(featureContributions, learnedWeight);
   const { priorContributionTotal, intentContributionTotal, totalScore } = weightBreakdown;
 
@@ -449,7 +475,7 @@ function scoreSkill(
 
 export function chooseAction(
   context: DecisionContext,
-  skillWeights: ArchetypeSkillWeights = {},
+  decisionModel: ArchetypeDecisionModel = {},
   decisionLogger?: DecisionLogger,
   options: ScoreOptions = {}
 ): CandidateAction {
@@ -465,12 +491,12 @@ export function chooseAction(
   const intentWeights = deriveIntentWeights(context);
   const predictedOpponentSkillId = options.disableForecast
     ? BASIC_ATTACK_SKILL_ID
-    : predictOpponentAction(context, skillWeights).skillId;
+    : predictOpponentAction(context, decisionModel).skillId;
   const predictedOpponentSkill = getSkillDef(predictedOpponentSkillId);
   const ordered = candidateSkillIds
     .map((skillId) => ({
       skillId,
-      score: scoreSkill(getSkillDef(skillId), context, skillWeights, intentWeights, predictedOpponentSkill, options)
+      score: scoreSkill(getSkillDef(skillId), context, decisionModel, intentWeights, predictedOpponentSkill, options)
     }))
     .sort((a, b) => {
       if (a.score.totalScore !== b.score.totalScore) return b.score.totalScore - a.score.totalScore;
@@ -478,7 +504,7 @@ export function chooseAction(
     });
 
   decisionLogger?.({
-    traceVersion: 'decision-trace.v5',
+    traceVersion: 'decision-trace.v6',
     actorActiveSkillIds: actor.activeSkillIds,
     actorCooldowns: { ...actor.cooldowns },
     target: context.target,
