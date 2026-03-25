@@ -174,6 +174,8 @@ export default function BattlePage() {
     };
   }, [playbackActions, result]);
 
+  const view = useMemo(() => deriveView(result), [result]);
+
   const onSimulate = async () => {
     setError(null);
     setIsLoading(true);
