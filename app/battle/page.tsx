@@ -120,29 +120,29 @@ function formatEventLine(
     case 'ROUND_START':
       return `Round ${event.round} start`;
     case 'ACTION':
-      return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} uses ${SKILL_META[event.skillId]?.name ?? event.skillId} on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)}`;
+      return `${event.actorId} uses ${SKILL_META[event.skillId]?.name ?? event.skillId} on ${event.targetId}`;
     case 'COOLDOWN_SET':
-      return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} sets cooldown on ${SKILL_META[event.skillId]?.name ?? event.skillId} to ${event.cooldownRemainingTurns}`;
+      return `${event.actorId} sets cooldown on ${SKILL_META[event.skillId]?.name ?? event.skillId} to ${event.cooldownRemainingTurns}`;
     case 'STUNNED_SKIP':
-      return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} is stunned and loses their action`;
+      return `${event.actorId} is stunned and loses their action`;
     case 'HIT_RESULT':
       return event.didHit
-        ? `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} hits ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} (${event.rollBP}/${event.hitChanceBP})`
-        : `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} misses ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} (${event.rollBP}/${event.hitChanceBP})`;
+        ? `${event.actorId} hits ${event.targetId} (${event.rollBP}/${event.hitChanceBP})`
+        : `${event.actorId} misses ${event.targetId} (${event.rollBP}/${event.hitChanceBP})`;
     case 'DAMAGE':
-      return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} takes ${event.amount} damage (HP now ${event.targetHpAfter})`;
+      return `${event.targetId} takes ${event.amount} damage (HP now ${event.targetHpAfter})`;
     case 'STATUS_APPLY':
-      return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} gains ${event.statusId} from ${formatCombatantName(event.sourceId, leftId, leftName, rightId, rightName)} (${event.remainingTurns} turns)`;
+      return `${event.targetId} gains ${event.statusId} from ${event.sourceId} (${event.remainingTurns} turns)`;
     case 'STATUS_REFRESH':
-      return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} refreshes ${event.statusId} to ${event.remainingTurns} turns`;
+      return `${event.targetId} refreshes ${event.statusId} to ${event.remainingTurns} turns`;
     case 'STATUS_APPLY_FAILED':
-      return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} failed to gain ${event.statusId} (${event.reason})`;
+      return `${event.targetId} failed to gain ${event.statusId} (${event.reason})`;
     case 'STATUS_EFFECT_RESOLVE':
-      return `${event.statusId} resolves on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} during ${event.phase} (hpΔ ${event.hpDelta}, hp ${event.targetHpAfter})`;
+      return `${event.statusId} resolves on ${event.targetId} during ${event.phase} (hpΔ ${event.hpDelta}, hp ${event.targetHpAfter})`;
     case 'STATUS_EXPIRE':
-      return `${event.statusId} expired on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)}`;
+      return `${event.statusId} expired on ${event.targetId}`;
     case 'DEATH':
-      return `${formatCombatantName(event.entityId, leftId, leftName, rightId, rightName)} was defeated`;
+      return `${event.entityId} was defeated`;
     case 'ROUND_END':
       return `Round ${event.round} end`;
     case 'BATTLE_END':
@@ -178,12 +178,11 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
   let displayRightHp = rightHp;
   let displayLeftCooldowns = { ...leftCooldowns };
   let displayRightCooldowns = { ...rightCooldowns };
-  let lastUsedSkillByActor: Record<string, string> = {};
 
   const frames: ReplayFrame[] = [];
 
   for (const event of result.events) {
-    const line = formatEventLine(event, leftId, leftName, rightId, rightName);
+    const line = formatEventLine(event);
     let actionLabelSide: Side | null = null;
     let actionLabelText = '';
 
@@ -198,23 +197,11 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     }
 
     if ('actorId' in event) {
-      if (event.type === 'ACTION') {
-        lastUsedSkillByActor = {
-          ...lastUsedSkillByActor,
-          [event.actorId]: SKILL_META[event.skillId]?.name ?? event.skillId
-        };
-
-        if (event.skillId === '1004' || event.skillId === '1005') {
-          actionLabelSide = event.actorId === leftId ? 'left' : event.actorId === rightId ? 'right' : null;
-          actionLabelText = `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} used ${SKILL_META[event.skillId]?.name ?? event.skillId} successfully!`;
-        }
-      }
-
-      if (event.type === 'HIT_RESULT') {
-        const usedSkill = lastUsedSkillByActor[event.actorId] ?? 'Basic Attack';
-        actionLabelSide = event.actorId === leftId ? 'left' : event.actorId === rightId ? 'right' : null;
-        actionLabelText = `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} used ${usedSkill} and ${event.didHit ? 'hit!' : 'missed!'}`;
-      }
+      actionLabelSide = event.actorId === leftId ? 'left' : event.actorId === rightId ? 'right' : null;
+      actionLabelText = line;
+    } else if ('targetId' in event && (event.type === 'STATUS_EFFECT_RESOLVE' || event.type === 'STATUS_APPLY' || event.type === 'STATUS_REFRESH')) {
+      actionLabelSide = event.targetId === leftId ? 'left' : event.targetId === rightId ? 'right' : null;
+      actionLabelText = line;
     }
 
     if (event.type === 'COOLDOWN_SET') {
@@ -269,9 +256,6 @@ export default function BattleDashboardPage() {
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [battleStarted, setBattleStarted] = useState(false);
-  const [activeLabel, setActiveLabel] = useState<{ side: Side; text: string } | null>(null);
-  const [leftFlash, setLeftFlash] = useState<'damage' | 'recover' | null>(null);
-  const [rightFlash, setRightFlash] = useState<'damage' | 'recover' | null>(null);
 
   const frames = useMemo(() => (result ? buildFrames(result) : []), [result]);
   const currentFrame = frames[currentFrameIndex];
@@ -339,8 +323,8 @@ export default function BattleDashboardPage() {
   const leftHp = currentFrame?.displayLeftHp ?? leftCharacter.hp;
   const rightHp = currentFrame?.displayRightHp ?? rightCharacter.hp;
   const battleId = result?.battleId ?? '—';
-  const leftActionText = activeLabel?.side === 'left' ? activeLabel.text : '';
-  const rightActionText = activeLabel?.side === 'right' ? activeLabel.text : '';
+  const leftActionText = currentFrame?.actionLabelSide === 'left' ? currentFrame.actionLabelText : '';
+  const rightActionText = currentFrame?.actionLabelSide === 'right' ? currentFrame.actionLabelText : '';
   const leftSkills = ['1000', ...leftCharacter.activeSkillIds];
   const rightSkills = ['1000', ...rightCharacter.activeSkillIds];
 
