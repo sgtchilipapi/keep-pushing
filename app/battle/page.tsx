@@ -32,6 +32,13 @@ const SKILL_META: Record<string, { name: string; icon: string }> = {
 };
 
 const ACTIVE_SKILL_IDS = ['1001', '1002', '1003', '1004', '1005'] as const;
+const NAME_BANK = [
+  'Ironclaw', 'Bloodfang', 'Wolfbite', 'Razorbeast', 'Stonejaw', 'Grimhound', 'Nightfang', 'Brutehorn', 'Skullwolf', 'Venomtail',
+  'Gunshock', 'Steelshot', 'Bladefist', 'Axebreaker', 'Hammerfall', 'Quickshot', 'Deadtrigger', 'Blastcore', 'Ironburst', 'Killspike',
+  'Maskhead', 'Boneface', 'Scarjaw', 'Redeye', 'Steelmask', 'Grimface', 'Halfskull', 'Madgrin', 'Coldeye', 'Rustface',
+  'Blackthorn', 'Frostbite', 'Darkclaw', 'Stormfury', 'Ironfang', 'Voidstrike', 'Shadowburn', 'Bloodspark', 'Ashbreaker', 'Steelrage',
+  'Brawler', 'Outlaw', 'Reaper', 'Crusher', 'Slasher', 'Breaker', 'Hunter', 'Warden', 'Striker', 'Ravager'
+] as const;
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -55,11 +62,12 @@ function pickDistinct<T>(values: readonly T[], count: number): T[] {
 function buildRandomCharacter(entityId: string, side: Side): CombatantSnapshot {
   const [skill1, skill2] = pickDistinct(ACTIVE_SKILL_IDS, 2) as [string, string];
   const hpMax = randomInt(950, 1450);
+  const [name] = pickDistinct(NAME_BANK, 1) as [string];
 
   return {
     entityId,
     side: side === 'left' ? 'PLAYER' : 'ENEMY',
-    name: side === 'left' ? `Left-${randomInt(10, 99)}` : `Right-${randomInt(10, 99)}`,
+    name,
     hp: hpMax,
     hpMax,
     atk: randomInt(85, 145),
@@ -262,6 +270,8 @@ export default function BattleDashboardPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [battleStarted, setBattleStarted] = useState(false);
   const [activeLabel, setActiveLabel] = useState<{ side: Side; text: string } | null>(null);
+  const [leftFlash, setLeftFlash] = useState<'damage' | 'recover' | null>(null);
+  const [rightFlash, setRightFlash] = useState<'damage' | 'recover' | null>(null);
 
   const frames = useMemo(() => (result ? buildFrames(result) : []), [result]);
   const currentFrame = frames[currentFrameIndex];
@@ -334,6 +344,39 @@ export default function BattleDashboardPage() {
   const leftSkills = ['1000', ...leftCharacter.activeSkillIds];
   const rightSkills = ['1000', ...rightCharacter.activeSkillIds];
 
+  useEffect(() => {
+    if (currentFrameIndex === 0) {
+      return;
+    }
+
+    const prevFrame = frames[currentFrameIndex - 1];
+    const currFrame = frames[currentFrameIndex];
+    if (!prevFrame || !currFrame) {
+      return;
+    }
+
+    const leftDelta = currFrame.displayLeftHp - prevFrame.displayLeftHp;
+    const rightDelta = currFrame.displayRightHp - prevFrame.displayRightHp;
+
+    const timers: number[] = [];
+
+    if (leftDelta !== 0) {
+      setLeftFlash(leftDelta < 0 ? 'damage' : 'recover');
+      timers.push(window.setTimeout(() => setLeftFlash(null), 450));
+    }
+
+    if (rightDelta !== 0) {
+      setRightFlash(rightDelta < 0 ? 'damage' : 'recover');
+      timers.push(window.setTimeout(() => setRightFlash(null), 450));
+    }
+
+    return () => {
+      for (const timer of timers) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [currentFrameIndex, frames]);
+
   return (
     <main style={{ minHeight: '100vh', background: '#000', color: '#fff', padding: '1rem' }}>
       <section style={{ width: '100%', maxWidth: 1100, margin: '0 auto', display: 'grid', gap: '0.9rem' }}>
@@ -359,12 +402,14 @@ export default function BattleDashboardPage() {
               name={leftCharacter.name ?? leftCharacter.entityId}
               actionText={leftActionText}
               side="left"
+              flash={leftFlash}
               isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === leftCharacter.entityId}
             />
             <ArenaCell
               name={rightCharacter.name ?? rightCharacter.entityId}
               actionText={rightActionText}
               side="right"
+              flash={rightFlash}
               isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === rightCharacter.entityId}
             />
           </div>
@@ -410,9 +455,12 @@ type ArenaCellProps = {
   actionText: string;
   side: Side;
   isActive: boolean;
+  flash: 'damage' | 'recover' | null;
 };
 
-function ArenaCell({ name, actionText, side, isActive }: ArenaCellProps) {
+function ArenaCell({ name, actionText, side, isActive, flash }: ArenaCellProps) {
+  const flashColor = flash === 'damage' ? 'rgba(255, 120, 120, 0.35)' : flash === 'recover' ? 'rgba(120, 255, 160, 0.35)' : undefined;
+
   return (
     <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr', gap: '0.75rem' }}>
       <p style={{ margin: 0, border: '1px solid #fff', padding: '0.5rem', minHeight: '3rem', background: '#0d0d0d' }}>{actionText}</p>
@@ -423,8 +471,9 @@ function ArenaCell({ name, actionText, side, isActive }: ArenaCellProps) {
           placeItems: 'center',
           fontSize: '1.25rem',
           letterSpacing: '0.05em',
-          background: isActive ? '#1a1a1a' : '#000',
-          transition: 'background 0.25s ease'
+          background: flashColor ?? (isActive ? '#1a1a1a' : '#000'),
+          transition: 'background 0.25s ease, box-shadow 0.25s ease',
+          boxShadow: flashColor ? `0 0 0 2px ${flashColor}` : 'none'
         }}
       >
         {name}
