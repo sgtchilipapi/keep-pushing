@@ -72,6 +72,23 @@ function buildRandomCharacter(entityId: string, side: Side): CombatantSnapshot {
   };
 }
 
+function buildDefaultCharacter(entityId: string, side: Side): CombatantSnapshot {
+  return {
+    entityId,
+    side: side === 'left' ? 'PLAYER' : 'ENEMY',
+    name: side === 'left' ? 'Vanguard' : 'Sentinel',
+    hp: 1200,
+    hpMax: 1200,
+    atk: 110,
+    def: 90,
+    spd: side === 'left' ? 105 : 100,
+    accuracyBP: 9000,
+    evadeBP: 900,
+    activeSkillIds: ['1001', '1002'],
+    passiveSkillIds: ['2001', '2002']
+  };
+}
+
 function formatCombatantName(entityId: string, leftId: string, leftName: string, rightId: string, rightName: string): string {
   if (entityId === leftId) {
     return leftName;
@@ -238,8 +255,8 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
 }
 
 export default function BattleDashboardPage() {
-  const [leftCharacter, setLeftCharacter] = useState<CombatantSnapshot>(() => buildRandomCharacter('10001', 'left'));
-  const [rightCharacter, setRightCharacter] = useState<CombatantSnapshot>(() => buildRandomCharacter('20001', 'right'));
+  const [leftCharacter, setLeftCharacter] = useState<CombatantSnapshot>(() => buildDefaultCharacter('10001', 'left'));
+  const [rightCharacter, setRightCharacter] = useState<CombatantSnapshot>(() => buildDefaultCharacter('20001', 'right'));
   const [result, setResult] = useState<BattleResult | null>(null);
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -276,15 +293,18 @@ export default function BattleDashboardPage() {
     setBattleStarted(true);
   }, [leftCharacter, rightCharacter]);
 
+  const currentActionLabelSide = currentFrame?.actionLabelSide ?? null;
+  const currentActionLabelText = currentFrame?.actionLabelText ?? '';
+
   useEffect(() => {
-    if (currentFrame?.actionLabelSide === null || currentFrame?.actionLabelText.length === 0) {
+    if (currentActionLabelSide === null || currentActionLabelText.length === 0) {
       return;
     }
 
-    setActiveLabel({ side: currentFrame.actionLabelSide, text: currentFrame.actionLabelText });
+    setActiveLabel({ side: currentActionLabelSide, text: currentActionLabelText });
     const hideTimer = window.setTimeout(() => setActiveLabel(null), 2000);
     return () => window.clearTimeout(hideTimer);
-  }, [currentFrame?.actionLabelSide, currentFrame?.actionLabelText]);
+  }, [currentActionLabelSide, currentActionLabelText]);
 
   useEffect(() => {
     if (!isPlaying || frames.length === 0) {
