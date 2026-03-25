@@ -85,11 +85,13 @@ describe('battleEngine skills', () => {
     );
     expect(playerHitOrDamage).toEqual([]);
 
-    const enemyDamageFromPlayer = result.events.filter(
-      (event): event is Extract<(typeof result.events)[number], { type: 'DAMAGE' }> =>
-        event.type === 'DAMAGE' && event.actorId === 'player' && event.targetId === 'enemy'
+    const firstPlayerAction = result.events.find(
+      (event): event is Extract<(typeof result.events)[number], { type: 'ACTION' }> =>
+        event.type === 'ACTION' && event.actorId === 'player'
     );
-    expect(enemyDamageFromPlayer).toEqual([]);
+    expect(firstPlayerAction).toEqual(
+      expect.objectContaining({ type: 'ACTION', skillId: '1005', targetId: 'player', round: 1 })
+    );
   });
 
 });

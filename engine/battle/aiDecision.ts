@@ -1,36 +1,114 @@
+import { calculateDamage, calculateHitChanceBP } from './resolveDamage';
 import { BASIC_ATTACK_SKILL_ID, getSkillDef, type SkillDef } from './skillRegistry';
-import type { StatusId } from './statuses/statusRegistry';
-import { scoreLearnedWeightTerm, type ArchetypeSkillWeights } from './learning';
+import { getStatusDef, type StatusId } from './statuses/statusRegistry';
+import {
+  getPriorWeightScaleBP,
+  scoreLearnedFeatureTerm,
+  scoreLearnedWeightTerm,
+  type ArchetypeDecisionModel
+} from './learning';
 
 /**
  * Read-only combat snapshot used by the AI scorer when evaluating candidate skills.
  *
  * This shape intentionally contains only data required by heuristics so decision-making
  * remains deterministic and independent from mutable battle engine state.
- * 
- * @todo: So as for now, a combatant only uses enemy hp and statuses? That is too shallow for MVP.
- *       To have a meaningful combat agent, they should have need to be able to factor in multiple information and weigh the possible actions to take.
- *       For example, skills might be for offense or self-preservation. Or skills might be to set a trap hence the agent understands timing.
- *       Moreover, the agent must have the ability to anticipate even if crude at first which it improves over time through weights as well.
- *       
- *       Idea: Should agents decide based on ratios or levels of multiple stats? Like for example, combatantHp, enemyHp, skillDamageOutput, hitChance, etc?
- *             So agents actually decide based on the current situation rather than just decide based on skill weights alone?
- * 
- *       Re-design.
  */
 export type DecisionCombatantSnapshot = {
+  entityId: string;
+  archetypeId?: string;
   hp: number;
   hpMax: number;
+  atk: number;
+  def: number;
+  accuracyBP: number;
+  evadeBP: number;
   statuses: readonly StatusId[];
+  activeSkillIds?: readonly [string, string];
+  cooldowns?: Readonly<Record<string, number>>;
 };
 
-/**
- * Action selected by the AI decision phase.
- *
- * The battle engine resolves the referenced skill as the actor's next command.
- */
+export type DecisionBattleSnapshot = {
+  round: number;
+  maxRounds: number;
+  roundsRemaining: number;
+};
+
+export type DecisionContext = {
+  actor: {
+    entityId: string;
+    archetypeId?: string;
+    hp: number;
+    hpMax: number;
+    atk: number;
+    def: number;
+    accuracyBP: number;
+    evadeBP: number;
+    statuses: readonly StatusId[];
+    activeSkillIds: readonly [string, string];
+    cooldowns: Readonly<Record<string, number>>;
+  };
+  target: DecisionCombatantSnapshot;
+  battle: DecisionBattleSnapshot;
+};
+
 export type CandidateAction = {
   skillId: string;
+};
+
+export type IntentId = 'finish' | 'survive' | 'control' | 'setup' | 'attrition';
+
+export type SkillFeatureId =
+  | 'basePower'
+  | 'activeSkillPreference'
+  | 'executeOpportunity'
+  | 'stunRedundancy'
+  | 'shieldbreakOpportunity'
+  | 'controlOpportunity'
+  | 'defensiveShieldValue'
+  | 'defensiveRepairValue'
+  | 'setupOpportunity'
+  | 'attritionOpportunity'
+  | 'projectedOutgoingPressure'
+  | 'projectedIncomingMitigation'
+  | 'projectedRecoveryValue'
+  | 'projectedControlValue';
+
+export type SkillFeatures = Record<SkillFeatureId, number>;
+export type IntentWeights = Record<IntentId, number>;
+
+export type ProjectionSnapshot = {
+  skillId: string;
+  projectedOutgoingDamage: number;
+  projectedIncomingDamage: number;
+  projectedRecovery: number;
+  projectedNetPressure: number;
+  projectedStatusSwing: number;
+  predictedOpponentSkillId: string;
+};
+
+export type FeatureContribution = {
+  featureId: SkillFeatureId;
+  value: number;
+  priorWeight: number;
+  priorContribution: number;
+  intentWeights: Partial<Record<IntentId, number>>;
+  intentBreakdown: Partial<Record<IntentId, number>>;
+  intentContribution: number;
+  learnedWeight: number;
+  learnedConfidenceBP: number;
+  learnedContribution: number;
+  totalContribution: number;
+};
+
+export type ScoreWeightBreakdown = {
+  priorContributionTotal: number;
+  intentContributionTotal: number;
+  learnedWeight: number;
+  learnedFeatureContributionTotal: number;
+  perIntentContributionTotals: Record<IntentId, number>;
+  featureContributionTotal: number;
+  totalScore: number;
 };
 
 export type SkillScoreBreakdown = {
@@ -41,174 +119,402 @@ export type SkillScoreBreakdown = {
   stunPenalty: number;
   shieldbreakBonus: number;
   learnedWeight: number;
+  priorContributionTotal: number;
+  intentContributionTotal: number;
+  intentWeights: IntentWeights;
+  features: SkillFeatures;
+  projections: ProjectionSnapshot;
+  featureContributions: readonly FeatureContribution[];
+  weightBreakdown: ScoreWeightBreakdown;
   totalScore: number;
 };
 
 export type DecisionTrace = {
+  traceVersion: 'decision-trace.v6';
   actorActiveSkillIds: readonly [string, string];
   actorCooldowns: Record<string, number>;
   target: DecisionCombatantSnapshot;
+  context: DecisionContext;
+  intentWeights: IntentWeights;
+  predictedOpponentSkillId: string;
   candidateSkillIds: readonly string[];
   scores: readonly SkillScoreBreakdown[];
   selectedSkillId: string;
+  selectedScore: SkillScoreBreakdown;
 };
 
 export type DecisionLogger = (trace: DecisionTrace) => void;
 
-/**
- * @todo: Where did we get these hardcoded values from? As far as I know, we dont want hardcoded bonuses and organically let the combatants learn
- *        and choose on their own.
- *        
- *        Re-design.
- */
-const ACTIVE_AVAILABLE_BONUS = 200;
-const EXECUTE_BONUS = 500;
-const SHIELDBREAK_BONUS = 350;
-const WASTED_STUN_PENALTY = 10_000;
+type ScoreOptions = {
+  disableForecast?: boolean;
+};
 
-/**
- * Converts current HP into basis points to avoid floating-point comparisons in heuristics.
- */
+const FEATURE_PRIOR_WEIGHTS: Record<SkillFeatureId, number> = {
+  basePower: 10,
+  activeSkillPreference: 25,
+  executeOpportunity: 120,
+  stunRedundancy: -220,
+  shieldbreakOpportunity: 90,
+  controlOpportunity: 20,
+  defensiveShieldValue: 35,
+  defensiveRepairValue: 35,
+  setupOpportunity: 20,
+  attritionOpportunity: 25,
+  projectedOutgoingPressure: 4,
+  projectedIncomingMitigation: 5,
+  projectedRecoveryValue: 5,
+  projectedControlValue: 35
+};
+
+const FEATURE_INTENT_WEIGHTS: Record<SkillFeatureId, Partial<Record<IntentId, number>>> = {
+  basePower: { finish: 4, attrition: 2 },
+  activeSkillPreference: { setup: 10, attrition: 5 },
+  executeOpportunity: { finish: 160 },
+  stunRedundancy: { control: -180, finish: -25 },
+  shieldbreakOpportunity: { finish: 75, attrition: 25 },
+  controlOpportunity: { control: 60, survive: 20 },
+  defensiveShieldValue: { survive: 180, attrition: 30 },
+  defensiveRepairValue: { survive: 220, attrition: 45 },
+  setupOpportunity: { setup: 95, attrition: 35 },
+  attritionOpportunity: { attrition: 60, setup: 20 },
+  projectedOutgoingPressure: { finish: 5, attrition: 2 },
+  projectedIncomingMitigation: { survive: 10, attrition: 2 },
+  projectedRecoveryValue: { survive: 12, attrition: 2 },
+  projectedControlValue: { control: 80, setup: 20, survive: 15 }
+};
+
 function hpPercentBP(combatant: DecisionCombatantSnapshot): number {
-  if (combatant.hpMax <= 0) {
-    return 0;
-  }
-
+  if (combatant.hpMax <= 0) return 0;
   return Math.floor((combatant.hp * 10000) / combatant.hpMax);
 }
 
-/**
- * Computes a deterministic priority score for a skill against the current target snapshot.
- *
- * The score combines static skill power, context-sensitive tag bonuses/penalties,
- * and learned archetype preferences.
- */
-function scoreSkill(skill: SkillDef, target: DecisionCombatantSnapshot, skillWeights: ArchetypeSkillWeights): SkillScoreBreakdown {
-  /** Heuristic intentionally starts from base power so every modifier is an additive preference, not a hard rule.
-   * @todo: Why we use skill.basePower as a base? I gues this only applies when the combatant decides to execute an offensive action.
-   *        Decide where to create a decision point between offensive or defensive. Before specific skill weights? Or after skill weights?
-   *        Re-design.
-   */
-  let score = skill.basePower;
-  let activeSkillBonus = 0;
-  let executeBonus = 0;
-  let stunPenalty = 0;
-  let shieldbreakBonus = 0;
+function hasSelfAppliedStatus(skill: SkillDef, statusId: StatusId): boolean {
+  return (skill.selfAppliesStatusIds ?? []).includes(statusId);
+}
 
-  /**
-   * @see: We dont want to influence with hardcoded bonuses. Re-design.
-   */
-  if (skill.skillId !== BASIC_ATTACK_SKILL_ID) {
-    activeSkillBonus = ACTIVE_AVAILABLE_BONUS;
-    score += activeSkillBonus;
-  }
+function hasTargetAppliedStatus(skill: SkillDef, statusId: StatusId): boolean {
+  return (skill.appliesStatusIds ?? []).includes(statusId);
+}
 
-  /**
-   * @see: This is yet another hardcoded bonus to influence the agent's decision making. We dont want this. Re-design.
-   */
-  if (skill.tags.includes('execute')) {
-    const targetHpBP = hpPercentBP(target);
-    const threshold = skill.executeThresholdBP ?? 0;
+function normalizeProjectionValue(value: number): number {
+  return Math.max(0, Math.floor(value / 25));
+}
 
-    if (targetHpBP <= threshold) {
-      executeBonus = EXECUTE_BONUS;
-      score += executeBonus;
+function normalizeSignedProjectionValue(value: number): number {
+  if (value === 0) return 0;
+  return Math.trunc(value / 25);
+}
+
+function projectStatusRoundStartHp(statuses: readonly StatusId[]): number {
+  return statuses.reduce((sum, statusId) => sum + getStatusDef(statusId).roundStartHpDelta, 0);
+}
+
+function applyProjectedStatuses(baseStatuses: readonly StatusId[], addedStatuses: readonly StatusId[]): StatusId[] {
+  return [...new Set([...baseStatuses, ...addedStatuses])].sort();
+}
+
+function predictIncomingDamage(skill: SkillDef, actor: DecisionCombatantSnapshot, target: DecisionCombatantSnapshot): number {
+  if (skill.resolutionMode !== 'attack') return 0;
+  const hitChanceBP = calculateHitChanceBP(actor, target, skill);
+  const rawDamage = calculateDamage(actor, target, skill);
+  const incomingMultiplierBP = target.statuses.reduce((acc, statusId) => {
+    return Math.floor((acc * getStatusDef(statusId).incomingDamageMultiplierBP) / 10000);
+  }, 10000);
+  const adjustedDamage = Math.max(1, Math.floor((rawDamage * incomingMultiplierBP) / 10000));
+  return Math.floor((adjustedDamage * hitChanceBP) / 10000);
+}
+
+function predictOutgoingDamage(skill: SkillDef, context: DecisionContext): number {
+  return predictIncomingDamage(skill, context.actor, context.target);
+}
+
+function predictOpponentAction(context: DecisionContext, decisionModel: ArchetypeDecisionModel): CandidateAction {
+  const opponentContext: DecisionContext = {
+    actor: {
+      entityId: context.target.entityId,
+      archetypeId: context.target.archetypeId,
+      hp: context.target.hp,
+      hpMax: context.target.hpMax,
+      atk: context.target.atk,
+      def: context.target.def,
+      accuracyBP: context.target.accuracyBP,
+      evadeBP: context.target.evadeBP,
+      statuses: context.target.statuses,
+      activeSkillIds: context.target.activeSkillIds ?? ['1000', '1000'],
+      cooldowns: context.target.cooldowns ?? {}
+    },
+    target: {
+      entityId: context.actor.entityId,
+      archetypeId: context.actor.archetypeId,
+      hp: context.actor.hp,
+      hpMax: context.actor.hpMax,
+      atk: context.actor.atk,
+      def: context.actor.def,
+      accuracyBP: context.actor.accuracyBP,
+      evadeBP: context.actor.evadeBP,
+      statuses: context.actor.statuses,
+      activeSkillIds: context.actor.activeSkillIds,
+      cooldowns: context.actor.cooldowns
+    },
+    battle: context.battle
+  };
+
+  return chooseAction(opponentContext, decisionModel, undefined, { disableForecast: true });
+}
+
+function buildProjectionSnapshot(
+  skill: SkillDef,
+  context: DecisionContext,
+  predictedOpponentSkill: SkillDef
+): ProjectionSnapshot {
+  const projectedOutgoingDamage = predictOutgoingDamage(skill, context);
+  const projectedStatusesOnActor = applyProjectedStatuses(
+    context.actor.statuses,
+    skill.selfAppliesStatusIds ?? []
+  );
+  const projectedStatusesOnTarget = applyProjectedStatuses(
+    context.target.statuses,
+    skill.appliesStatusIds ?? []
+  );
+  const projectedIncomingDamage = predictIncomingDamage(
+    predictedOpponentSkill,
+    {
+      ...context.target,
+      statuses: projectedStatusesOnTarget
+    },
+    {
+      ...context.actor,
+      statuses: projectedStatusesOnActor
     }
-  }
-
-  /**
-   * @todo: This is hardcoded influence about how a combatant should be efficient. We dont want this.
-   *       Imagine a combatant almost winning if only it uses a high-damage high-hit-chance skill for the last time on a stunned enemy.
-   *       But it doesnt because such skill includes a 'stun' tag? That is undesirable. We want organic learning even if it is rule-based.
-   * 
-   *       Re-design.
-   */
-  if (skill.tags.includes('stun') && target.statuses.includes('stunned')) {
-    // Reapplying stun is heavily penalized to avoid wasting turns on non-stacking control effects.
-    stunPenalty = -WASTED_STUN_PENALTY;
-    score += stunPenalty;
-  }
-
-  /**
-   * @todo: Another hardcoded influence. Re-design.
-   */
-  if (skill.tags.includes('shieldbreak') && target.statuses.includes('shielded')) {
-    shieldbreakBonus = SHIELDBREAK_BONUS;
-    score += shieldbreakBonus;
-  }
-
-  const learnedWeight = scoreLearnedWeightTerm(skillWeights, skill.skillId);
-  score += learnedWeight;
+  );
+  const projectedRecovery = Math.max(0, projectStatusRoundStartHp(projectedStatusesOnActor));
+  const projectedTargetRoundStartHp = projectStatusRoundStartHp(projectedStatusesOnTarget);
+  const projectedStatusSwing = projectedRecovery - projectedTargetRoundStartHp;
 
   return {
     skillId: skill.skillId,
-    basePower: skill.basePower,
-    activeSkillBonus,
-    executeBonus,
-    stunPenalty,
-    shieldbreakBonus,
-    learnedWeight,
-    totalScore: score
+    projectedOutgoingDamage,
+    projectedIncomingDamage,
+    projectedRecovery,
+    projectedNetPressure: projectedOutgoingDamage + projectedRecovery - projectedIncomingDamage - projectedTargetRoundStartHp,
+    projectedStatusSwing,
+    predictedOpponentSkillId: predictedOpponentSkill.skillId
   };
 }
 
-/**
- * Chooses the next skill the actor should use against the current target.
- *
- * The selector always includes the basic attack and only includes active skills whose
- * cooldown is currently zero. Candidate skills are scored deterministically; when scores
- * tie, lexical ordering is used so replay output and test runs remain stable.
- *
- * This function does not mutate cooldown state or battle entities.
- *
- * @param actorActiveSkillIds - The actor's equipped active skill identifiers.
- * @param actorCooldowns - Remaining cooldown turns keyed by skill identifier.
- * @param target - Read-only snapshot of the current enemy target.
- * @param skillWeights - Learned per-skill preference weights for the actor archetype.
- * @returns The single highest-priority action candidate.
- * @throws If a candidate skill identifier has no registered definition.
- */
+export function deriveIntentWeights(context: DecisionContext): IntentWeights {
+  const actorHpBP = hpPercentBP(context.actor);
+  const targetHpBP = hpPercentBP(context.target);
+  const targetAlreadyControlled = context.target.statuses.includes('stunned');
+  const earlyBattle = context.battle.round <= 2 ? 1 : 0;
+  const lateBattle = context.battle.roundsRemaining <= 2 ? 1 : 0;
+
+  return {
+    finish: targetHpBP <= 3000 ? 7 : targetHpBP <= 5000 ? 3 : lateBattle,
+    survive: actorHpBP <= 2500 ? 7 : actorHpBP <= 5000 ? 4 : 1,
+    control: targetAlreadyControlled ? 0 : targetHpBP >= 4500 ? 4 : 2,
+    setup: earlyBattle && targetHpBP >= 5000 ? 3 : earlyBattle,
+    attrition: targetHpBP >= 6500 ? 3 : targetHpBP >= 4000 ? 2 : 1
+  };
+}
+
+export function extractSkillFeatures(
+  skill: SkillDef,
+  context: DecisionContext,
+  projection: ProjectionSnapshot,
+  options: ScoreOptions = {}
+): SkillFeatures {
+  const targetHpBP = hpPercentBP(context.target);
+  const projectionEnabled = !options.disableForecast;
+
+  return {
+    basePower: Math.floor(skill.basePower / 10),
+    activeSkillPreference: skill.skillId === BASIC_ATTACK_SKILL_ID ? 0 : 1,
+    executeOpportunity:
+      skill.tags.includes('execute') && targetHpBP <= (skill.executeThresholdBP ?? 0) ? 1 : 0,
+    stunRedundancy: skill.tags.includes('stun') && context.target.statuses.includes('stunned') ? 1 : 0,
+    shieldbreakOpportunity: skill.tags.includes('shieldbreak') && context.target.statuses.includes('shielded') ? 1 : 0,
+    controlOpportunity: skill.tags.includes('stun') && !context.target.statuses.includes('stunned') ? 1 : 0,
+    defensiveShieldValue: hasSelfAppliedStatus(skill, 'shielded') && !context.actor.statuses.includes('shielded') ? 1 : 0,
+    defensiveRepairValue: hasSelfAppliedStatus(skill, 'recovering') && !context.actor.statuses.includes('recovering') ? 1 : 0,
+    setupOpportunity: hasTargetAppliedStatus(skill, 'overheated') && !context.target.statuses.includes('overheated') ? 1 : 0,
+    attritionOpportunity:
+      (hasTargetAppliedStatus(skill, 'overheated') && !context.target.statuses.includes('overheated')) ||
+      (hasSelfAppliedStatus(skill, 'shielded') && !context.actor.statuses.includes('shielded')) ||
+      (hasSelfAppliedStatus(skill, 'recovering') && !context.actor.statuses.includes('recovering'))
+        ? 1
+        : 0,
+    projectedOutgoingPressure: projectionEnabled ? normalizeProjectionValue(projection.projectedOutgoingDamage) : 0,
+    projectedIncomingMitigation: projectionEnabled
+      ? normalizeProjectionValue(Math.max(0, projection.projectedOutgoingDamage + projection.projectedRecovery - projection.projectedIncomingDamage))
+      : 0,
+    projectedRecoveryValue: projectionEnabled ? normalizeProjectionValue(projection.projectedRecovery) : 0,
+    projectedControlValue: projectionEnabled
+      ? Math.max(
+          0,
+          (hasTargetAppliedStatus(skill, 'stunned') && predictedOpponentCannotAttack(projection.predictedOpponentSkillId) ? 4 : 0) +
+            normalizeSignedProjectionValue(projection.projectedStatusSwing)
+        )
+      : 0
+  };
+}
+
+function predictedOpponentCannotAttack(skillId: string): boolean {
+  return getSkillDef(skillId).resolutionMode === 'self_utility';
+}
+
+function buildFeatureContributions(
+  features: SkillFeatures,
+  intentWeights: IntentWeights,
+  decisionModel: ArchetypeDecisionModel
+): readonly FeatureContribution[] {
+  return (Object.keys(features) as SkillFeatureId[]).map((featureId) => {
+    const value = features[featureId];
+    const priorScaleBP = getPriorWeightScaleBP(decisionModel);
+    const priorWeight = Math.trunc((FEATURE_PRIOR_WEIGHTS[featureId] * priorScaleBP) / 10000);
+    const priorContribution = value * priorWeight;
+    const perIntentWeights = Object.fromEntries(
+      Object.entries(FEATURE_INTENT_WEIGHTS[featureId]).map(([intentId, featureIntentWeight]) => [
+        intentId,
+        Math.trunc((featureIntentWeight * priorScaleBP) / 10000)
+      ])
+    ) as Partial<Record<IntentId, number>>;
+    const intentBreakdown: Partial<Record<IntentId, number>> = {};
+    let intentContribution = 0;
+
+    for (const [intentId, featureIntentWeight] of Object.entries(perIntentWeights) as [IntentId, number][]) {
+      const contribution = value * featureIntentWeight * intentWeights[intentId];
+      intentBreakdown[intentId] = contribution;
+      intentContribution += contribution;
+    }
+
+    const learnedFeatureTerm = scoreLearnedFeatureTerm(decisionModel, featureId, value);
+
+    return {
+      featureId,
+      value,
+      priorWeight,
+      priorContribution,
+      intentWeights: perIntentWeights,
+      intentBreakdown,
+      intentContribution,
+      learnedWeight: learnedFeatureTerm.learnedWeight,
+      learnedConfidenceBP: learnedFeatureTerm.confidenceBP,
+      learnedContribution: learnedFeatureTerm.contribution,
+      totalContribution: priorContribution + intentContribution + learnedFeatureTerm.contribution
+    };
+  });
+}
+
+function buildWeightBreakdown(
+  featureContributions: readonly FeatureContribution[],
+  learnedWeight: number
+): ScoreWeightBreakdown {
+  const perIntentContributionTotals: Record<IntentId, number> = {
+    finish: 0,
+    survive: 0,
+    control: 0,
+    setup: 0,
+    attrition: 0
+  };
+
+  for (const featureContribution of featureContributions) {
+    for (const intentId of Object.keys(perIntentContributionTotals) as IntentId[]) {
+      perIntentContributionTotals[intentId] += featureContribution.intentBreakdown[intentId] ?? 0;
+    }
+  }
+
+  const priorContributionTotal = featureContributions.reduce((sum, item) => sum + item.priorContribution, 0);
+  const intentContributionTotal = featureContributions.reduce((sum, item) => sum + item.intentContribution, 0);
+  const learnedFeatureContributionTotal = featureContributions.reduce((sum, item) => sum + item.learnedContribution, 0);
+
+  return {
+    priorContributionTotal,
+    intentContributionTotal,
+    learnedWeight,
+    learnedFeatureContributionTotal,
+    perIntentContributionTotals,
+    featureContributionTotal: priorContributionTotal + intentContributionTotal + learnedFeatureContributionTotal,
+    totalScore: priorContributionTotal + intentContributionTotal + learnedFeatureContributionTotal + learnedWeight
+  };
+}
+
+function scoreSkill(
+  skill: SkillDef,
+  context: DecisionContext,
+  decisionModel: ArchetypeDecisionModel,
+  intentWeights: IntentWeights,
+  predictedOpponentSkill: SkillDef,
+  options: ScoreOptions = {}
+): SkillScoreBreakdown {
+  const projections = buildProjectionSnapshot(skill, context, predictedOpponentSkill);
+  const features = extractSkillFeatures(skill, context, projections, options);
+  const featureContributions = buildFeatureContributions(features, intentWeights, decisionModel);
+  const learnedWeight = scoreLearnedWeightTerm(decisionModel, skill.skillId);
+  const weightBreakdown = buildWeightBreakdown(featureContributions, learnedWeight);
+  const { priorContributionTotal, intentContributionTotal, totalScore } = weightBreakdown;
+
+  return {
+    skillId: skill.skillId,
+    basePower: features.basePower,
+    activeSkillBonus: features.activeSkillPreference * FEATURE_PRIOR_WEIGHTS.activeSkillPreference,
+    executeBonus: features.executeOpportunity * FEATURE_PRIOR_WEIGHTS.executeOpportunity,
+    stunPenalty: features.stunRedundancy * FEATURE_PRIOR_WEIGHTS.stunRedundancy,
+    shieldbreakBonus: features.shieldbreakOpportunity * FEATURE_PRIOR_WEIGHTS.shieldbreakOpportunity,
+    learnedWeight,
+    priorContributionTotal,
+    intentContributionTotal,
+    intentWeights,
+    features,
+    projections,
+    featureContributions,
+    weightBreakdown,
+    totalScore
+  };
+}
+
 export function chooseAction(
-  actorActiveSkillIds: readonly [string, string],
-  actorCooldowns: Record<string, number>,
-  target: DecisionCombatantSnapshot,
-  skillWeights: ArchetypeSkillWeights = {},
-  decisionLogger?: DecisionLogger
+  context: DecisionContext,
+  decisionModel: ArchetypeDecisionModel = {},
+  decisionLogger?: DecisionLogger,
+  options: ScoreOptions = {}
 ): CandidateAction {
+  const { actor } = context;
   const candidateSkillIds: string[] = [BASIC_ATTACK_SKILL_ID];
 
-  /**
-   * @see: It is worth mentioning but not implementing now for the initial MVP or aiDecision version that agents should be able to think ahead.
-   *        Think ahead in the sense that they factor in future availability of other actions. Like for example, they can see that in the next
-   *        turn, their high damage skill but with low-hit chance is going to be available, they might prioritize using a 'stun' skill for this
-   *        turn so the next turn they can use such high-damage skill successfully.
-   * 
-   *        This might sound interesting but might be too complex for MVP. But leaving a note for this.
-   */
-  for (const activeSkillId of actorActiveSkillIds) {
-    if ((actorCooldowns[activeSkillId] ?? 0) === 0) {
+  for (const activeSkillId of actor.activeSkillIds) {
+    if ((actor.cooldowns[activeSkillId] ?? 0) === 0) {
       candidateSkillIds.push(activeSkillId);
     }
   }
 
+  const intentWeights = deriveIntentWeights(context);
+  const predictedOpponentSkillId = options.disableForecast
+    ? BASIC_ATTACK_SKILL_ID
+    : predictOpponentAction(context, decisionModel).skillId;
+  const predictedOpponentSkill = getSkillDef(predictedOpponentSkillId);
   const ordered = candidateSkillIds
-    .map((skillId) => ({ skillId, score: scoreSkill(getSkillDef(skillId), target, skillWeights) }))
+    .map((skillId) => ({
+      skillId,
+      score: scoreSkill(getSkillDef(skillId), context, decisionModel, intentWeights, predictedOpponentSkill, options)
+    }))
     .sort((a, b) => {
-      if (a.score.totalScore !== b.score.totalScore) {
-        return b.score.totalScore - a.score.totalScore;
-      }
-
-      // Lexical tie-break keeps action selection deterministic for replay and test consistency.
+      if (a.score.totalScore !== b.score.totalScore) return b.score.totalScore - a.score.totalScore;
       return a.skillId.localeCompare(b.skillId);
     });
 
   decisionLogger?.({
-    actorActiveSkillIds,
-    actorCooldowns: { ...actorCooldowns },
-    target,
+    traceVersion: 'decision-trace.v6',
+    actorActiveSkillIds: actor.activeSkillIds,
+    actorCooldowns: { ...actor.cooldowns },
+    target: context.target,
+    context,
+    intentWeights,
+    predictedOpponentSkillId,
     candidateSkillIds,
     scores: ordered.map((entry) => entry.score),
-    selectedSkillId: ordered[0].skillId
+    selectedSkillId: ordered[0].skillId,
+    selectedScore: ordered[0].score
   });
 
   return { skillId: ordered[0].skillId };

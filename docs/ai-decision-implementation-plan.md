@@ -237,6 +237,12 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 - decision traces expose the richer context,
 - legacy-equivalent action selection is preserved under transitional defaults.
 
+**Status update (completed on current branch)**:
+- `DecisionContext`, `DecisionBattleSnapshot`, and richer `DecisionCombatantSnapshot` contracts were added in `engine/battle/aiDecision.ts`.
+- `battleEngine.ts` now constructs actor/target/battle snapshots and passes them into `chooseAction(...)`.
+- Decision traces are versioned as `decision-trace.v2` and include the full `context` payload while preserving legacy parity scoring.
+- Coverage was updated in `tests/aiDecision.decisionLog.test.ts`, `tests/learning.test.ts`, and `tests/combatSimulation.scenarioMatrix.test.ts` to verify trace shape, API usage, and deterministic parity.
+
 ### Slice 2 — Intent-aware tactical behavior
 
 **Goal**: deliver the first visible decision-quality improvement, especially around finish/survive/control tradeoffs.
@@ -268,6 +274,8 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 
 **Goal**: deliver lightweight anticipation so setup/control can be valued for near-future payoff.
 
+**Status**: completed on the current branch via deterministic mirrored opponent prediction, bounded projection-derived features, and `decision-trace.v5` logging/test coverage with full action-weight breakdowns.
+
 **Touches capabilities**:
 - WS2 feature extraction updates,
 - WS4 opponent prediction and one-turn projections,
@@ -292,6 +300,8 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 - scenario tests prove projections change decisions in expected spots.
 
 ### Slice 4 — Weak-prior learning progression
+
+**Status**: completed on the current branch via near-neutral learning-state initialization, bounded feature-residual updates with confidence/decay, `decision-trace.v6` learned-feature accounting, and deterministic regression-league progression coverage.
 
 **Goal**: deliver the Option B promise that repeated combat meaningfully improves policy from near-neutral priors.
 
@@ -320,7 +330,7 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 
 ## Milestones and Timeline (single engineer estimate)
 
-1. **M1 (Week 1)**: Slice 1 complete (WS1 + WS2 + WS6 parity plumbing).
+1. **M1 (Week 1)**: Slice 1 complete (WS1 + WS2 + WS6 parity plumbing). **Status:** completed on current branch.
 2. **M2 (Week 2)**: Slice 2 complete (WS2 + WS3 tactical behavior improvements).
 3. **M3 (Week 3)**: Slice 3 complete (WS2 + WS4 one-turn forecasting).
 4. **M4 (Week 4)**: Slice 4 complete (WS5 + WS6 learning progression gates).
@@ -341,13 +351,55 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 - `docs/ai-decision-design-trajectory.md`
   - architecture and rationale summary.
 
+## Future Add-On Backlog
+
+These are intentionally **post-slice** follow-ons, not part of the current Slice 2 delivery scope. They should build on the existing feature/intent scaffolding without replacing the Option B weak-prior + learning direction.
+
+### Add-on A — Personality templates for prior weights
+
+**Goal**: allow authored style presets to shape the initial feature-prior layer while remaining weak enough for learning to dominate over time.
+
+**Expected shape**:
+- add a `personalityTemplate` concept at archetype or combatant configuration level,
+- map each template to low-magnitude offsets over the default feature prior table,
+- keep learned residuals separate from those authored offsets,
+- surface template-derived prior contributions in decision traces.
+
+**Examples**:
+- aggressive → slightly higher finish/offense-related prior weights,
+- cautious → slightly higher defensive prior weights,
+- controller → slightly higher control-oriented prior weights,
+- attrition → slightly higher setup/attrition prior weights.
+
+### Add-on B — Strategy templates for intent thresholds
+
+**Goal**: allow authored tactical framing to modify how context becomes intent weights without bypassing context-driven derivation.
+
+**Expected shape**:
+- add a `strategyTemplate` concept that parameterizes `deriveIntentWeights(...)`,
+- express templates as threshold/ramp adjustments rather than fixed final intent overrides,
+- keep resulting intent weights deterministic and explainable from battle context plus template parameters,
+- surface strategy-template influence in traces alongside the final intent weights.
+
+**Examples**:
+- rushdown → enter finish pressure earlier and tolerate lower survival pressure,
+- turtle → raise survival/attrition sensitivity earlier,
+- control → hold control/setup pressure higher into neutral states,
+- opportunist → sharpen finish spikes near conversion windows.
+
+**Guardrail for both add-ons**:
+- keep authored template influence low-magnitude,
+- avoid hard tactical scripts,
+- preserve deterministic tie-break behavior,
+- and ensure learning residuals can still dominate long-run policy.
+
 ## Definition of Done
 
 - Deterministic behavior verified for same seed and model version.
 - Transitional parity achieved for `feature_v1` defaults in baseline scenarios.
 - Intent behavior tests cover at least 5 tactical scenarios.
-- Trace output explains selected action with named feature contributions.
-- Documentation updated with tuning guidance and migration notes.
+- Trace output explains selected action with named feature contributions, including learned feature residuals in `decision-trace.v6`.
+- Documentation updated with tuning guidance and migration notes, including Slice 4 weak-prior progression notes.
 
 ## Risks and Mitigations
 
@@ -364,9 +416,9 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 
 ## Backlog Tickets (suggested)
 
-1. `AI-101` Add `DecisionContext` and battle-engine plumbing.
+1. `AI-101` Add `DecisionContext` and battle-engine plumbing. **Status:** completed.
 2. `AI-102` Introduce feature extraction and weighted scorer parity mode.
-3. `AI-103` Add decision trace v2 with feature contributions.
+3. `AI-103` Add decision trace v2 with feature contributions. **Status:** trace-version/context plumbing completed; per-feature contribution expansion still pending.
 4. `AI-104` Add intent-weight derivation and utility aggregation.
 5. `AI-105` Add opponent action predictor and one-turn projection helpers.
 6. `AI-106` Add bounded feature-level learning residuals.
@@ -377,8 +429,8 @@ Each slice below contains the **actual implementation tasks** for a coding agent
 ## Rollout Strategy
 
 1. Ship `feature_v1` behind config flag, default to legacy.
-2. Land Slice 1 and run CI scenario matrix comparing legacy vs transitional parity.
+2. ✅ Slice 1 landed: context + trace v2 plumbing and scenario-matrix parity checks are complete on the current branch.
 3. Land Slice 2 and require behavior gates for finish/survive/control scenarios.
 4. Land Slice 3 and require projection-aware determinism and trace coverage.
-5. Land Slice 4, reduce priors toward weak-prior defaults, and validate deterministic learning progression.
+5. ✅ Slice 4 landed: weak-prior learning state, bounded feature residuals, and deterministic learning-progression gates are complete on the current branch.
 6. Promote `feature_v1` to default when parity, behavior, projection, and learning-progression gates are green.

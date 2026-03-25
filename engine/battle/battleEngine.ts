@@ -8,7 +8,7 @@ import { getStatusDef, isStatusId, type StatusId } from './statuses/statusRegist
 import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/resolverRegistry';
 import type { StatusResolvePhase } from './statuses/types';
-import type { ArchetypeSkillWeights } from './learning';
+import type { ArchetypeDecisionModel } from './learning';
 import type { BattleEvent, BattleResult } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
@@ -19,8 +19,8 @@ export type BattleInput = {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
-  playerSkillWeights?: ArchetypeSkillWeights;
-  enemySkillWeights?: ArchetypeSkillWeights;
+  playerSkillWeights?: ArchetypeDecisionModel;
+  enemySkillWeights?: ArchetypeDecisionModel;
   maxRounds?: number;
   decisionLogger?: (decision: { round: number; actorId: string; targetId: string; trace: DecisionTrace }) => void;
 };
@@ -196,12 +196,36 @@ export function simulateBattle(input: BattleInput): BattleResult {
       }
 
       const selectedAction = chooseAction(
-        actor.activeSkillIds,
-        actor.cooldowns,
         {
-          hp: target.hp,
-          hpMax: target.hpMax,
-          statuses: getActiveStatusIds(target)
+          actor: {
+            entityId: actor.entityId,
+            hp: actor.hp,
+            hpMax: actor.hpMax,
+            atk: actor.atk,
+            def: actor.def,
+            accuracyBP: actor.accuracyBP,
+            evadeBP: actor.evadeBP,
+            statuses: getActiveStatusIds(actor),
+            activeSkillIds: actor.activeSkillIds,
+            cooldowns: { ...actor.cooldowns }
+          },
+          target: {
+            entityId: target.entityId,
+            hp: target.hp,
+            hpMax: target.hpMax,
+            atk: target.atk,
+            def: target.def,
+            accuracyBP: target.accuracyBP,
+            evadeBP: target.evadeBP,
+            statuses: getActiveStatusIds(target),
+            activeSkillIds: target.activeSkillIds,
+            cooldowns: { ...target.cooldowns }
+          },
+          battle: {
+            round,
+            maxRounds,
+            roundsRemaining: Math.max(0, maxRounds - round)
+          }
         },
         actorIndex === 0 ? (input.playerSkillWeights ?? {}) : (input.enemySkillWeights ?? {}),
         (trace) => {

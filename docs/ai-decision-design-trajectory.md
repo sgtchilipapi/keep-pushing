@@ -77,6 +77,8 @@ Under Option B:
 ### 1) Decision context expansion
 Introduce a read-only `DecisionContext` passed from battle engine to AI scorer.
 
+**Status**: completed on the current branch for the Slice 1 parity increment and expanded in Slice 3; actor/target/battle snapshots now flow into `chooseAction(...)`, decision traces include a versioned `context` payload, and the snapshots carry the combat stats needed for deterministic one-turn forecasting.
+
 ```ts
 export type DecisionContext = {
   actor: {
@@ -132,6 +134,19 @@ Add dynamic intent weights (`finish`, `survive`, `control`, `setup`, `attrition`
 
 ### 5) Opponent action likelihood (lightweight)
 Estimate probable next opponent action via mirrored deterministic scoring (top-1 or top-k normalized ranking), then reuse it for projected incoming damage/recovery proxies.
+
+### Future add-on: personality priors and strategy templates
+Two future extensions fit the current Option B direction well if they remain low-magnitude and fully traceable:
+
+- **Personality templates as base priors**: personality presets such as aggressive, cautious, controller, or attrition-focused can provide small feature-prior offsets on top of the neutral/default weight table. This should affect the prior layer only, so learning can still dominate long-run behavior.
+- **Strategy templates as intent-derivation presets**: strategy presets such as rushdown, turtle, control, or opportunist can adjust the thresholds and ramps used by `deriveIntentWeights(...)` rather than directly hardcoding final intent weights. This preserves deterministic, context-explainable intent outputs while allowing authored tactical framing.
+
+Recommended constraint for both add-ons:
+
+- keep templates additive and low-magnitude,
+- keep them separate from learned residuals,
+- expose their contribution in decision traces,
+- and avoid using them as hard tactical scripts.
 
 ## Delivery Phases and Cost Envelope
 
@@ -243,14 +258,18 @@ So the Option B goal is:
 
 ## Immediate Next Steps
 
-1. Land `DecisionContext` plumbing and AI trace v2 fields.
-2. Implement feature extraction that mirrors current behavior under **weak-prior defaults**.
-3. Add parity tests proving no behavior regression with the transitional defaults.
-4. Add a focused behavior suite for finish/survive/control/setup choices.
-5. Implement learning calibration batches that verify long-run policy movement away from priors.
-6. Implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
+1. ✅ Landed `DecisionContext` plumbing and AI trace v2 fields on the current branch.
+2. Next: implement feature extraction that mirrors current behavior under **weak-prior defaults**.
+3. Next: add parity tests proving no behavior regression with the transitional defaults.
+4. Next: add a focused behavior suite for finish/survive/control/setup choices.
+5. Next: implement learning calibration batches that verify long-run policy movement away from priors.
+6. Next: implement one-turn projection helpers for expected incoming/outgoing damage and recovery.
 
 ## Related Documents
 
 - `docs/ai-decision-implementation-plan.md` (detailed execution plan)
 - `docs/planned-features.md` (portfolio-level tracking)
+
+## Current delivery note
+
+Slice 3 is now implemented on the current branch: the scorer predicts the opponent's most likely action with mirrored deterministic evaluation, projects one-turn outgoing/incoming pressure plus simple round-start status continuation, and records those projection terms plus the full selected-action weight breakdown in `decision-trace.v5`.
