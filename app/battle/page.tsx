@@ -478,7 +478,7 @@ export default function BattleDashboardPage() {
         </div>
         <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em', textAlign: 'center' }}>ROUND {currentRound}</div>
 
-        <section style={{ border: '2px solid #fff', height: '58vh', display: 'grid', gridTemplateRows: '70% 30%', overflow: 'hidden' }}>
+        <section style={{ border: '2px solid #fff', minHeight: '58vh', display: 'grid', gridTemplateRows: '70% 30%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff' }}>
             <ArenaCell
               name={leftCharacter.name ?? leftCharacter.entityId}
@@ -500,7 +500,7 @@ export default function BattleDashboardPage() {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
             <StatsCell
               hp={leftHp}
               hpMax={leftCharacter.hpMax}
@@ -592,7 +592,7 @@ function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProp
   const initiativePercent = Math.max(0, Math.min(100, Math.round((initiative / 200) * 100)));
 
   return (
-    <article style={{ borderRight: '2px solid #fff', padding: '0.75rem', overflowY: 'auto' }}>
+    <article style={{ borderRight: '2px solid #fff', padding: '0.75rem' }}>
       <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '0.7rem' }}>
         <span>HP:</span>
         <div style={{ height: 20, border: '1px solid #fff', background: '#1b1b1b' }}>
