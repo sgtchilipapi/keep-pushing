@@ -256,7 +256,14 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     let cursor = index;
     while (cursor < result.events.length) {
       const event = result.events[cursor];
-      if (cursor > index && (event.type === 'ACTION' || event.type === 'STUNNED_SKIP')) {
+      if (
+        cursor > index &&
+        (
+          event.type === 'ACTION' ||
+          event.type === 'STUNNED_SKIP' ||
+          (event.type === 'STATUS_EFFECT_RESOLVE' && event.phase === 'onRoundStart' && event.hpDelta !== 0)
+        )
+      ) {
         break;
       }
 
