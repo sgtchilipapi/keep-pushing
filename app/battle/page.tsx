@@ -345,6 +345,27 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     index = cursor;
   }
 
+  const lastFrame = frames[frames.length - 1];
+  if (
+    lastFrame !== undefined &&
+    (
+      lastFrame.displayLeftHp !== displayLeftHp ||
+      lastFrame.displayRightHp !== displayRightHp ||
+      JSON.stringify(lastFrame.displayLeftCooldowns) !== JSON.stringify(displayLeftCooldowns) ||
+      JSON.stringify(lastFrame.displayRightCooldowns) !== JSON.stringify(displayRightCooldowns)
+    )
+  ) {
+    frames.push({
+      ...lastFrame,
+      displayLeftHp,
+      displayRightHp,
+      displayLeftCooldowns: { ...displayLeftCooldowns },
+      displayRightCooldowns: { ...displayRightCooldowns },
+      leftFlash: null,
+      rightFlash: null
+    });
+  }
+
   return frames;
 }
 
@@ -354,7 +375,7 @@ export default function BattleDashboardPage() {
   const [result, setResult] = useState<BattleResult | null>(null);
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [battleStarted, setBattleStarted] = useState(false);
+  const [isRequestingBattle, setIsRequestingBattle] = useState(false);
 
   const frames = useMemo(() => (result ? buildFrames(result) : []), [result]);
   const currentFrame = frames[currentFrameIndex];
@@ -372,6 +393,7 @@ export default function BattleDashboardPage() {
   }, [result]);
 
   const runBattle = useCallback(async () => {
+    setIsRequestingBattle(true);
     setIsPlaying(false);
     setCurrentFrameIndex(0);
 
@@ -387,6 +409,7 @@ export default function BattleDashboardPage() {
 
     if (!response.ok) {
       setResult(null);
+      setIsRequestingBattle(false);
       return;
     }
 
@@ -394,7 +417,7 @@ export default function BattleDashboardPage() {
     setResult(battleResult);
     setCurrentFrameIndex(0);
     setIsPlaying(true);
-    setBattleStarted(true);
+    setIsRequestingBattle(false);
   }, [leftCharacter, rightCharacter]);
 
   useEffect(() => {
@@ -417,6 +440,16 @@ export default function BattleDashboardPage() {
     return () => window.clearInterval(timer);
   }, [frames.length, isPlaying]);
 
+  useEffect(() => {
+    if (!isPlaying) {
+      return;
+    }
+
+    if (currentFrameIndex >= frames.length - 1) {
+      setIsPlaying(false);
+    }
+  }, [currentFrameIndex, frames.length, isPlaying]);
+
   const leftHp = currentFrame?.displayLeftHp ?? leftCharacter.hp;
   const rightHp = currentFrame?.displayRightHp ?? rightCharacter.hp;
   const battleId = result?.battleId ?? '—';
@@ -424,6 +457,8 @@ export default function BattleDashboardPage() {
   const rightActionText = currentFrame?.actionLabelSide === 'right' ? currentFrame.actionLabelText : '';
   const leftSkills = ['1000', ...leftCharacter.activeSkillIds];
   const rightSkills = ['1000', ...rightCharacter.activeSkillIds];
+  const currentRound = currentFrame?.event.round ?? 1;
+  const controlsDisabled = isPlaying || isRequestingBattle;
 
   return (
     <main style={{ minHeight: '100vh', background: '#000', color: '#fff', padding: '1rem' }}>
@@ -433,16 +468,17 @@ export default function BattleDashboardPage() {
         </header>
 
         <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: '1fr 1fr' }}>
-          <button type="button" disabled={battleStarted} onClick={() => setLeftCharacter(buildRandomCharacter('10001', 'left'))} style={buttonStyle}>
+          <button type="button" disabled={controlsDisabled} onClick={() => setLeftCharacter(buildRandomCharacter('10001', 'left'))} style={buttonStyle}>
             Randomize Left
           </button>
-          <button type="button" disabled={battleStarted} onClick={() => setRightCharacter(buildRandomCharacter('20001', 'right'))} style={buttonStyle}>
+          <button type="button" disabled={controlsDisabled} onClick={() => setRightCharacter(buildRandomCharacter('20001', 'right'))} style={buttonStyle}>
             Randomize Right
           </button>
-          <button type="button" disabled={battleStarted} onClick={runBattle} style={{ ...buttonStyle, gridColumn: '1 / -1' }}>
+          <button type="button" disabled={controlsDisabled} onClick={runBattle} style={{ ...buttonStyle, gridColumn: '1 / -1' }}>
             Start Replay
           </button>
         </div>
+        <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em' }}>ROUND {currentRound}</div>
 
         <section style={{ border: '2px solid #fff', minHeight: '58vh', display: 'grid', gridTemplateRows: '70% 30%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff' }}>
