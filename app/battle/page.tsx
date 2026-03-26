@@ -8,7 +8,7 @@ import type { CombatantSnapshot } from '../../types/combat';
 type Side = 'left' | 'right';
 
 type ReplayFrame = {
-  event: Extract<BattleEvent, { type: 'ACTION' | 'STUNNED_SKIP' }>;
+  event: Extract<BattleEvent, { type: 'ACTION' | 'STUNNED_SKIP' | 'STATUS_EFFECT_RESOLVE' }>;
   logCursorIndex: number;
   leftHp: number;
   rightHp: number;
@@ -159,6 +159,17 @@ function decrementCooldowns(cooldowns: Record<string, number>): Record<string, n
   return Object.fromEntries(Object.entries(cooldowns).map(([skillId, value]) => [skillId, Math.max(0, value - 1)]));
 }
 
+function toStatusName(statusId: string): string {
+  return statusId
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function formatDelta(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
 function buildFrames(result: BattleResult): ReplayFrame[] {
   const leftId = result.playerInitial.entityId;
   const rightId = result.enemyInitial.entityId;
@@ -188,6 +199,41 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
 
   while (index < result.events.length) {
     const mainEvent = result.events[index];
+
+    if (mainEvent.type === 'STATUS_EFFECT_RESOLVE' && mainEvent.phase === 'onRoundStart' && mainEvent.hpDelta !== 0) {
+      const event = mainEvent;
+      let actionLabelSide: Side | null = event.targetId === leftId ? 'left' : event.targetId === rightId ? 'right' : null;
+      let actionLabelText = `${toStatusName(event.statusId)} (${formatDelta(event.hpDelta)})`;
+
+      if (event.targetId === leftId) {
+        leftHp = event.targetHpAfter;
+      }
+      if (event.targetId === rightId) {
+        rightHp = event.targetHpAfter;
+      }
+
+      frames.push({
+        event,
+        logCursorIndex: index,
+        leftHp,
+        rightHp,
+        displayLeftHp,
+        displayRightHp,
+        leftCooldowns: { ...leftCooldowns },
+        rightCooldowns: { ...rightCooldowns },
+        displayLeftCooldowns: { ...displayLeftCooldowns },
+        displayRightCooldowns: { ...displayRightCooldowns },
+        actionLabelSide,
+        actionLabelText,
+        leftFlash: event.targetId === leftId ? (event.hpDelta < 0 ? 'damage' : 'recover') : null,
+        rightFlash: event.targetId === rightId ? (event.hpDelta < 0 ? 'damage' : 'recover') : null,
+        logLine: formatEventLine(event, leftId, leftName, rightId, rightName)
+      });
+
+      index += 1;
+      continue;
+    }
+
     if (mainEvent.type !== 'ACTION' && mainEvent.type !== 'STUNNED_SKIP') {
       index += 1;
       continue;
@@ -201,6 +247,7 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     let logLine = formatEventLine(mainEvent, leftId, leftName, rightId, rightName);
     let skillName = mainEvent.type === 'ACTION' ? SKILL_META[mainEvent.skillId]?.name ?? mainEvent.skillId : 'Turn';
     let didHit: boolean | null = null;
+    let actionHpDelta = 0;
 
     if (mainEvent.type === 'ACTION') {
       lastUsedSkillByActor = { ...lastUsedSkillByActor, [mainEvent.actorId]: skillName };
@@ -218,9 +265,11 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
 
       if (event.type === 'DAMAGE') {
         if (event.targetId === leftId) {
+          actionHpDelta += leftHp - event.targetHpAfter;
           leftHp = event.targetHpAfter;
         }
         if (event.targetId === rightId) {
+          actionHpDelta += rightHp - event.targetHpAfter;
           rightHp = event.targetHpAfter;
         }
       }
@@ -260,11 +309,9 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     if (mainEvent.type === 'STUNNED_SKIP') {
       actionLabelText = `${formatCombatantName(mainEvent.actorId, leftId, leftName, rightId, rightName)} is stunned and lost the turn!`;
     } else {
-      if (didHit === null && (mainEvent.skillId === '1004' || mainEvent.skillId === '1005')) {
-        actionLabelText = `${formatCombatantName(mainEvent.actorId, leftId, leftName, rightId, rightName)} used ${skillName} successfully!`;
-      } else {
-        actionLabelText = `${formatCombatantName(mainEvent.actorId, leftId, leftName, rightId, rightName)} used ${lastUsedSkillByActor[mainEvent.actorId] ?? skillName} and ${didHit ? 'hit!' : 'missed!'}`;
-      }
+      const actionName = lastUsedSkillByActor[mainEvent.actorId] ?? skillName;
+      const signedDelta = didHit === false ? 0 : -actionHpDelta;
+      actionLabelText = `${actionName} (${formatDelta(signedDelta)})`;
     }
 
     const leftDelta = leftHp - tickStartLeftHp;
