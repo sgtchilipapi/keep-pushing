@@ -393,7 +393,7 @@ export default function BattleDashboardPage() {
   }, [result]);
   const visibleBattleLogLines = useMemo(() => {
     const cursor = currentFrame?.logCursorIndex ?? -1;
-    return battleLogLines.slice(0, cursor + 1);
+    return battleLogLines.slice(0, cursor + 1).reverse();
   }, [battleLogLines, currentFrame?.logCursorIndex]);
 
   const runBattle = useCallback(async () => {
@@ -526,7 +526,7 @@ export default function BattleDashboardPage() {
             {visibleBattleLogLines.map((line, index) => (
               <li
                 key={`battle-log-${index}`}
-                style={{ fontWeight: index === (currentFrame?.logCursorIndex ?? -1) ? 700 : 400 }}
+                style={{ fontWeight: index === 0 ? 700 : 400 }}
               >
                 {line}
               </li>
