@@ -478,8 +478,8 @@ export default function BattleDashboardPage() {
         </div>
         <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em', textAlign: 'center' }}>ROUND {currentRound}</div>
 
-        <section style={{ border: '2px solid #fff', minHeight: '58vh', display: 'grid', gridTemplateRows: '70% 30%' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff' }}>
+        <section style={{ border: '2px solid #fff' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff', minHeight: 320 }}>
             <ArenaCell
               name={leftCharacter.name ?? leftCharacter.entityId}
               actionText={leftActionText}
@@ -550,7 +550,7 @@ function ArenaCell({ name, actionText, side, isActive, flash, onRandomize, rando
   const flashColor = flash === 'damage' ? 'rgba(255, 120, 120, 0.35)' : flash === 'recover' ? 'rgba(120, 255, 160, 0.35)' : undefined;
 
   return (
-    <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr', gap: '0.75rem', position: 'relative' }}>
+    <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr auto', gap: '0.75rem' }}>
       <p style={{ margin: 0, border: '1px solid #fff', padding: '0.5rem', minHeight: '3rem', background: '#0d0d0d' }}>{actionText}</p>
       <div
         style={{
@@ -566,15 +566,17 @@ function ArenaCell({ name, actionText, side, isActive, flash, onRandomize, rando
       >
         {name}
       </div>
-      <button
-        type="button"
-        onClick={onRandomize}
-        disabled={randomizeDisabled}
-        style={{ position: 'absolute', bottom: 10, right: 10, width: 28, height: 28, border: '1px solid #fff', borderRadius: 4, background: '#000', color: '#fff', cursor: randomizeDisabled ? 'not-allowed' : 'pointer', opacity: randomizeDisabled ? 0.45 : 1 }}
-        title={`Randomize ${side}`}
-      >
-        🎲
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onRandomize}
+          disabled={randomizeDisabled}
+          style={{ width: 28, height: 28, border: '1px solid #fff', borderRadius: 4, background: '#000', color: '#fff', cursor: randomizeDisabled ? 'not-allowed' : 'pointer', opacity: randomizeDisabled ? 0.45 : 1 }}
+          title={`Randomize ${side}`}
+        >
+          🎲
+        </button>
+      </div>
     </article>
   );
 }
@@ -605,24 +607,21 @@ function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProp
           <div style={{ width: `${initiativePercent}%`, height: '100%', background: '#9a9a9a' }} />
         </div>
       </div>
-      <div style={{ display: 'grid', gap: '0.35rem' }}>
-        <span>Actions:</span>
-        {skillIds.map((skillId) => {
-          const cooldown = cooldowns[skillId] ?? 0;
-          const disabled = cooldown > 0;
-
-          return (
-            <div
-              key={skillId}
-              style={{ border: '1px solid #fff', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 8, padding: '0.25rem 0.4rem', opacity: disabled ? 0.4 : 1, background: disabled ? '#2b2b2b' : '#000' }}
-            >
-              <span style={{ display: 'inline-grid', placeItems: 'center' }}>{SKILL_META[skillId]?.icon ?? '◻'}</span>
-              <span>{SKILL_META[skillId]?.name ?? skillId}</span>
-              <small>{cooldown > 0 ? `CD ${cooldown}` : 'Ready'}</small>
-            </div>
-          );
-        })}
-      </div>
+      <section>
+        <h4>Actions</h4>
+        <ul>
+          {skillIds.map((skillId) => {
+            const cooldown = cooldowns[skillId] ?? 0;
+            return (
+              <li key={skillId}>
+                <span>{SKILL_META[skillId]?.icon ?? '◻'} </span>
+                <span>{SKILL_META[skillId]?.name ?? skillId} </span>
+                <small>{cooldown > 0 ? `CD ${cooldown}` : 'Ready'}</small>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
     </article>
   );
 }
