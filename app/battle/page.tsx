@@ -471,18 +471,12 @@ export default function BattleDashboardPage() {
           Battle ID: {battleId}
         </header>
 
-        <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: '1fr 1fr' }}>
-          <button type="button" disabled={controlsDisabled} onClick={() => setLeftCharacter(buildRandomCharacter('10001', 'left'))} style={buttonStyle}>
-            Randomize Left
-          </button>
-          <button type="button" disabled={controlsDisabled} onClick={() => setRightCharacter(buildRandomCharacter('20001', 'right'))} style={buttonStyle}>
-            Randomize Right
-          </button>
+        <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: '1fr' }}>
           <button type="button" disabled={controlsDisabled} onClick={runBattle} style={{ ...buttonStyle, gridColumn: '1 / -1' }}>
-            Start Replay
+            Simulate Battle
           </button>
         </div>
-        <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em' }}>ROUND {currentRound}</div>
+        <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em', textAlign: 'center' }}>ROUND {currentRound}</div>
 
         <section style={{ border: '2px solid #fff', minHeight: '58vh', display: 'grid', gridTemplateRows: '70% 30%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff' }}>
@@ -491,6 +485,8 @@ export default function BattleDashboardPage() {
               actionText={leftActionText}
               side="left"
               flash={currentFrame?.leftFlash ?? null}
+              onRandomize={() => setLeftCharacter(buildRandomCharacter('10001', 'left'))}
+              randomizeDisabled={controlsDisabled}
               isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === leftCharacter.entityId}
             />
             <ArenaCell
@@ -498,6 +494,8 @@ export default function BattleDashboardPage() {
               actionText={rightActionText}
               side="right"
               flash={currentFrame?.rightFlash ?? null}
+              onRandomize={() => setRightCharacter(buildRandomCharacter('20001', 'right'))}
+              randomizeDisabled={controlsDisabled}
               isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === rightCharacter.entityId}
             />
           </div>
@@ -544,13 +542,15 @@ type ArenaCellProps = {
   side: Side;
   isActive: boolean;
   flash: 'damage' | 'recover' | null;
+  onRandomize: () => void;
+  randomizeDisabled: boolean;
 };
 
-function ArenaCell({ name, actionText, side, isActive, flash }: ArenaCellProps) {
+function ArenaCell({ name, actionText, side, isActive, flash, onRandomize, randomizeDisabled }: ArenaCellProps) {
   const flashColor = flash === 'damage' ? 'rgba(255, 120, 120, 0.35)' : flash === 'recover' ? 'rgba(120, 255, 160, 0.35)' : undefined;
 
   return (
-    <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr', gap: '0.75rem' }}>
+    <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr', gap: '0.75rem', position: 'relative' }}>
       <p style={{ margin: 0, border: '1px solid #fff', padding: '0.5rem', minHeight: '3rem', background: '#0d0d0d' }}>{actionText}</p>
       <div
         style={{
@@ -566,6 +566,15 @@ function ArenaCell({ name, actionText, side, isActive, flash }: ArenaCellProps) 
       >
         {name}
       </div>
+      <button
+        type="button"
+        onClick={onRandomize}
+        disabled={randomizeDisabled}
+        style={{ position: 'absolute', bottom: 10, right: 10, width: 28, height: 28, border: '1px solid #fff', borderRadius: 4, background: '#000', color: '#fff', cursor: randomizeDisabled ? 'not-allowed' : 'pointer', opacity: randomizeDisabled ? 0.45 : 1 }}
+        title={`Randomize ${side}`}
+      >
+        🎲
+      </button>
     </article>
   );
 }
@@ -579,35 +588,38 @@ type StatsCellProps = {
 };
 
 function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProps) {
+  const hpPercent = Math.max(0, Math.min(100, Math.round((hp / hpMax) * 100)));
+  const initiativePercent = Math.max(0, Math.min(100, Math.round((initiative / 200) * 100)));
+
   return (
     <article style={{ borderRight: '2px solid #fff', padding: '0.75rem' }}>
-      <p style={{ margin: '0 0 0.3rem' }}>HP: {hp}/{hpMax}</p>
-      <p style={{ margin: '0 0 0.5rem' }}>Initiative: {initiative}</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '0.7rem' }}>
+        <span>HP:</span>
+        <div style={{ height: 20, border: '1px solid #fff', background: '#1b1b1b' }}>
+          <div style={{ width: `${hpPercent}%`, height: '100%', background: '#fff' }} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: '0.3rem', marginBottom: '0.75rem' }}>
+        <span>Initiative:</span>
+        <div style={{ height: 12, border: '1px solid #fff', background: '#1b1b1b' }}>
+          <div style={{ width: `${initiativePercent}%`, height: '100%', background: '#9a9a9a' }} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: '0.35rem' }}>
         <span>Actions:</span>
         {skillIds.map((skillId) => {
           const cooldown = cooldowns[skillId] ?? 0;
           const disabled = cooldown > 0;
 
           return (
-            <span
+            <div
               key={skillId}
-              title={SKILL_META[skillId]?.name ?? skillId}
-              style={{
-                minWidth: 32,
-                height: 32,
-                border: '1px solid #fff',
-                display: 'inline-grid',
-                placeItems: 'center',
-                opacity: disabled ? 0.4 : 1,
-                background: disabled ? '#2b2b2b' : '#000',
-                position: 'relative',
-                fontSize: '0.9rem'
-              }}
+              style={{ border: '1px solid #fff', display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: 8, padding: '0.25rem 0.4rem', opacity: disabled ? 0.4 : 1, background: disabled ? '#2b2b2b' : '#000' }}
             >
-              {SKILL_META[skillId]?.icon ?? '◻'}
-              {disabled ? <small style={{ position: 'absolute', bottom: -18 }}>{cooldown}</small> : null}
-            </span>
+              <span style={{ display: 'inline-grid', placeItems: 'center' }}>{SKILL_META[skillId]?.icon ?? '◻'}</span>
+              <span>{SKILL_META[skillId]?.name ?? skillId}</span>
+              <small>{cooldown > 0 ? `CD ${cooldown}` : 'Ready'}</small>
+            </div>
           );
         })}
       </div>
