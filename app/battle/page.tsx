@@ -391,10 +391,10 @@ export default function BattleDashboardPage() {
 
     return result.events.map((event) => formatEventLine(event, leftId, leftName, rightId, rightName));
   }, [result]);
-  const reversedBattleLogLines = useMemo(
-    () => battleLogLines.map((line, index) => ({ line, eventIndex: index })).reverse(),
-    [battleLogLines]
-  );
+  const visibleBattleLogLines = useMemo(() => {
+    const cursor = currentFrame?.logCursorIndex ?? -1;
+    return battleLogLines.slice(0, cursor + 1);
+  }, [battleLogLines, currentFrame?.logCursorIndex]);
 
   const runBattle = useCallback(async () => {
     setIsRequestingBattle(true);
@@ -523,10 +523,10 @@ export default function BattleDashboardPage() {
         <details style={{ border: '2px solid #fff', padding: '0.75rem 1rem' }} open>
           <summary style={{ cursor: 'pointer', fontWeight: 700, marginBottom: '0.5rem' }}>Battle Log</summary>
           <ol style={{ margin: 0, paddingLeft: '1.2rem', maxHeight: 220, overflowY: 'auto', display: 'grid', gap: '0.3rem' }}>
-            {reversedBattleLogLines.map(({ line, eventIndex }) => (
+            {visibleBattleLogLines.map((line, index) => (
               <li
-                key={`battle-log-${eventIndex}`}
-                style={{ opacity: eventIndex <= (currentFrame?.logCursorIndex ?? -1) ? 1 : 0.45, fontWeight: eventIndex === (currentFrame?.logCursorIndex ?? -1) ? 700 : 400 }}
+                key={`battle-log-${index}`}
+                style={{ fontWeight: index === (currentFrame?.logCursorIndex ?? -1) ? 700 : 400 }}
               >
                 {line}
               </li>
