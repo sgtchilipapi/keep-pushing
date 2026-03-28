@@ -619,6 +619,26 @@ Each archetype defines:
     weakness tags
     skill kit
 
+
+## 21.1 Persistent Enemy Instance Model
+
+Enemy archetypes remain static templates, while spawned enemies are persistent instances with mutable runtime state.
+
+Canonical enemy domains:
+
+    Enemy Instance Root (identity + lifetime counters)
+    Enemy Instance Stats (base + bonus stats)
+    Enemy Instance Loadout (active/passive slots)
+    Enemy Instance Learning State (adaptive weights)
+    Enemy Instance Presence (active/dead/despawned lifecycle)
+
+Design rules:
+
+- Enemy instances are system-owned (no player authority field).
+- Presence/lifecycle state controls encounter eligibility.
+- Enemy snapshots should remain shape-compatible with character snapshots where practical.
+
+
 ---
 
 # 22. Persistence Model
@@ -636,6 +656,19 @@ Stored data:
     World Milestones
     World Discoveries
     Battle Summaries
+
+
+## 22.1 Enemy Persistence and Validation Anchors
+
+Enemy-side persistence includes both template and instance layers:
+
+    EnemyArchetypeRegistry (static template)
+    EnemySkillSet (optional reusable skill template)
+    EnemyDropTable (reward validation template)
+    EnemyInstanceRoot / Stats / Loadout / Learning / Presence (live spawned enemy)
+
+Enemy learning should be keyed by opponent buckets (for example: class/role, weapon family, build category), not by exact character identity, to avoid unbounded storage growth.
+
 
 ---
 
