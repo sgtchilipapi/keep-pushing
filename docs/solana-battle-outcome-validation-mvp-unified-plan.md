@@ -461,3 +461,137 @@ Before implementation begins, explicitly resolve and record answers for the foll
 2. Decide if `BattleSettlementBatchReceiptAccount` remains MVP+1 or is promoted into MVP-core for ops/audit reasons.
 3. Confirm `max_histogram_entries_per_batch` launch value and governance tuning rules.
 4. Confirm server batch construction policy (`target_batch_size = 20`) and whether adaptive sizing is allowed under constraints.
+
+---
+
+## 14) Updated End-to-End Implementation Checklist
+
+Use this checklist as the execution tracker for implementing the full unified plan.
+
+### 0) Governance decisions (must lock first)
+
+- [x] Resolve and freeze all Section 13 decision points with lean MVP choices.
+- [ ] Publish error-code map and operator runbook for settlement failures.
+
+### 1) On-chain account model (MVP-core)
+
+- [ ] Implement and test account layouts + PDA derivations for:
+  - [ ] CharacterRootAccount
+  - [ ] CharacterStatsAccount
+  - [ ] CharacterWorldProgressAccount
+  - [ ] CharacterZoneProgressPageAccount
+  - [ ] CharacterLoadoutAccount
+  - [ ] ZoneRegistryAccount
+  - [ ] ZoneEnemySetAccount
+  - [ ] EnemyArchetypeRegistryAccount
+  - [ ] ProgramConfigAccount
+  - [ ] CharacterSettlementBatchCursorAccount
+- [ ] Initialize cursor defaults during character creation:
+  - [ ] `last_committed_end_nonce = 0`
+  - [ ] `last_committed_state_hash = genesis_state_hash(character_root)`
+  - [ ] `last_committed_batch_id = 0`
+
+### 2) Instruction + canonical payload contract
+
+- [ ] Implement `ApplyBattleSettlementBatchV1` instruction data layout exactly as frozen.
+- [ ] Implement canonical serialization for payload hashing/signature verification.
+- [ ] Recompute and equality-check `batch_hash` on-chain for every submission.
+- [ ] Enforce signature-domain separation (`program_id`, `cluster_id`, `character_root_pubkey`).
+
+### 3) Attestation and trust checks
+
+- [ ] Verify ed25519 server signature with Solana native flow.
+- [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
+- [ ] Enforce attestation validity window and expiry.
+- [ ] Enforce `settlement_paused` behavior per locked policy.
+
+### 4) Batch validation sequence (instruction core)
+
+- [ ] Implement derivation/ownership checks.
+- [ ] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
+- [ ] Implement continuity checks (`start_nonce`, `start_state_hash`, `batch_id`, nonce range).
+- [ ] Implement histogram integrity checks (sum/count, non-zero counts, duplicates forbidden).
+- [ ] Implement world eligibility checks for all referenced zones.
+- [ ] Implement zone/enemy legality checks against registry mapping.
+- [ ] Implement reward cap checks using registry-bound policy.
+- [ ] Implement optional loadout revision check.
+- [ ] Apply progression transitions with monotonic rules.
+- [ ] Persist cursor updates.
+
+### 5) Account access wiring + compute envelope
+
+- [ ] Enforce required account set and mutability constraints in instruction account validation.
+- [ ] Support multi-page zone progress account access for large batches.
+- [ ] Benchmark compute for worst-case allowed batch (`battle_count=32`, histogram entries=64).
+
+### 6) Server batch construction + submission orchestration
+
+- [ ] Implement contiguous batch construction target (`target_batch_size=20`).
+- [ ] Enforce strict oldest-first submission continuity.
+- [ ] Store batch metadata for retries/reconciliation and support tooling.
+
+### 7) Testing + verification gates
+
+- [ ] Add deterministic success/failure vectors for every invariant.
+- [ ] Add replay/out-of-order test matrix across sequential batches.
+- [ ] Add boundary tests for max-size payloads and arithmetic behavior.
+- [ ] Add signature-domain replay tests (wrong cluster/program/character root).
+
+### 8) MVP+1 optional
+
+- [ ] Decide and implement `BattleSettlementBatchReceiptAccount` if promoted.
+- [ ] Add receipt indexing/dispute support tooling.
+
+### 9) Explicitly deferred
+
+- [ ] Inventory/drop settlement domains.
+- [ ] On-chain learning persistence extensions.
+- [ ] Persistent enemy instance domains.
+
+---
+
+## 15) Section 13 Decision Locks (Lean MVP Defaults)
+
+These decisions are now **locked for MVP** to unblock implementation.
+
+### 15.1 Product & trust boundaries (locks)
+
+1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
+2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch (array size may expand later without schema break).
+3. **Paused behavior:** when `settlement_paused = true`, all player settlement submissions are blocked; no admin bypass path in MVP.
+4. **Attestation validity window:** default `attestation_expiry_slot - attestation_slot = 150` slots.
+
+### 15.2 Batch identity, ordering, replay semantics (locks)
+
+1. `batch_id` is strictly monotonic per character and never resets in MVP.
+2. `genesis_state_hash(character_root)` is `sha256(character_root_pubkey || character_id || 0u64_nonce || 0u64_batch_id)` with canonical little-endian integer encoding.
+3. Deterministic continuity error buckets are frozen: nonce gap, state-hash mismatch, batch-id gap, nonce-range mismatch.
+4. Backlog submission is strict oldest-first only; no skipping or parallelized commit lanes.
+
+### 15.3 Payload canonicalization & signature domain (locks)
+
+1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields.
+2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
+3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
+4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
+
+### 15.4 World progression semantics (locks)
+
+1. `locked -> cleared` is globally forbidden in MVP (no zone-level exceptions at launch).
+2. If histogram-implied progression conflicts with `zone_progress_delta`, `zone_progress_delta` is canonical and conflicts fail validation.
+3. `zone_id -> page_index_u16` mapping is `page_index = zone_id / 256` (integer division).
+4. If summary and page data are inconsistent at validation time, fail settlement (no repair path in instruction).
+
+### 15.5 Reward and balance guardrails (locks)
+
+1. `exp_cap_per_encounter(enemy_archetype_id)` is read directly from `EnemyArchetypeRegistryAccount.exp_reward_base` for MVP.
+2. EXP math uses `u128` intermediates; overflow during intermediate math is rejection, not clamp.
+3. Zero-EXP non-empty batches are valid in MVP.
+4. MVP level-up side effects are limited to level/exp/stat recalculation domains only; inventory/unlocks/learning side effects are deferred.
+
+### 15.6 Optional components to lock now (locks)
+
+1. `optional_loadout_revision` remains optional in MVP policy.
+2. `BattleSettlementBatchReceiptAccount` remains MVP+1 (not MVP-core).
+3. Launch `max_histogram_entries_per_batch = 64`; governance can lower/raise through program config update.
+4. Server batch construction targets 20 battles but may adapt size as long as on-chain constraints are met.
