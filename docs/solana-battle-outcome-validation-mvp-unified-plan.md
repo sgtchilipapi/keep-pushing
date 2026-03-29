@@ -413,3 +413,51 @@ Optional (MVP+1):
 - BattleSettlementBatchReceiptAccount
 
 Everything else is explicitly deferred unless product scope changes.
+
+---
+
+## 13) Pre-Implementation Clarifications & Decision Points
+
+Before implementation begins, explicitly resolve and record answers for the following.
+
+### 13.1 Product & trust boundaries
+
+1. What is the MVP dispute/remediation path for server-attested but player-disputed batches?
+2. What signer model is used in `ProgramConfigAccount.trusted_server_signers` for MVP (single signer, small rotating set, or signer-set hash strategy)?
+3. When `settlement_paused = true`, are all settlement paths blocked, or is there an admin-only emergency path?
+4. What is the canonical default attestation validity window (`attestation_expiry_slot - attestation_slot`)?
+
+### 13.2 Batch identity, ordering, replay semantics
+
+1. Confirm `batch_id` monotonicity scope and reset policy (strict per-character sequence unless explicit reset/migration).
+2. Freeze the exact `genesis_state_hash(character_root)` construction and serialization source of truth.
+3. Define deterministic replay/out-of-order error code mapping for client/support observability.
+4. Confirm backlog submission behavior (strict oldest-first continuity across multiple sessions/transactions).
+
+### 13.3 Payload canonicalization & signature domain
+
+1. Freeze canonical serialization format used by `batch_hash` and signature verification.
+2. Freeze canonical `cluster_id` / environment identifier set in signed domain fields.
+3. Define compatibility/versioning strategy for future payload evolution (`signature_scheme` and/or instruction versioning).
+4. Confirm whether `batch_hash` is always recomputed and strictly equality-checked on-chain.
+
+### 13.4 World progression semantics
+
+1. Decide if any zones may permit `locked -> cleared` directly via explicit policy (otherwise globally forbidden in MVP).
+2. Define conflict resolution if `zone_progress_delta` and inferred progression from encounters diverge.
+3. Freeze deterministic `zone_id -> page_index_u16` mapping for `CharacterZoneProgressPageAccount`.
+4. Define repair-vs-fail policy when summary and detailed zone progress state are inconsistent at validation time.
+
+### 13.5 Reward and balance guardrails
+
+1. Freeze exact `exp_cap_per_encounter(enemy_archetype_id)` policy function and registry dependencies.
+2. Freeze arithmetic safety policy for EXP math (intermediate width, overflow behavior, and clamp/reject semantics).
+3. Decide whether zero-EXP non-empty batches are valid or rejected as anomalous.
+4. Confirm all level-up side effects in MVP scope versus deferred domains.
+
+### 13.6 Optional components to lock now
+
+1. Decide whether `optional_loadout_revision` remains optional by policy or becomes effectively required for all submissions.
+2. Decide if `BattleSettlementBatchReceiptAccount` remains MVP+1 or is promoted into MVP-core for ops/audit reasons.
+3. Confirm `max_histogram_entries_per_batch` launch value and governance tuning rules.
+4. Confirm server batch construction policy (`target_batch_size = 20`) and whether adaptive sizing is allowed under constraints.
