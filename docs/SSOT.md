@@ -81,6 +81,10 @@ Explicit non-goal for MVP:
 
 - **No cryptographic proof of exact per-turn historical truth**.
 
+Policy note (MVP):
+
+- Without independent anchors, pre-dating risk is **mitigated (bounded), not fully prevented**.
+
 Canonical implementation details for this trust model are defined in:
 
 - `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
