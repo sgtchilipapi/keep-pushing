@@ -127,6 +127,9 @@ These values can be governance-tuned later, but are canonical for MVP launch.
 - `trusted_server_signers: [Pubkey; N]` (or signer-set hash + verification strategy)
 - `settlement_paused: bool`
 - `max_battles_per_batch: u16` (policy cap)
+- `throughput_cap_battles_per_minute: u32`
+- `season_start_unix_ms: u64`
+- `season_end_unix_ms: u64`
 - `updated_at_slot: u64`
 
 Purpose:
@@ -145,6 +148,7 @@ Purpose:
 - `last_committed_end_nonce: u64`
 - `last_committed_state_hash: [u8; 32]`
 - `last_committed_batch_id: u64` (optional but recommended)
+- `last_committed_end_unix_ms: u64`
 - `updated_at_slot: u64`
 
 Purpose:
@@ -213,6 +217,8 @@ Applies exactly one server-attested contiguous batch.
 - `encounter_histogram: Vec<EncounterCountEntry>`
 - `optional_loadout_revision: Option<u32>`
 - `batch_hash: [u8; 32]`
+- `batch_start_unix_ms: u64`
+- `batch_end_unix_ms: u64`
 - attestation domain fields (e.g., `attestation_slot: u64`, `attestation_expiry_slot: u64`)
 - `signature_scheme: u8` (`0 = ed25519_server_sig_v1`)
 
@@ -244,7 +250,7 @@ To prevent signature replay across environments/programs, the signed message dom
 - all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
 
 Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, batch_start_unix_ms, batch_end_unix_ms, attestation_slot, attestation_expiry_slot, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -296,34 +302,50 @@ Required accounts:
    - require `end_nonce >= start_nonce`,
    - require `battle_count == (end_nonce - start_nonce + 1)`.
 
-4. **Histogram integrity checks**
+4. **Temporal continuity + throughput cap checks**
+   - require `batch_start_unix_ms == cursor.last_committed_end_unix_ms + 1` (cross-batch temporal continuity; first batch may use `genesis_time_unix_ms + 1`),
+   - require `batch_end_unix_ms >= batch_start_unix_ms`,
+   - require non-decreasing submission timeline (`batch_start_unix_ms > cursor.last_committed_end_unix_ms`),
+   - derive `elapsed_ms = batch_end_unix_ms - batch_start_unix_ms + 1`,
+   - derive deterministic bounded throughput using integer floor math only:
+     - `max_allowed_battles = (elapsed_ms * throughput_cap_battles_per_minute) / 60_000`,
+     - if `max_allowed_battles == 0`, treat as `1` minimum allowed battle for any non-empty batch interval,
+   - require `battle_count <= max_allowed_battles`.
+
+5. **Histogram integrity checks**
    - require `sum(encounter_histogram.count) == battle_count`,
    - reject zero-count or duplicate `(zone_id, enemy_archetype_id)` entries.
 
-5. **World eligibility checks**
+6. **World eligibility checks**
    - each referenced `zone_id` must be currently unlocked or become valid via allowed progression transition rules in same batch.
 
-6. **Zone/enemy legality checks**
+7. **Zone/enemy legality checks**
    - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
 
-7. **Deterministic EXP derivation checks**
+8. **Deterministic EXP derivation checks**
    - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
    - reject on arithmetic overflow or missing registry entries,
    - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
-8. **Optional loadout consistency**
+9. **Optional loadout consistency**
    - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
 
-9. **Apply progression transitions**
+10. **Season window checks**
+   - require the batch interval to stay within active season bounds configured in `ProgramConfigAccount`,
+   - `batch_start_unix_ms >= season_start_unix_ms`,
+   - `batch_end_unix_ms <= season_end_unix_ms`.
+
+11. **Apply progression transitions**
    - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
 
-10. **Persist batch cursor**
+12. **Persist batch cursor**
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
+   - set `cursor.last_committed_end_unix_ms = batch_end_unix_ms`,
    - optionally write batch receipt.
 
 This sequence replaces per-battle validation as the MVP ingestion path.
@@ -355,6 +377,39 @@ Rules:
 - `zone_den_u128 == 0` is validation failure,
 - no floating point is allowed,
 - rounding mode is always floor via integer division.
+
+## 8.2 Throughput Cap Formula + Rounding (Canonical)
+
+The throughput cap check must use exactly the deterministic integer formula below:
+
+```text
+elapsed_ms_u128 = u128(batch_end_unix_ms - batch_start_unix_ms + 1)
+cap_bpm_u128 = u128(ProgramConfigAccount.throughput_cap_battles_per_minute)
+max_allowed_battles_u128 = (elapsed_ms_u128 * cap_bpm_u128) / 60_000
+// integer floor division (round down)
+
+if battle_count > 0 and max_allowed_battles_u128 == 0:
+    max_allowed_battles_u128 = 1
+
+require(u128(battle_count) <= max_allowed_battles_u128)
+```
+
+Rules:
+- all math uses unsigned integers; no floating point,
+- rounding is fixed to floor via integer division,
+- overflow in multiply/add is validation failure,
+- if `batch_end_unix_ms < batch_start_unix_ms`, validation fails before throughput math.
+
+## 8.3 Canonical Failure Categories (Required)
+
+Validation must surface deterministic error categories for observability and support tooling:
+
+1. `ERR_RATE_LIMIT_VIOLATION`
+   - emitted when `battle_count > max_allowed_battles` under section 8.2.
+2. `ERR_NON_MONOTONIC_TIMESTAMPS`
+   - emitted when timestamp continuity/ordering checks fail (including cross-batch continuity mismatch).
+3. `ERR_SEASON_WINDOW_VIOLATION`
+   - emitted when batch timestamps fall outside `[season_start_unix_ms, season_end_unix_ms]`.
 
 
 ---
@@ -605,7 +660,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
 
    Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, batch_start_unix_ms, batch_end_unix_ms, attestation_slot, attestation_expiry_slot, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.

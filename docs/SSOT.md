@@ -76,6 +76,7 @@ Explicit goals for MVP settlement validation:
 - Prevent impossible progression jumps.
 - Prevent replay and out-of-order settlement.
 - Prevent impossible battle throughput.
+- No settlement path can credit impossible battle density.
 
 Explicit non-goal for MVP:
 
