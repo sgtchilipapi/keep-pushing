@@ -57,7 +57,35 @@ The server is the **only authority** for outcomes.
 
 ---
 
-## 2.3 Vertical Slice Development
+## 2.3 Solana Settlement Trust Model (MVP)
+
+For Solana settlement in MVP, trust boundaries are explicitly split:
+
+- The **server remains authoritative** for battle simulation details.
+- The **on-chain program enforces bounded legality/economic constraints**.
+
+Security objective:
+
+- If the server is compromised, the maximum adversarial impact must be limited to **diligent-player-equivalent progression**.
+
+Explicit goals for MVP settlement validation:
+
+- Prevent reward inflation.
+- Prevent impossible progression jumps.
+- Prevent replay and out-of-order settlement.
+- Prevent impossible battle throughput.
+
+Explicit non-goal for MVP:
+
+- **No cryptographic proof of exact per-turn historical truth**.
+
+Canonical implementation details for this trust model are defined in:
+
+- `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
+
+---
+
+## 2.4 Vertical Slice Development
 
 Development follows **Vertical Slice Expansion**:
 
