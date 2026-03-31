@@ -209,7 +209,6 @@ Applies exactly one server-attested contiguous batch.
 - `battle_count: u16`
 - `start_state_hash: [u8; 32]`
 - `end_state_hash: [u8; 32]`
-- `exp_delta: u32`
 - `zone_progress_delta: Vec<ZoneProgressDeltaEntry>`
 - `encounter_histogram: Vec<EncounterCountEntry>`
 - `optional_loadout_revision: Option<u32>`
@@ -242,7 +241,10 @@ To prevent signature replay across environments/programs, the signed message dom
 - `program_id`,
 - `cluster_id` (or explicit environment id),
 - `character_root_pubkey`,
-- all fields in section 6.2 in canonical serialization order.
+- all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
+
+Canonical serialized order for hashing/signing is:
+`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -304,15 +306,16 @@ Required accounts:
 6. **Zone/enemy legality checks**
    - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
 
-7. **Reward sanity checks**
-   - compute `max_allowed_exp = Σ(count * exp_cap_per_encounter(enemy_archetype_id))` from registries/policy,
-   - require `exp_delta <= max_allowed_exp`.
+7. **Deterministic EXP derivation checks**
+   - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
+   - reject on arithmetic overflow or missing registry entries,
+   - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
 8. **Optional loadout consistency**
    - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
 
 9. **Apply progression transitions**
-   - apply `exp_delta` with normal level-up logic,
+   - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
@@ -325,6 +328,35 @@ Required accounts:
 
 This sequence replaces per-battle validation as the MVP ingestion path.
 
+## 8.1 Deterministic EXP Derivation Formula (Canonical)
+
+Use exact integer math below to derive batch EXP and prevent implementation drift:
+
+```text
+let total_exp_u128 = 0
+for each entry in encounter_histogram:
+    // all fields are unsigned integers
+    count_u128 = u128(entry.count)
+    base_exp_u128 = u128(EnemyArchetypeRegistry[entry.enemy_archetype_id].exp_reward_base)
+    zone_num_u128 = u128(ZoneRegistry[entry.zone_id].exp_multiplier_num)      // e.g., 100 for 1.00x
+    zone_den_u128 = u128(ZoneRegistry[entry.zone_id].exp_multiplier_den)      // must be > 0
+
+    weighted_exp_u128 = (count_u128 * base_exp_u128 * zone_num_u128) / zone_den_u128
+    // division is integer floor (round toward zero)
+
+    total_exp_u128 += weighted_exp_u128
+
+require(total_exp_u128 <= u128(u32::MAX))
+derived_exp_delta_u32 = u32(total_exp_u128)
+```
+
+Rules:
+- overflow in any intermediate multiply/add is validation failure,
+- `zone_den_u128 == 0` is validation failure,
+- no floating point is allowed,
+- rounding mode is always floor via integer division.
+
+
 ---
 
 ## 9) Histogram Validation Invariants (Required)
@@ -332,7 +364,7 @@ This sequence replaces per-battle validation as the MVP ingestion path.
 1. `sum(count) == battle_count`.
 2. Every histogram pair is zone-legal (`enemy ∈ zone_enemy_set`).
 3. Referenced zones must be world-legal for the character under transition constraints.
-4. `exp_delta` must not exceed histogram-derived registry bound.
+4. EXP is derived deterministically from histogram + registry/policy fields (no EXP input claims).
 5. Duplicate `(zone_id, enemy_archetype_id)` entries are invalid.
 6. `battle_count == end_nonce - start_nonce + 1`.
 
@@ -357,7 +389,7 @@ This sequence replaces per-battle validation as the MVP ingestion path.
 3. No replay of previously committed batch range/hash.
 4. No batch referencing locked/invalid zones.
 5. No batch claiming enemies outside zone mappings.
-6. No EXP inflation beyond histogram-derived bounds.
+6. No EXP input claims; only deterministic histogram+registry/policy-derived EXP is applied.
 7. Every committed batch must connect to last committed state hash.
 8. Only minimum required accounts are mutated.
 
@@ -570,7 +602,10 @@ These decisions are now **locked for MVP** to unblock implementation.
 
 ### 15.3 Payload canonicalization & signature domain (locks)
 
-1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields.
+1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
+
+   Canonical field order for hashing/signing:
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
@@ -584,7 +619,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 
 ### 15.5 Reward and balance guardrails (locks)
 
-1. `exp_cap_per_encounter(enemy_archetype_id)` is read directly from `EnemyArchetypeRegistryAccount.exp_reward_base` for MVP.
+1. Per-encounter EXP base input is read from `EnemyArchetypeRegistryAccount.exp_reward_base` for MVP and combined with zone policy multipliers in deterministic derivation.
 2. EXP math uses `u128` intermediates; overflow during intermediate math is rejection, not clamp.
 3. Zero-EXP non-empty batches are valid in MVP.
 4. MVP level-up side effects are limited to level/exp/stat recalculation domains only; inventory/unlocks/learning side effects are deferred.

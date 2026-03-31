@@ -55,6 +55,8 @@ Client → replay animation
 
 The server is the **only authority** for outcomes.
 
+Rule: **EXP claims are never client/server-provided inputs; they are computed by on-chain logic.**
+
 ---
 
 ## 2.3 Vertical Slice Development
