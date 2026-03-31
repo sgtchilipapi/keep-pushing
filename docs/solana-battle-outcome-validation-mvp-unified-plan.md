@@ -19,6 +19,39 @@ Primary product reason:
 
 ---
 
+
+## 1.1) Canonical Field and Policy Dictionary (Normative, Workstream 6 Framing Lock)
+
+This section is the one-page canonical dictionary referenced by all implementation docs. If another section conflicts, this section wins until the conflict is corrected.
+
+### Canonical time and season fields
+
+- Canonical time anchor family: `*_battle_ts` only.
+- Canonical unit: `u64` Unix timestamp in **seconds**.
+- Cursor fields are mandatory and canonical:
+  - `last_committed_battle_ts: u64`
+  - `last_committed_season_id: u32`
+- Season policy terms are canonical:
+  - `season_start_ts: u64`
+  - `season_end_ts: u64`
+  - `commit_grace_end_ts: u64`
+
+### Canonical policy order
+
+1. Delayed submission is allowed (submission time is not the primary validity signal).
+2. Prior-season uncommitted progress expires permanently after grace closes.
+3. Throughput is deterministic from the claimed battle interval (`last_battle_ts - first_battle_ts`), never from submission timing.
+
+### Compatibility policy (explicit, no silent reinterpretation)
+
+- `schema_version = 1` (legacy): payloads carrying `attestation_expiry_slot`/`expDelta` are accepted only by legacy validation paths.
+- `schema_version >= 2` (canonical delayed-submission model):
+  - `attestation_expiry_slot` is rejected if provided in canonical payload,
+  - server-provided `expDelta` is rejected,
+  - EXP must be registry-derived on-chain,
+  - timestamp/season/grace/throughput invariants are mandatory.
+- Trusted signer verification remains mandatory in all versions, but signer verification is authN/authZ and is **not** a freshness proof.
+
 ## 2) Revised MVP Trust Model (Bounded Trust)
 
 ## 2.1 What the chain trusts the server for
@@ -70,7 +103,9 @@ To avoid ambiguity in initial implementation, MVP uses these explicit defaults:
 - `CharacterSettlementBatchCursorAccount` is initialized at character creation with:
   - `last_committed_end_nonce = 0`,
   - `last_committed_state_hash = genesis_state_hash(character_root)`,
-  - `last_committed_batch_id = 0`.
+  - `last_committed_batch_id = 0`,
+  - `last_committed_battle_ts = character_creation_ts`,
+  - `last_committed_season_id = season_id_at_character_creation`.
 
 These values can be governance-tuned later, but are canonical for MVP launch.
 
@@ -145,6 +180,8 @@ Purpose:
 - `last_committed_end_nonce: u64`
 - `last_committed_state_hash: [u8; 32]`
 - `last_committed_batch_id: u64` (optional but recommended)
+- `last_committed_battle_ts: u64` (canonical monotonic time anchor; seconds)
+- `last_committed_season_id: u32`
 - `updated_at_slot: u64`
 
 Purpose:
@@ -213,7 +250,11 @@ Applies exactly one server-attested contiguous batch.
 - `encounter_histogram: Vec<EncounterCountEntry>`
 - `optional_loadout_revision: Option<u32>`
 - `batch_hash: [u8; 32]`
-- attestation domain fields (e.g., `attestation_slot: u64`, `attestation_expiry_slot: u64`)
+- `first_battle_ts: u64` (seconds since Unix epoch)
+- `last_battle_ts: u64` (seconds since Unix epoch)
+- `season_id: u32`
+- `schema_version: u16`
+- legacy attestation metadata MAY be present for telemetry but is non-normative in V2+
 - `signature_scheme: u8` (`0 = ed25519_server_sig_v1`)
 
 ## 6.3 Required supporting types
@@ -244,7 +285,7 @@ To prevent signature replay across environments/programs, the signed message dom
 - all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
 
 Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+`character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -254,7 +295,7 @@ Server attestation verification for MVP:
 
 - use Solana ed25519 verification flow,
 - accept only signer keys present in `ProgramConfigAccount.trusted_server_signers`,
-- reject if `attestation_expiry_slot < current_slot`.
+- no expiry-window freshness gate; delayed submissions are valid when all invariants pass.
 
 ---
 
@@ -296,34 +337,47 @@ Required accounts:
    - require `end_nonce >= start_nonce`,
    - require `battle_count == (end_nonce - start_nonce + 1)`.
 
-4. **Histogram integrity checks**
+4. **Season/time eligibility checks**
+   - require `first_battle_ts >= cursor.last_committed_battle_ts`,
+   - require `last_battle_ts >= first_battle_ts`,
+   - require `first_battle_ts >= character_creation_ts`,
+   - require `season_id >= cursor.last_committed_season_id` (unless explicit migration instruction),
+   - enforce season window + grace eligibility and stale-progress expiry rules.
+
+5. **Throughput cap checks**
+   - compute deterministic `allowed_battles` from section 9.3 integer formula,
+   - require `battle_count <= allowed_battles`.
+
+6. **Histogram integrity checks**
    - require `sum(encounter_histogram.count) == battle_count`,
    - reject zero-count or duplicate `(zone_id, enemy_archetype_id)` entries.
 
-5. **World eligibility checks**
+7. **World eligibility checks**
    - each referenced `zone_id` must be currently unlocked or become valid via allowed progression transition rules in same batch.
 
-6. **Zone/enemy legality checks**
+8. **Zone/enemy legality checks**
    - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
 
-7. **Deterministic EXP derivation checks**
+9. **Deterministic EXP derivation checks**
    - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
    - reject on arithmetic overflow or missing registry entries,
    - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
-8. **Optional loadout consistency**
+10. **Optional loadout consistency**
    - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
 
-9. **Apply progression transitions**
+11. **Apply progression transitions**
    - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
 
-10. **Persist batch cursor**
+12. **Persist batch cursor**
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
+   - set `cursor.last_committed_battle_ts = last_battle_ts`,
+   - set `cursor.last_committed_season_id = season_id`,
    - optionally write batch receipt.
 
 This sequence replaces per-battle validation as the MVP ingestion path.
@@ -381,6 +435,65 @@ Rules:
 4. Summary (`CharacterWorldProgressAccount`) and detailed page state must remain consistent after apply.
 
 ---
+
+## 9.2) Delayed Submission, Monotonic Anchoring, and Season Eligibility (Required)
+
+Validation ordering (normative):
+
+1. authority/signature checks,
+2. continuity checks (nonce/state hash/batch id),
+3. season eligibility checks,
+4. throughput checks,
+5. legality + deterministic reward derivation.
+
+Rules:
+
+- delayed submission is explicitly valid: batches may be submitted any time later if all checks pass;
+- monotonic time anchor: `first_battle_ts >= cursor.last_committed_battle_ts`;
+- in-batch order: `last_battle_ts >= first_battle_ts`;
+- character lower bound: `first_battle_ts >= character_creation_ts`;
+- cross-season monotonicity: `season_id >= cursor.last_committed_season_id` unless a future explicit migration instruction says otherwise;
+- season window eligibility requires battle timestamps to be in the active season interval or in the prior-season commit grace window (`<= commit_grace_end_ts`);
+- stale-progress expiry: once grace closes, uncommitted prior-season batches are permanently ineligible.
+
+Failure modes:
+
+- `ERR_SEASON_WINDOW_CLOSED`
+- `ERR_SEASON_REGRESSION`
+- `ERR_PRE_CHARACTER_TIMESTAMP`
+
+Timeline examples:
+
+- Valid near grace boundary: season S ends at `1,700,259,200`, grace ends at `1,700,345,600`; a batch with `last_battle_ts = 1,700,345,599` and `season_id = S` is eligible.
+- Invalid after grace closure: same season but `last_battle_ts = 1,700,345,601` is rejected with `ERR_SEASON_WINDOW_CLOSED`.
+
+## 9.3) Deterministic Throughput Cap (Required)
+
+Constants:
+
+- `throughput_cap_per_minute = 20` battles/minute (default MVP policy constant).
+
+Arithmetic (integer-only, deterministic across languages):
+
+```text
+interval_seconds = last_battle_ts - first_battle_ts
+allowed_battles = floor((interval_seconds * 20) / 60) + 1
+require(battle_count <= allowed_battles)
+```
+
+Notes and corner cases:
+
+- `+1` permits one battle at the interval start instant.
+- Equal timestamps (`interval_seconds = 0`) allow exactly one battle.
+- If timestamps differ by 1..2 seconds, still deterministic integer floor behavior applies.
+- Throughput does not replace nonce continuity; both are mandatory.
+- Throughput is evaluated only after season eligibility passes.
+
+Examples:
+
+- Boundary pass: `interval_seconds=60` => `allowed_battles=21`; `battle_count=21` passes.
+- Boundary fail: `interval_seconds=60`; `battle_count=22` fails.
+- Delayed submission pass: an old interval still passes if continuity + season/grace + throughput invariants pass.
 
 ## 10) Non-Negotiable MVP Invariants
 
@@ -457,7 +570,7 @@ Before implementation begins, explicitly resolve and record answers for the foll
 1. What is the MVP dispute/remediation path for server-attested but player-disputed batches?
 2. What signer model is used in `ProgramConfigAccount.trusted_server_signers` for MVP (single signer, small rotating set, or signer-set hash strategy)?
 3. When `settlement_paused = true`, are all settlement paths blocked, or is there an admin-only emergency path?
-4. What is the canonical default attestation validity window (`attestation_expiry_slot - attestation_slot`)?
+4. Legacy expiry-slot freshness is removed in V2; delayed submission is allowed subject to continuity + season/grace + throughput invariants.
 
 ### 13.2 Batch identity, ordering, replay semantics
 
@@ -522,10 +635,13 @@ Use this checklist as the execution tracker for implementing the full unified pl
   - [ ] `last_committed_end_nonce = 0`
   - [ ] `last_committed_state_hash = genesis_state_hash(character_root)`
   - [ ] `last_committed_batch_id = 0`
+  - [ ] `last_committed_battle_ts = character_creation_ts`
+  - [ ] `last_committed_season_id = season_id_at_character_creation`
 
 ### 2) Instruction + canonical payload contract
 
-- [ ] Implement `ApplyBattleSettlementBatchV1` instruction data layout exactly as frozen.
+- [ ] Implement `ApplyBattleSettlementBatchV1`/`V2` instruction data layout exactly as frozen.
+- [ ] Align `types/settlement.ts` with canonical schema (`*_battle_ts`, season cursors, no server `expDelta` in canonical path).
 - [ ] Implement canonical serialization for payload hashing/signature verification.
 - [ ] Recompute and equality-check `batch_hash` on-chain for every submission.
 - [ ] Enforce signature-domain separation (`program_id`, `cluster_id`, `character_root_pubkey`).
@@ -534,7 +650,7 @@ Use this checklist as the execution tracker for implementing the full unified pl
 
 - [ ] Verify ed25519 server signature with Solana native flow.
 - [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
-- [ ] Enforce attestation validity window and expiry.
+- [ ] Enforce monotonic time anchor validation (`first_battle_ts >= cursor.last_committed_battle_ts`, `last_battle_ts >= first_battle_ts`).
 - [ ] Enforce `settlement_paused` behavior per locked policy.
 
 ### 4) Batch validation sequence (instruction core)
@@ -582,6 +698,33 @@ Use this checklist as the execution tracker for implementing the full unified pl
 
 ---
 
+
+## 14.1) Implementation Mapping Appendix (Normative)
+
+- **Types layer:** `types/settlement.ts`
+  - remove canonical reliance on `expDelta` and `attestationExpirySlot` for `schema_version >= 2`,
+  - add `firstBattleTs`, `lastBattleTs`, `seasonId`, and cursor fields `lastCommittedBattleTs`, `lastCommittedSeasonId`.
+- **Validation logic:** `lib/solana/settlementBatchValidation.ts`
+  - remove expiry-slot freshness gate,
+  - insert validation order: authority/signature -> continuity -> season eligibility -> throughput -> legality/reward derivation,
+  - enforce deterministic throughput formula and season/grace failures.
+- **Serialization/hash domain:** settlement payload canonical encoding path
+  - freeze V2 field order from section 6.4; reject unknown/legacy fields under V2.
+- **Tests:** `tests/settlementBatchValidation.test.ts`
+  - add positive/negative vectors for delayed submission, grace-expiry rejection, season regression, pre-character timestamp, throughput boundary pass/fail, and season transition continuity.
+
+## 14.2) QA-Readiness Test Matrix (Required)
+
+1. Delayed submission accepted with valid continuity/season/throughput.
+2. Prior-season batch rejected after `commit_grace_end_ts`.
+3. Prior-season batch accepted at `commit_grace_end_ts - 1`.
+4. Season regression rejected (`season_id < cursor.last_committed_season_id`).
+5. Pre-character timestamp rejected.
+6. Throughput exact boundary pass.
+7. Throughput +1 overflow fail.
+8. Equal timestamp single battle pass, multi-battle fail.
+9. Replay/out-of-order batch rejection still enforced with delayed submission model.
+
 ## 15) Section 13 Decision Locks (Lean MVP Defaults)
 
 These decisions are now **locked for MVP** to unblock implementation.
@@ -591,7 +734,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
 2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch (array size may expand later without schema break).
 3. **Paused behavior:** when `settlement_paused = true`, all player settlement submissions are blocked; no admin bypass path in MVP.
-4. **Attestation validity window:** default `attestation_expiry_slot - attestation_slot = 150` slots.
+4. **Freshness policy:** no attestation expiry gate in MVP V2; freshness is enforced via monotonic timestamps, season/grace eligibility, and throughput bounds.
 
 ### 15.2 Batch identity, ordering, replay semantics (locks)
 
@@ -605,7 +748,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
 
    Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
