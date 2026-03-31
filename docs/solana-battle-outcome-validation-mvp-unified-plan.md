@@ -172,7 +172,6 @@ If enabled, fields:
 - `start_state_hash: [u8; 32]`
 - `end_state_hash: [u8; 32]`
 - `battle_count: u16`
-- `exp_delta: u32`
 - `settled_at_slot: u64`
 
 ---
@@ -202,19 +201,24 @@ Applies exactly one server-attested contiguous batch.
 
 ## 6.2 Required payload fields
 
-- `character_id: [u8; 16]` (or project-standard opaque id)
-- `batch_id: u64`
-- `start_nonce: u64`
-- `end_nonce: u64`
-- `battle_count: u16`
-- `start_state_hash: [u8; 32]`
-- `end_state_hash: [u8; 32]`
-- `zone_progress_delta: Vec<ZoneProgressDeltaEntry>`
-- `encounter_histogram: Vec<EncounterCountEntry>`
-- `optional_loadout_revision: Option<u32>`
-- `batch_hash: [u8; 32]`
-- attestation domain fields (e.g., `attestation_slot: u64`, `attestation_expiry_slot: u64`)
-- `signature_scheme: u8` (`0 = ed25519_server_sig_v1`)
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `character_id` | `[u8; 16]` | Yes | Project-standard opaque character identifier. |
+| `batch_id` | `u64` | Yes | Strictly monotonic per character (`+1`). |
+| `start_nonce` | `u64` | Yes | Must equal `cursor.last_committed_end_nonce + 1`. |
+| `end_nonce` | `u64` | Yes | Inclusive end of contiguous nonce range. |
+| `battle_count` | `u16` | Yes | Must equal `end_nonce - start_nonce + 1`. |
+| `start_state_hash` | `[u8; 32]` | Yes | Must equal `cursor.last_committed_state_hash`. |
+| `end_state_hash` | `[u8; 32]` | Yes | New committed chain head hash after apply. |
+| `season_id` | `u32` | Yes | Logical season identifier used for season window enforcement. |
+| `batch_timestamp_unix_s` | `u64` | Yes | Server-issued batch timestamp used for monotonicity and grace checks. |
+| `zone_progress_delta` | `Vec<ZoneProgressDeltaEntry>` | Yes | Monotonic zone-state transitions only. |
+| `encounter_histogram` | `Vec<EncounterCountEntry>` | Yes | Mandatory in MVP; per-battle listing is not required. |
+| `optional_loadout_revision` | `Option<u32>` | Optional | If present, must match on-chain loadout revision. |
+| `batch_hash` | `[u8; 32]` | Yes | Recomputed and equality-checked on chain. |
+| `attestation_slot` | `u64` | Yes | Included in signed domain for anti-replay controls. |
+| `attestation_expiry_slot` | `u64` | Yes | Included in signed domain; checked against current slot. |
+| `signature_scheme` | `u8` | Yes | `0 = ed25519_server_sig_v1`. |
 
 ## 6.3 Required supporting types
 
@@ -241,10 +245,10 @@ To prevent signature replay across environments/programs, the signed message dom
 - `program_id`,
 - `cluster_id` (or explicit environment id),
 - `character_root_pubkey`,
-- all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
+- all fields in section 6.2 in canonical serialization order (no standalone EXP input field).
 
 Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, season_id, batch_timestamp_unix_s, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -287,43 +291,52 @@ Required accounts:
    - reject if `settlement_paused`,
    - verify trusted server attestation/signature under `ProgramConfigAccount` policy,
    - enforce batch size policy (`battle_count <= max_battles_per_batch`),
-   - enforce `encounter_histogram.len() <= max_histogram_entries_per_batch`.
+   - enforce `encounter_histogram.len() <= max_histogram_entries_per_batch`,
+   - enforce throughput policy (`battle_count <= 20` when `batch_timestamp_unix_s` falls in the same active minute bucket for a character).
 
 3. **Batch continuity checks**
    - require `start_nonce == cursor.last_committed_end_nonce + 1`,
    - require `start_state_hash == cursor.last_committed_state_hash`,
    - require `batch_id == cursor.last_committed_batch_id + 1`,
    - require `end_nonce >= start_nonce`,
-   - require `battle_count == (end_nonce - start_nonce + 1)`.
+   - require `battle_count == (end_nonce - start_nonce + 1)`,
+   - require `batch_timestamp_unix_s > cursor.last_committed_batch_timestamp_unix_s` (strict monotonic timestamp per character).
 
-4. **Histogram integrity checks**
+4. **Season window and grace checks**
+   - require `season_id == ProgramConfigAccount.active_season_id`,
+   - require `season_window_start_unix_s <= batch_timestamp_unix_s <= season_window_end_unix_s`,
+   - if submitted after season end, allow only within configured `grace_expiry_unix_s` for the same `season_id`,
+   - reject once grace expires.
+
+5. **Histogram integrity checks**
    - require `sum(encounter_histogram.count) == battle_count`,
    - reject zero-count or duplicate `(zone_id, enemy_archetype_id)` entries.
 
-5. **World eligibility checks**
+6. **World eligibility checks**
    - each referenced `zone_id` must be currently unlocked or become valid via allowed progression transition rules in same batch.
 
-6. **Zone/enemy legality checks**
+7. **Zone/enemy legality checks**
    - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
 
-7. **Deterministic EXP derivation checks**
+8. **Deterministic EXP derivation checks**
    - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
    - reject on arithmetic overflow or missing registry entries,
    - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
-8. **Optional loadout consistency**
+9. **Optional loadout consistency**
    - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
 
-9. **Apply progression transitions**
+10. **Apply progression transitions**
    - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
 
-10. **Persist batch cursor**
+11. **Persist batch cursor**
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
+   - set `cursor.last_committed_batch_timestamp_unix_s = batch_timestamp_unix_s`,
    - optionally write batch receipt.
 
 This sequence replaces per-battle validation as the MVP ingestion path.
@@ -367,6 +380,8 @@ Rules:
 4. EXP is derived deterministically from histogram + registry/policy fields (no EXP input claims).
 5. Duplicate `(zone_id, enemy_archetype_id)` entries are invalid.
 6. `battle_count == end_nonce - start_nonce + 1`.
+7. `batch_timestamp_unix_s` is strictly monotonic per character (must increase every committed batch).
+8. Per-character throughput is capped at 20 battles per active minute bucket.
 
 ---
 
@@ -392,6 +407,10 @@ Rules:
 6. No EXP input claims; only deterministic histogram+registry/policy-derived EXP is applied.
 7. Every committed batch must connect to last committed state hash.
 8. Only minimum required accounts are mutated.
+9. Batch season window must be active or still inside configured grace period.
+10. Grace-expired submissions are always rejected.
+11. Batch timestamps are strictly monotonic for each character.
+12. Throughput cannot exceed 20 battles/minute for each character.
 
 ---
 
@@ -457,7 +476,7 @@ Before implementation begins, explicitly resolve and record answers for the foll
 1. What is the MVP dispute/remediation path for server-attested but player-disputed batches?
 2. What signer model is used in `ProgramConfigAccount.trusted_server_signers` for MVP (single signer, small rotating set, or signer-set hash strategy)?
 3. When `settlement_paused = true`, are all settlement paths blocked, or is there an admin-only emergency path?
-4. What is the canonical default attestation validity window (`attestation_expiry_slot - attestation_slot`)?
+4. What is the canonical source-of-truth field path in `ProgramConfigAccount` for attestation expiry policy?
 
 ### 13.2 Batch identity, ordering, replay semantics
 
@@ -465,6 +484,13 @@ Before implementation begins, explicitly resolve and record answers for the foll
 2. Freeze the exact `genesis_state_hash(character_root)` construction and serialization source of truth.
 3. Define deterministic replay/out-of-order error code mapping for client/support observability.
 4. Confirm backlog submission behavior (strict oldest-first continuity across multiple sessions/transactions).
+
+### 13.2A Temporal and rate controls
+
+1. Confirm active season field naming and source (`active_season_id`, window start/end, grace expiry) in `ProgramConfigAccount`.
+2. Confirm minute-bucket keying for throughput cap (`floor(batch_timestamp_unix_s / 60)`).
+3. Confirm exact rejection semantics when a batch would breach 20 battles/minute (full reject vs partial acceptance; MVP = full reject).
+4. Confirm handling when on-chain clock skew and server timestamp differ at boundary seconds.
 
 ### 13.3 Payload canonicalization & signature domain
 
@@ -534,7 +560,7 @@ Use this checklist as the execution tracker for implementing the full unified pl
 
 - [ ] Verify ed25519 server signature with Solana native flow.
 - [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
-- [ ] Enforce attestation validity window and expiry.
+- [ ] Enforce attestation expiry checks from payload + configured on-chain policy source.
 - [ ] Enforce `settlement_paused` behavior per locked policy.
 
 ### 4) Batch validation sequence (instruction core)
@@ -542,6 +568,10 @@ Use this checklist as the execution tracker for implementing the full unified pl
 - [ ] Implement derivation/ownership checks.
 - [ ] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
 - [ ] Implement continuity checks (`start_nonce`, `start_state_hash`, `batch_id`, nonce range).
+- [ ] Implement timestamp monotonicity checks (`batch_timestamp_unix_s` strictly increasing per character).
+- [ ] Implement season window enforcement (`season_id` and configured season start/end bounds).
+- [ ] Implement grace expiry handling (reject post-grace submissions).
+- [ ] Implement throughput cap enforcement (max 20 battles per character per minute bucket).
 - [ ] Implement histogram integrity checks (sum/count, non-zero counts, duplicates forbidden).
 - [ ] Implement world eligibility checks for all referenced zones.
 - [ ] Implement zone/enemy legality checks against registry mapping.
@@ -591,7 +621,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
 2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch (array size may expand later without schema break).
 3. **Paused behavior:** when `settlement_paused = true`, all player settlement submissions are blocked; no admin bypass path in MVP.
-4. **Attestation validity window:** default `attestation_expiry_slot - attestation_slot = 150` slots.
+4. **Attestation validity window:** no hardcoded default constant in spec; expiry is enforced from payload + on-chain policy at validation time.
 
 ### 15.2 Batch identity, ordering, replay semantics (locks)
 
@@ -599,13 +629,14 @@ These decisions are now **locked for MVP** to unblock implementation.
 2. `genesis_state_hash(character_root)` is `sha256(character_root_pubkey || character_id || 0u64_nonce || 0u64_batch_id)` with canonical little-endian integer encoding.
 3. Deterministic continuity error buckets are frozen: nonce gap, state-hash mismatch, batch-id gap, nonce-range mismatch.
 4. Backlog submission is strict oldest-first only; no skipping or parallelized commit lanes.
+5. `batch_timestamp_unix_s` must be strictly increasing per character across committed batches.
 
 ### 15.3 Payload canonicalization & signature domain (locks)
 
-1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
+1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (no standalone EXP input field).
 
    Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, season_id, batch_timestamp_unix_s, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
@@ -616,6 +647,13 @@ These decisions are now **locked for MVP** to unblock implementation.
 2. If histogram-implied progression conflicts with `zone_progress_delta`, `zone_progress_delta` is canonical and conflicts fail validation.
 3. `zone_id -> page_index_u16` mapping is `page_index = zone_id / 256` (integer division).
 4. If summary and page data are inconsistent at validation time, fail settlement (no repair path in instruction).
+
+### 15.7 Temporal/rate controls (locks)
+
+1. Season validity is enforced with `season_id` + configured season window bounds in `ProgramConfigAccount`.
+2. Grace handling is enforced via explicit `grace_expiry_unix_s`; post-grace settlement is rejected.
+3. Timestamp monotonicity is strict per character using `batch_timestamp_unix_s`.
+4. Throughput is capped at 20 battles per minute per character.
 
 ### 15.5 Reward and balance guardrails (locks)
 

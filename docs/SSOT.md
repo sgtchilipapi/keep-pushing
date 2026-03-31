@@ -85,6 +85,32 @@ Canonical implementation details for this trust model are defined in:
 
 - `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
 
+Canonical MVP batch payload terminology (must match plan doc exactly):
+
+- `batch_id`
+- `start_nonce`
+- `end_nonce`
+- `battle_count`
+- `start_state_hash`
+- `end_state_hash`
+- `season_id`
+- `batch_timestamp_unix_s`
+- `zone_progress_delta`
+- `encounter_histogram`
+- `optional_loadout_revision`
+- `batch_hash`
+- `attestation_slot`
+- `attestation_expiry_slot`
+- `signature_scheme`
+
+Canonical settlement invariants (must match plan doc wording):
+
+- No EXP input claims; only deterministic histogram+registry/policy-derived EXP is applied.
+- Batch season window must be active or still inside configured grace period.
+- Grace-expired submissions are always rejected.
+- Batch timestamps are strictly monotonic for each character.
+- Throughput cannot exceed 20 battles/minute for each character.
+
 ---
 
 ## 2.4 Vertical Slice Development
