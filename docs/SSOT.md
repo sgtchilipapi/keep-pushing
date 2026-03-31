@@ -76,6 +76,7 @@ Explicit goals for MVP settlement validation:
 - Prevent impossible progression jumps.
 - Prevent replay and out-of-order settlement.
 - Prevent impossible battle throughput.
+- Impossible battle density must fail settlement via deterministic interval math.
 
 Explicit non-goal for MVP:
 
@@ -86,6 +87,35 @@ Canonical implementation details for this trust model are defined in:
 - `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
 
 ---
+
+
+## 2.3.1 Settlement Canonical Dictionary (Summary)
+
+The settlement model uses one canonical time anchor family and unit:
+
+- canonical battle time fields are `*_battle_ts` only,
+- canonical unit is Unix timestamp seconds (`u64`),
+- canonical cursor anchors are `last_committed_battle_ts` and `last_committed_season_id`,
+- canonical season policy fields are `season_start_ts`, `season_end_ts`, `commit_grace_end_ts`.
+
+Canonical policy order:
+
+1. Delayed submission is valid.
+2. Prior-season uncommitted progress expires after grace.
+3. Throughput cap is deterministic from interval timestamps, not submission timing.
+
+Compatibility policy:
+
+- Legacy expiry-window fields must follow explicit version policy.
+- No silent reinterpretation of legacy fields is allowed.
+
+Player-facing lifecycle rule:
+
+- Commit within grace or lose uncommitted prior-season progress.
+
+Security caveat (must remain explicit):
+
+- Without independent external timestamp anchoring, anti-predating is mitigation-bound and not absolute proof of historical truth.
 
 ## 2.4 Vertical Slice Development
 
