@@ -67,10 +67,16 @@ To avoid ambiguity in initial implementation, MVP uses these explicit defaults:
 - `max_battles_per_batch = 32` (hard on-chain acceptance ceiling),
 - `max_histogram_entries_per_batch = 64`,
 - `batch_id` is **required** and strictly monotonic (`+1`),
+- season model timestamps are required in policy/config:
+  - `season_start_ts`,
+  - `season_end_ts`,
+  - `commit_grace_end_ts`,
 - `CharacterSettlementBatchCursorAccount` is initialized at character creation with:
   - `last_committed_end_nonce = 0`,
   - `last_committed_state_hash = genesis_state_hash(character_root)`,
-  - `last_committed_batch_id = 0`.
+  - `last_committed_batch_id = 0`,
+  - `last_committed_battle_ts = character_created_at_ts`,
+  - `last_committed_season_id = 0` (pre-season sentinel).
 
 These values can be governance-tuned later, but are canonical for MVP launch.
 
@@ -145,6 +151,8 @@ Purpose:
 - `last_committed_end_nonce: u64`
 - `last_committed_state_hash: [u8; 32]`
 - `last_committed_batch_id: u64` (optional but recommended)
+- `last_committed_battle_ts: i64`
+- `last_committed_season_id: u32`
 - `updated_at_slot: u64`
 
 Purpose:
@@ -207,6 +215,12 @@ Applies exactly one server-attested contiguous batch.
 - `start_nonce: u64`
 - `end_nonce: u64`
 - `battle_count: u16`
+- `first_battle_ts: i64` (unix seconds)
+- `last_battle_ts: i64` (unix seconds)
+- `season_id: u32`
+- `season_start_ts: i64`
+- `season_end_ts: i64`
+- `commit_grace_end_ts: i64`
 - `start_state_hash: [u8; 32]`
 - `end_state_hash: [u8; 32]`
 - `zone_progress_delta: Vec<ZoneProgressDeltaEntry>`
@@ -244,7 +258,7 @@ To prevent signature replay across environments/programs, the signed message dom
 - all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
 
 Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+`character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, season_start_ts, season_end_ts, commit_grace_end_ts, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -289,41 +303,53 @@ Required accounts:
    - enforce batch size policy (`battle_count <= max_battles_per_batch`),
    - enforce `encounter_histogram.len() <= max_histogram_entries_per_batch`.
 
-3. **Batch continuity checks**
+3. **Season/time/eligibility checks**
+   - require `season_start_ts <= season_end_ts <= commit_grace_end_ts`,
+   - require `first_battle_ts <= last_battle_ts`,
+   - require `first_battle_ts >= CharacterRootAccount.created_at_ts` (no claimed battle before character creation),
+   - require batch commit interval is within active season + grace commit window:
+     - `first_battle_ts >= season_start_ts`,
+     - `last_battle_ts <= commit_grace_end_ts`,
+   - require stale-progress protection:
+     - any uncommitted prior-season progress is ineligible once `current_ts > commit_grace_end_ts`.
+
+4. **Batch continuity checks**
    - require `start_nonce == cursor.last_committed_end_nonce + 1`,
    - require `start_state_hash == cursor.last_committed_state_hash`,
    - require `batch_id == cursor.last_committed_batch_id + 1`,
    - require `end_nonce >= start_nonce`,
    - require `battle_count == (end_nonce - start_nonce + 1)`.
 
-4. **Histogram integrity checks**
+5. **Histogram integrity checks**
    - require `sum(encounter_histogram.count) == battle_count`,
    - reject zero-count or duplicate `(zone_id, enemy_archetype_id)` entries.
 
-5. **World eligibility checks**
+6. **World eligibility checks**
    - each referenced `zone_id` must be currently unlocked or become valid via allowed progression transition rules in same batch.
 
-6. **Zone/enemy legality checks**
+7. **Zone/enemy legality checks**
    - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
 
-7. **Deterministic EXP derivation checks**
+8. **Deterministic EXP derivation checks**
    - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
    - reject on arithmetic overflow or missing registry entries,
    - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
-8. **Optional loadout consistency**
+9. **Optional loadout consistency**
    - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
 
-9. **Apply progression transitions**
+10. **Apply progression transitions**
    - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
 
-10. **Persist batch cursor**
+11. **Persist batch cursor**
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
+   - set `cursor.last_committed_battle_ts = last_battle_ts`,
+   - set `cursor.last_committed_season_id = season_id`,
    - optionally write batch receipt.
 
 This sequence replaces per-battle validation as the MVP ingestion path.
@@ -367,6 +393,9 @@ Rules:
 4. EXP is derived deterministically from histogram + registry/policy fields (no EXP input claims).
 5. Duplicate `(zone_id, enemy_archetype_id)` entries are invalid.
 6. `battle_count == end_nonce - start_nonce + 1`.
+7. Claimed battle timestamps cannot predate `CharacterRootAccount.created_at_ts`.
+8. Claimed batch interval must stay within `[season_start_ts, commit_grace_end_ts]`.
+9. Uncommitted prior-season progress is invalid after grace end.
 
 ---
 
@@ -599,16 +628,18 @@ These decisions are now **locked for MVP** to unblock implementation.
 2. `genesis_state_hash(character_root)` is `sha256(character_root_pubkey || character_id || 0u64_nonce || 0u64_batch_id)` with canonical little-endian integer encoding.
 3. Deterministic continuity error buckets are frozen: nonce gap, state-hash mismatch, batch-id gap, nonce-range mismatch.
 4. Backlog submission is strict oldest-first only; no skipping or parallelized commit lanes.
+5. Stale-progress rule: once a season’s `commit_grace_end_ts` has passed, any still-uncommitted progress from that season is permanently ineligible for settlement.
 
 ### 15.3 Payload canonicalization & signature domain (locks)
 
 1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
 
    Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, season_start_ts, season_end_ts, commit_grace_end_ts, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
+5. Cursor continuity extends to season/time fields: `last_committed_battle_ts` is monotonic and `last_committed_season_id` must be non-decreasing unless an explicit migration instruction is introduced.
 
 ### 15.4 World progression semantics (locks)
 

@@ -85,6 +85,21 @@ Canonical implementation details for this trust model are defined in:
 
 - `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
 
+### 2.3.1 Progression/Settlement Lifecycle Policy (MVP)
+
+Season-based settlement is constrained by explicit lifecycle timestamps:
+
+- `season_start_ts`
+- `season_end_ts`
+- `commit_grace_end_ts`
+
+High-level policy requirements:
+
+- Claimed battle timestamps must not precede character creation.
+- Claimed batch intervals must fall within the active season plus grace commit window.
+- Uncommitted progress from a prior season becomes permanently ineligible once that season’s grace window ends.
+- Settlement payloads and per-character cursors must carry season/timestamp continuity fields so ordering and stale-progress rejection are enforceable on-chain.
+
 ---
 
 ## 2.4 Vertical Slice Development
