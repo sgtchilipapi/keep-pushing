@@ -70,7 +70,9 @@ To avoid ambiguity in initial implementation, MVP uses these explicit defaults:
 - `CharacterSettlementBatchCursorAccount` is initialized at character creation with:
   - `last_committed_end_nonce = 0`,
   - `last_committed_state_hash = genesis_state_hash(character_root)`,
-  - `last_committed_batch_id = 0`.
+  - `last_committed_batch_id = 0`,
+  - `last_committed_attestation_slot = 0`,
+  - `last_committed_battle_ts = 0`.
 
 These values can be governance-tuned later, but are canonical for MVP launch.
 
@@ -145,6 +147,8 @@ Purpose:
 - `last_committed_end_nonce: u64`
 - `last_committed_state_hash: [u8; 32]`
 - `last_committed_batch_id: u64` (optional but recommended)
+- `last_committed_attestation_slot: u64`
+- `last_committed_battle_ts: u64`
 - `updated_at_slot: u64`
 
 Purpose:
@@ -213,7 +217,7 @@ Applies exactly one server-attested contiguous batch.
 - `encounter_histogram: Vec<EncounterCountEntry>`
 - `optional_loadout_revision: Option<u32>`
 - `batch_hash: [u8; 32]`
-- attestation domain fields (e.g., `attestation_slot: u64`, `attestation_expiry_slot: u64`)
+- attestation/battle marker domain fields (`attestation_slot: u64`, `battle_ts: u64`)
 - `signature_scheme: u8` (`0 = ed25519_server_sig_v1`)
 
 ## 6.3 Required supporting types
@@ -244,7 +248,7 @@ To prevent signature replay across environments/programs, the signed message dom
 - all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
 
 Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+`character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, battle_ts, signature_scheme`.
 
 `batch_hash` is defined as:
 
@@ -254,7 +258,7 @@ Server attestation verification for MVP:
 
 - use Solana ed25519 verification flow,
 - accept only signer keys present in `ProgramConfigAccount.trusted_server_signers`,
-- reject if `attestation_expiry_slot < current_slot`.
+- delayed submission is allowed (no attestation-expiry-slot rejection rule in MVP).
 
 ---
 
@@ -293,6 +297,8 @@ Required accounts:
    - require `start_nonce == cursor.last_committed_end_nonce + 1`,
    - require `start_state_hash == cursor.last_committed_state_hash`,
    - require `batch_id == cursor.last_committed_batch_id + 1`,
+   - require `attestation_slot >= cursor.last_committed_attestation_slot`,
+   - require `battle_ts >= cursor.last_committed_battle_ts`,
    - require `end_nonce >= start_nonce`,
    - require `battle_count == (end_nonce - start_nonce + 1)`.
 
@@ -324,6 +330,8 @@ Required accounts:
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
+   - set `cursor.last_committed_attestation_slot = attestation_slot`,
+   - set `cursor.last_committed_battle_ts = battle_ts`,
    - optionally write batch receipt.
 
 This sequence replaces per-battle validation as the MVP ingestion path.
@@ -391,7 +399,9 @@ Rules:
 5. No batch claiming enemies outside zone mappings.
 6. No EXP input claims; only deterministic histogram+registry/policy-derived EXP is applied.
 7. Every committed batch must connect to last committed state hash.
-8. Only minimum required accounts are mutated.
+8. Delayed submission is allowed.
+9. Attestation/battle markers are monotonic across committed batches per character.
+10. Only minimum required accounts are mutated.
 
 ---
 
@@ -457,7 +467,7 @@ Before implementation begins, explicitly resolve and record answers for the foll
 1. What is the MVP dispute/remediation path for server-attested but player-disputed batches?
 2. What signer model is used in `ProgramConfigAccount.trusted_server_signers` for MVP (single signer, small rotating set, or signer-set hash strategy)?
 3. When `settlement_paused = true`, are all settlement paths blocked, or is there an admin-only emergency path?
-4. What is the canonical default attestation validity window (`attestation_expiry_slot - attestation_slot`)?
+4. Confirm delayed-submission policy and marker monotonicity semantics (`attestation_slot`/`battle_ts`).
 
 ### 13.2 Batch identity, ordering, replay semantics
 
@@ -522,6 +532,8 @@ Use this checklist as the execution tracker for implementing the full unified pl
   - [ ] `last_committed_end_nonce = 0`
   - [ ] `last_committed_state_hash = genesis_state_hash(character_root)`
   - [ ] `last_committed_batch_id = 0`
+  - [ ] `last_committed_attestation_slot = 0`
+  - [ ] `last_committed_battle_ts = 0`
 
 ### 2) Instruction + canonical payload contract
 
@@ -534,7 +546,8 @@ Use this checklist as the execution tracker for implementing the full unified pl
 
 - [ ] Verify ed25519 server signature with Solana native flow.
 - [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
-- [ ] Enforce attestation validity window and expiry.
+- [ ] Enforce delayed-submission policy (no expiry rejection).
+- [ ] Enforce attestation/battle marker monotonicity against cursor state.
 - [ ] Enforce `settlement_paused` behavior per locked policy.
 
 ### 4) Batch validation sequence (instruction core)
@@ -591,7 +604,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
 2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch (array size may expand later without schema break).
 3. **Paused behavior:** when `settlement_paused = true`, all player settlement submissions are blocked; no admin bypass path in MVP.
-4. **Attestation validity window:** default `attestation_expiry_slot - attestation_slot = 150` slots.
+4. **Delayed submission policy:** delayed submission is allowed in MVP; no attestation expiry window rejection is enforced.
 
 ### 15.2 Batch identity, ordering, replay semantics (locks)
 
@@ -605,7 +618,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
 
    Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, attestation_expiry_slot, signature_scheme`.
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, attestation_slot, battle_ts, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
