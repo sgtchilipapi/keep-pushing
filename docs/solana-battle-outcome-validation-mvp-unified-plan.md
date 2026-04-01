@@ -795,12 +795,12 @@ Use this checklist as the execution tracker. Each slice should finish with at le
 - [x] Create canonical test fixtures for one character / one zone / one enemy / one valid batch.
 - [x] Verify managed local workflow: `anchor test`.
 - [x] Verify persistent local-validator workflow: `solana-test-validator` + `anchor test --skip-local-validator`.
-- [ ] Build integration helpers for:
-  - [ ] server attestation signing,
-  - [ ] player permit signing,
-  - [ ] ed25519 instruction insertion,
-  - [ ] relayer submission,
-  - [ ] post-transaction state assertions.
+- [x] Build integration helpers for:
+  - [x] server attestation signing,
+  - [x] player permit signing,
+  - [x] ed25519 instruction insertion,
+  - [x] relayer submission,
+  - [x] post-transaction state assertions.
 
 ### Slice 0) Current `runana-program` Status Snapshot
 
@@ -811,19 +811,18 @@ Observed in `runana-program` at this stage:
 - The managed local workflow has been verified with a successful `anchor test` run.
 - The persistent-validator workflow has been verified with a successful `anchor test --skip-local-validator` run against `solana-test-validator`.
 - Canonical Slice 0 fixtures now exist in `runana-program/tests/src/fixtures.rs` and are verified by `runana-program/tests/src/test_canonical_fixtures.rs`.
-- The on-chain program is still the default `initialize` skeleton.
-- The current test harness is still only a minimal `initialize` smoke test.
-- Settlement accounts, canonical payload types, signature-domain helpers, and relayer-flow integration helpers are not implemented yet.
+- Integration helpers now exist in `runana-program/tests/src/integration_helpers.rs` and are unit-verified by `runana-program/tests/src/test_integration_helpers.rs`.
+- The on-chain program now includes a settlement-shaped smoke instruction `ApplyBattleSettlementBatchV1` that validates dual-ed25519 pre-instruction presence, canonical `batch_hash` recomputation, nonce-range math, and histogram sum/count integrity.
+- The current networked harness now targets the settlement-shaped smoke path instead of `initialize`, while still deferring real settlement account/state application to Slice 1.
 
 Assessment:
 
 - The repo now qualifies for the third Slice 0 checklist item.
-- Slice 0 as a whole remains open.
+- Slice 0 is complete.
 
-What is still missing for Slice 0 completion:
+Next implementation frontier:
 
-1. Integration helpers for server attestation signing, player permit signing, ed25519 instruction insertion, relayer submission, and post-transaction assertions.
-2. Replacement of the initialize-only harness with settlement-oriented vertical-slice tests.
+1. Slice 1 happy-path settlement accounts, bootstrap state, and real progression/cursor mutation.
 
 ### Slice 1) Happy-path single-batch settlement
 
