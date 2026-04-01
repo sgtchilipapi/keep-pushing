@@ -49,8 +49,9 @@ This section is the one-page canonical dictionary referenced by all implementati
   - `attestation_expiry_slot` is rejected if provided in canonical payload,
   - server-provided `expDelta` is rejected,
   - EXP must be registry-derived on-chain,
+  - dual-signature authorization is mandatory (`trusted_server_signer` attestation + player authorization permit),
   - timestamp/season/grace/throughput invariants are mandatory.
-- Trusted signer verification remains mandatory in all versions, but signer verification is authN/authZ and is **not** a freshness proof.
+- Trusted server signer verification remains mandatory in all versions; player authorization verification is mandatory in canonical `schema_version >= 2`. Signature verification is authN/authZ and is **not** a freshness proof.
 
 ## 2) Revised MVP Trust Model (Bounded Trust)
 
@@ -80,7 +81,7 @@ Mental model:
 
 1. **Battle execution (off-chain):** server simulates battles.
 2. **Batch construction (off-chain):** server seals contiguous battle batches (recommended: ~20 battles).
-3. **Deferred submission (player):** player can keep playing; later submits batches sequentially.
+3. **Deferred authorization + submission:** player can keep playing; later authorizes batches and the relayer/server submits them sequentially.
 4. **On-chain validation:** program validates each batch against authority, continuity, legality, reward bounds, replay rules.
 5. **On-chain apply:** only minimal progression + cursor accounts are updated.
 
@@ -111,9 +112,9 @@ These values can be governance-tuned later, but are canonical for MVP launch.
 
 ---
 
-## 4) Required MVP Account Set (Opinionated)
+## 4) MVP Account Set (Opinionated)
 
-## 4.1 Character-side mutable accounts (required)
+## 4.1 Character-side mutable accounts (MVP-core unless noted)
 
 1. **CharacterRootAccount**  
    PDA: `[b"character", authority_pubkey, character_id]`  
@@ -133,7 +134,7 @@ These values can be governance-tuned later, but are canonical for MVP launch.
 
 5. **CharacterLoadoutAccount** (**recommended in MVP**)  
    PDA: `[b"character_loadout", character_root_pubkey]`  
-   Purpose: optional consistency guard using `loadout_revision` at batch commit time.
+   Purpose: character equipment/loadout state; not used by canonical MVP settlement validation.
 
 ## 4.2 Global/static registries (required)
 
@@ -162,6 +163,7 @@ These values can be governance-tuned later, but are canonical for MVP launch.
 - `trusted_server_signers: [Pubkey; N]` (or signer-set hash + verification strategy)
 - `settlement_paused: bool`
 - `max_battles_per_batch: u16` (policy cap)
+- `max_histogram_entries_per_batch: u16` (policy cap)
 - `updated_at_slot: u64`
 
 Purpose:
@@ -235,7 +237,7 @@ These remain valid future domains but are **not settlement-critical for batch MV
 
 `ApplyBattleSettlementBatchV1`
 
-Applies exactly one server-attested contiguous batch.
+Applies exactly one server-attested, player-authorized contiguous batch.
 
 ## 6.2 Required payload fields
 
@@ -248,14 +250,14 @@ Applies exactly one server-attested contiguous batch.
 - `end_state_hash: [u8; 32]`
 - `zone_progress_delta: Vec<ZoneProgressDeltaEntry>`
 - `encounter_histogram: Vec<EncounterCountEntry>`
-- `optional_loadout_revision: Option<u32>`
+- `optional_loadout_revision: Option<u32>` (optional metadata only; ignored by canonical MVP settlement validation)
 - `batch_hash: [u8; 32]`
 - `first_battle_ts: u64` (seconds since Unix epoch)
 - `last_battle_ts: u64` (seconds since Unix epoch)
 - `season_id: u32`
 - `schema_version: u16`
 - legacy attestation metadata MAY be present for telemetry but is non-normative in V2+
-- `signature_scheme: u8` (`0 = ed25519_server_sig_v1`)
+- `signature_scheme: u8` (`0 = ed25519_dual_sig_v1`)
 
 ## 6.3 Required supporting types
 
@@ -277,24 +279,39 @@ Design requirement:
 
 ## 6.4 Canonical hash/signature domain (required)
 
-To prevent signature replay across environments/programs, the signed message domain must include:
+MVP uses a **dual-signature authorization model**:
+
+- **server attestation signature**: authorizes the sealed settlement batch contents,
+- **player authorization signature**: authorizes applying that sealed batch to the player's character,
+- the transaction submitter/fee payer MAY be a relayer and is **not** the authorization source.
+
+To prevent signature replay across environments/programs, both signed message domains must include:
 
 - `program_id`,
 - `cluster_id` (or explicit environment id),
-- `character_root_pubkey`,
-- all fields in section 6.2 in canonical serialization order (with no `exp_delta` field).
+- `character_root_pubkey`.
 
-Canonical serialized order for hashing/signing is:
-`character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
+Canonical serialized order for the **server attestation** message is:
+`program_id, cluster_id, character_root_pubkey, character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
+
+Canonical serialized order for the **player authorization permit** message is:
+`program_id, cluster_id, player_authority_pubkey, character_root_pubkey, batch_hash, batch_id, signature_scheme`.
 
 `batch_hash` is defined as:
 
-- `sha256(canonical_serialized_batch_payload_without_signature)`.
+- `sha256(canonical_serialized_batch_payload_preimage)`.
 
-Server attestation verification for MVP:
+`canonical_serialized_batch_payload_preimage` is the canonical payload serialization using the section 6.2 payload fields in order, **excluding** `batch_hash` itself and excluding all signature bytes/instruction metadata.
 
-- use Solana ed25519 verification flow,
-- accept only signer keys present in `ProgramConfigAccount.trusted_server_signers`,
+Canonical field order for `batch_hash` preimage is:
+`character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, schema_version, signature_scheme`.
+
+Dual-signature verification for MVP:
+
+- use Solana ed25519 verification flow for both server attestation and player authorization,
+- accept server signatures only from signer keys present in `ProgramConfigAccount.trusted_server_signers`,
+- require the player authorization signature to verify against the `player_authority_pubkey` bound to the character,
+- the player authorization permit is bound to an exact `batch_hash`/`batch_id`; replay is additionally blocked by continuity and cursor state,
 - no expiry-window freshness gate; delayed submissions are valid when all invariants pass.
 
 ---
@@ -303,13 +320,13 @@ Server attestation verification for MVP:
 
 Required accounts:
 
-- signer: `player_authority`
+- read: `player_authority` (not a transaction signer; used as permit subject / ownership identity)
+- read: `SysvarInstructions` (to inspect ed25519 verification instructions for server + player signatures)
 - read: `ProgramConfigAccount`
 - write: `CharacterRootAccount`
 - write: `CharacterStatsAccount` (if level/stat change)
 - read/write: `CharacterWorldProgressAccount`
 - read/write: one or more `CharacterZoneProgressPageAccount` entries referenced by deltas/histogram
-- optional read: `CharacterLoadoutAccount`
 - read/write: `CharacterSettlementBatchCursorAccount`
 - read: `ZoneRegistryAccount` entries referenced by batch
 - read: `ZoneEnemySetAccount` entries referenced by histogram
@@ -322,11 +339,15 @@ Required accounts:
 
 1. **Derivation and ownership**
    - verify PDA derivations,
-   - verify `player_authority` owns character root.
+   - verify `CharacterRootAccount.authority == player_authority`,
+   - verify the player authorization permit subject matches `player_authority` and `character_root_pubkey`.
 
-2. **Program config checks**
+2. **Authorization and program config checks**
    - reject if `settlement_paused`,
    - verify trusted server attestation/signature under `ProgramConfigAccount` policy,
+   - verify player authorization signature using Solana ed25519 native flow via `SysvarInstructions`,
+   - require both signed domains to bind `program_id`, `cluster_id`, and `character_root_pubkey`,
+   - require the player authorization permit to bind `player_authority`, `batch_hash`, and `batch_id`,
    - enforce batch size policy (`battle_count <= max_battles_per_batch`),
    - enforce `encounter_histogram.len() <= max_histogram_entries_per_batch`.
 
@@ -363,16 +384,13 @@ Required accounts:
    - reject on arithmetic overflow or missing registry entries,
    - use only `derived_exp_delta` for progression application (no client/server-provided EXP input field).
 
-10. **Optional loadout consistency**
-   - if `optional_loadout_revision` present, require equality to `CharacterLoadoutAccount.loadout_revision`.
-
-11. **Apply progression transitions**
+10. **Apply progression transitions**
    - apply `derived_exp_delta` with normal level-up logic,
    - update stats if level changes,
    - apply `zone_progress_delta` with monotonic state transition rules (`locked -> unlocked -> cleared`, never reverse),
    - update account timestamps/versions as needed.
 
-12. **Persist batch cursor**
+11. **Persist batch cursor**
    - set `cursor.last_committed_end_nonce = end_nonce`,
    - set `cursor.last_committed_state_hash = end_state_hash`,
    - set `cursor.last_committed_batch_id = batch_id` (if used),
@@ -440,7 +458,7 @@ Rules:
 
 Validation ordering (normative):
 
-1. authority/signature checks,
+1. dual-signature authority checks,
 2. continuity checks (nonce/state hash/batch id),
 3. season eligibility checks,
 4. throughput checks,
@@ -497,7 +515,7 @@ Examples:
 
 ## 10) Non-Negotiable MVP Invariants
 
-1. No batch settlement without valid player authority + trusted server attestation.
+1. No batch settlement without valid player authorization signature + trusted server attestation.
 2. No out-of-order batch submission.
 3. No replay of previously committed batch range/hash.
 4. No batch referencing locked/invalid zones.
@@ -508,54 +526,209 @@ Examples:
 
 ---
 
-## 11) Revised Implementation Phases
+## 11) Vertical Slice Implementation Plan
 
-### Phase A
+Implementation should proceed as **vertical slices**, not horizontal layers.
 
-- Freeze batch-based account set + schema + seeds.
-- Freeze `ApplyBattleSettlementBatchV1` payload and validation rules.
+Definition:
 
-### Phase B
+- each slice must produce one shippable end-to-end path across:
+  - player authorization UX/message generation,
+  - relayer/server transaction assembly,
+  - on-chain validation/application,
+  - automated integration tests,
+  - operator observability for that path.
 
-- Implement `ApplyBattleSettlementBatchV1` with cursor-based continuity + histogram validation.
+The goal is to validate real system integration early instead of finishing all accounts, then all serialization, then all validation, then all relay work separately.
 
-### Phase C
+### Slice 0: Foundations and harness
 
-- Add optional `BattleSettlementBatchReceiptAccount` for audit/indexing (if excluded from Phase B).
+- freeze account set, PDA seeds, canonical payload layout, and signature domains,
+- use **Anchor** as the default local development framework for the Solana program and test harness,
+- configure `Anchor.toml` for `localnet` during slices 0-5 local development,
+- establish local integration harness covering:
+  - player permit signing,
+  - server attestation signing,
+  - relayer transaction assembly,
+  - Solana execution + assertion helpers,
+- establish local Solana development workflow per Anchor local-development guidance:
+  - default path: run `anchor test` against `localnet` so the validator/program/test lifecycle is managed automatically,
+  - iterative debugging path: run `solana-test-validator` manually and use `anchor test --skip-local-validator`,
+  - use the local validator as the canonical environment for all vertical-slice integration in this document; devnet promotion is out of scope here,
+- define canonical fixture data for:
+  - one character,
+  - one unlocked zone,
+  - one enemy archetype,
+  - one valid one-batch settlement.
 
-### Phase D
+Exit criteria:
 
-- Add inventory/drop settlement domains when loot is in-scope.
+- one deterministic fixture set is reusable across later slices,
+- test harness can construct and submit transactions with ed25519 verification instructions,
+- Anchor localnet workflow is documented and working for both managed and persistent-validator modes.
 
-### Phase E
+### Slice 1: Happy-path single-batch settlement
 
-- Add on-chain learning persistence if anti-tamper scope expands.
+- implement the minimum account set needed for one valid batch:
+  - `CharacterRootAccount`,
+  - `CharacterStatsAccount`,
+  - `CharacterWorldProgressAccount`,
+  - `CharacterZoneProgressPageAccount`,
+  - `ZoneRegistryAccount`,
+  - `ZoneEnemySetAccount`,
+  - `EnemyArchetypeRegistryAccount`,
+  - `ProgramConfigAccount`,
+  - `CharacterSettlementBatchCursorAccount`,
+- implement local bootstrap/deployment path required to exercise a real happy-path settlement:
+  - deploy the Anchor program to localnet,
+  - initialize `ProgramConfigAccount`,
+  - seed minimum registry state (`ZoneRegistryAccount`, `ZoneEnemySetAccount`, `EnemyArchetypeRegistryAccount`),
+  - implement character creation/bootstrap instructions that create and initialize:
+    - `CharacterRootAccount`,
+    - `CharacterStatsAccount`,
+    - `CharacterWorldProgressAccount`,
+    - initial `CharacterZoneProgressPageAccount` entries as needed,
+    - `CharacterSettlementBatchCursorAccount`,
+- implement `ApplyBattleSettlementBatchV1` happy-path validation only for:
+  - PDA derivation,
+  - server signature verification,
+  - player permit verification,
+  - ownership binding,
+  - batch hash equality,
+  - basic continuity,
+  - histogram sum/count integrity,
+  - deterministic EXP application,
+  - cursor persistence,
+- implement server flow to:
+  - build canonical payload,
+  - build server attestation bytes,
+  - build player permit bytes,
+  - collect player authorization,
+  - assemble relay transaction with both ed25519 verification instructions,
+  - submit successfully,
+- add one end-to-end test that executes a successful settlement from permit request through on-chain apply.
 
-### Phase F
+Exit criteria:
 
-- Add enemy instance persistence only when persistent world enemies become chain-tracked requirements.
+- one real settlement batch succeeds end to end in integration tests,
+- character progression and cursor state update correctly,
+- no manual transaction crafting is required outside the tested relay flow.
+
+### Slice 2: Replay and sequencing defenses
+
+- enforce strict oldest-first continuity:
+  - `start_nonce`,
+  - `start_state_hash`,
+  - `batch_id`,
+  - nonce range math,
+- enforce player-permit binding to:
+  - `program_id`,
+  - `cluster_id`,
+  - `player_authority`,
+  - `character_root_pubkey`,
+  - `batch_hash`,
+  - `batch_id`,
+- add negative end-to-end tests for:
+  - replayed batch,
+  - out-of-order batch,
+  - wrong batch hash,
+  - wrong batch id,
+  - wrong character owner,
+  - wrong signature domain values.
+
+Exit criteria:
+
+- same harness proves replay/out-of-order submissions fail on-chain for the expected reasons.
+
+### Slice 3: Time, season, and throughput controls
+
+- implement:
+  - monotonic battle timestamp checks,
+  - season monotonicity,
+  - season/grace eligibility,
+  - deterministic throughput cap,
+- extend end-to-end vectors for:
+  - delayed submission success,
+  - grace-window boundary pass/fail,
+  - season regression failure,
+  - pre-character timestamp failure,
+  - throughput boundary pass/fail.
+
+Exit criteria:
+
+- old but valid batches can still settle,
+- stale or impossible timing patterns fail in integration tests.
+
+### Slice 4: World legality and deterministic rewards
+
+- enforce:
+  - unlocked-zone/world eligibility,
+  - zone→enemy legality,
+  - duplicate/zero-count histogram rejection,
+  - deterministic EXP derivation with overflow rejection,
+- test legal and illegal encounter histograms end to end.
+
+Exit criteria:
+
+- registry-backed legality and reward derivation are proven through integrated success/failure cases, not only unit tests.
+
+### Slice 5: Progression completeness and account envelope
+
+- finish monotonic `zone_progress_delta` application,
+- verify summary/page consistency policy,
+- support multi-page zone progress account access,
+- benchmark compute for worst-case canonical batch,
+- harden account mutability/readonly enforcement and instruction-account ordering.
+
+Exit criteria:
+
+- the full canonical MVP validation sequence is implemented for production-sized batches within compute limits.
+
+### Slice 6: Ops and optional auditability
+
+- publish operator runbook + error-code map,
+- add retry/reconciliation metadata storage in the relay path,
+- decide whether `BattleSettlementBatchReceiptAccount` is promoted,
+- if promoted, implement receipts and receipt-based support tooling.
+
+Exit criteria:
+
+- settlement flow is supportable in production,
+- optional receipt path is either explicitly deferred or integrated end to end.
 
 ---
 
-## 12) Final MVP Build Ticket Checklist
+## 12) Final MVP Build Ticket Scope
 
-Implement now (MVP-core):
+This section is the **scope inventory**, not the recommended implementation order. Delivery order is defined by the vertical slices in section 11.
+
+Implement now (MVP-core scope):
 
 1. CharacterRootAccount
 2. CharacterStatsAccount
 3. CharacterWorldProgressAccount
 4. CharacterZoneProgressPageAccount
-5. CharacterLoadoutAccount (recommended)
-6. ZoneRegistryAccount
-7. ZoneEnemySetAccount
-8. EnemyArchetypeRegistryAccount
-9. ProgramConfigAccount
-10. CharacterSettlementBatchCursorAccount
-11. ApplyBattleSettlementBatchV1 + required histogram validation logic
+5. ZoneRegistryAccount
+6. ZoneEnemySetAccount
+7. EnemyArchetypeRegistryAccount
+8. ProgramConfigAccount
+9. CharacterSettlementBatchCursorAccount
+10. `ApplyBattleSettlementBatchV1`
+11. local bootstrap/deployment path for localnet:
+   - Anchor program deployment,
+   - `ProgramConfigAccount` initialization,
+   - minimum registry seeding,
+   - character creation/bootstrap path for character-owned accounts and cursor defaults
+12. dual-signature authority flow:
+   - trusted server attestation,
+   - player authorization permit,
+   - relayer transaction assembly with ed25519 verification instructions
+13. canonical histogram validation + deterministic EXP derivation
 
 Optional (MVP+1):
 
 - BattleSettlementBatchReceiptAccount
+- CharacterLoadoutAccount (only if another MVP domain needs it; not part of canonical settlement validation)
 
 Everything else is explicitly deferred unless product scope changes.
 
@@ -595,102 +768,144 @@ Before implementation begins, explicitly resolve and record answers for the foll
 
 ### 13.5 Reward and balance guardrails
 
-1. Freeze exact `exp_cap_per_encounter(enemy_archetype_id)` policy function and registry dependencies.
+1. Freeze exact deterministic EXP derivation inputs and registry dependencies (`exp_reward_base`, zone multiplier fields, and integer math policy).
 2. Freeze arithmetic safety policy for EXP math (intermediate width, overflow behavior, and clamp/reject semantics).
 3. Decide whether zero-EXP non-empty batches are valid or rejected as anomalous.
 4. Confirm all level-up side effects in MVP scope versus deferred domains.
 
 ### 13.6 Optional components to lock now
 
-1. Decide whether `optional_loadout_revision` remains optional by policy or becomes effectively required for all submissions.
+1. Confirm `optional_loadout_revision` remains metadata-only and is ignored by canonical MVP settlement validation.
 2. Decide if `BattleSettlementBatchReceiptAccount` remains MVP+1 or is promoted into MVP-core for ops/audit reasons.
 3. Confirm `max_histogram_entries_per_batch` launch value and governance tuning rules.
 4. Confirm server batch construction policy (`target_batch_size = 20`) and whether adaptive sizing is allowed under constraints.
 
 ---
 
-## 14) Updated End-to-End Implementation Checklist
+## 14) Vertical Slice Delivery Checklist
 
-Use this checklist as the execution tracker for implementing the full unified plan.
+Use this checklist as the execution tracker. Each slice should finish with at least one end-to-end integration test passing through the real relayer flow.
 
-### 0) Governance decisions (must lock first)
+### Slice 0) Governance + harness
 
 - [x] Resolve and freeze all Section 13 decision points with lean MVP choices.
 - [ ] Publish error-code map and operator runbook for settlement failures.
+- [ ] Set up Anchor-based local development (`Anchor.toml` on `localnet`) for slices 0-5.
+- [ ] Create canonical test fixtures for one character / one zone / one enemy / one valid batch.
+- [ ] Verify managed local workflow: `anchor test`.
+- [ ] Verify persistent local-validator workflow: `solana-test-validator` + `anchor test --skip-local-validator`.
+- [ ] Build integration helpers for:
+  - [ ] server attestation signing,
+  - [ ] player permit signing,
+  - [ ] ed25519 instruction insertion,
+  - [ ] relayer submission,
+  - [ ] post-transaction state assertions.
 
-### 1) On-chain account model (MVP-core)
+### Slice 1) Happy-path single-batch settlement
 
-- [ ] Implement and test account layouts + PDA derivations for:
+- [ ] Implement and test minimum account layouts + PDA derivations for:
   - [ ] CharacterRootAccount
   - [ ] CharacterStatsAccount
   - [ ] CharacterWorldProgressAccount
   - [ ] CharacterZoneProgressPageAccount
-  - [ ] CharacterLoadoutAccount
   - [ ] ZoneRegistryAccount
   - [ ] ZoneEnemySetAccount
   - [ ] EnemyArchetypeRegistryAccount
   - [ ] ProgramConfigAccount
   - [ ] CharacterSettlementBatchCursorAccount
+- [ ] Deploy the Anchor program to localnet as part of the happy-path integration flow.
+- [ ] Initialize `ProgramConfigAccount` on localnet.
+- [ ] Seed minimum registry state on localnet:
+  - [ ] `ZoneRegistryAccount`
+  - [ ] `ZoneEnemySetAccount`
+  - [ ] `EnemyArchetypeRegistryAccount`
+- [ ] Implement character creation/bootstrap path that creates and initializes:
+  - [ ] `CharacterRootAccount`
+  - [ ] `CharacterStatsAccount`
+  - [ ] `CharacterWorldProgressAccount`
+  - [ ] initial `CharacterZoneProgressPageAccount` entries as needed
+  - [ ] `CharacterSettlementBatchCursorAccount`
 - [ ] Initialize cursor defaults during character creation:
   - [ ] `last_committed_end_nonce = 0`
   - [ ] `last_committed_state_hash = genesis_state_hash(character_root)`
   - [ ] `last_committed_batch_id = 0`
   - [ ] `last_committed_battle_ts = character_creation_ts`
   - [ ] `last_committed_season_id = season_id_at_character_creation`
-
-### 2) Instruction + canonical payload contract
-
-- [ ] Implement `ApplyBattleSettlementBatchV1`/`V2` instruction data layout exactly as frozen.
-- [ ] Align `types/settlement.ts` with canonical schema (`*_battle_ts`, season cursors, no server `expDelta` in canonical path).
-- [ ] Implement canonical serialization for payload hashing/signature verification.
-- [ ] Recompute and equality-check `batch_hash` on-chain for every submission.
-- [ ] Enforce signature-domain separation (`program_id`, `cluster_id`, `character_root_pubkey`).
-
-### 3) Attestation and trust checks
-
-- [ ] Verify ed25519 server signature with Solana native flow.
+- [ ] Implement `ApplyBattleSettlementBatchV1` happy-path instruction data layout exactly as frozen.
+- [ ] Align `types/settlement.ts` with canonical schema (`*_battle_ts`, season cursors, no server `expDelta`, `signature_scheme = ed25519_dual_sig_v1`).
+- [ ] Implement canonical serialization for:
+  - [ ] `batch_hash` preimage (excluding `batch_hash` itself and excluding signature bytes/instruction metadata),
+  - [ ] server attestation,
+  - [ ] player authorization permit.
+- [ ] Recompute and equality-check `batch_hash` on-chain.
+- [ ] Parse `SysvarInstructions` and verify both ed25519 instructions.
 - [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
-- [ ] Enforce monotonic time anchor validation (`first_battle_ts >= cursor.last_committed_battle_ts`, `last_battle_ts >= first_battle_ts`).
-- [ ] Enforce `settlement_paused` behavior per locked policy.
+- [ ] Bind verified player authorization to `CharacterRootAccount.authority`.
+- [ ] Require readonly `player_authority` account and readonly `SysvarInstructions` account in the canonical instruction account list.
+- [ ] Build the canonical player permit bytes from `program_id`, `cluster_id`, `player_authority_pubkey`, `character_root_pubkey`, `batch_hash`, `batch_id`, and `signature_scheme`.
+- [ ] Construct relay transactions that include both ed25519 verification instructions before `ApplyBattleSettlementBatchV1`.
+- [ ] Submit one successful settlement transaction through the relayer/server.
+- [ ] Add one happy-path end-to-end test asserting progression and cursor updates.
 
-### 4) Batch validation sequence (instruction core)
+### Slice 2) Replay and sequencing defenses
 
 - [ ] Implement derivation/ownership checks.
-- [ ] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
 - [ ] Implement continuity checks (`start_nonce`, `start_state_hash`, `batch_id`, nonce range).
+- [ ] Require the player authorization permit to bind `program_id`, `cluster_id`, `player_authority`, `character_root_pubkey`, `batch_hash`, and `batch_id`.
+- [ ] Enforce strict oldest-first submission continuity in the relayer path.
+- [ ] Store batch metadata needed for retry/reconciliation and replay diagnostics.
+- [ ] Add end-to-end negative tests for:
+  - [ ] replayed batch,
+  - [ ] out-of-order batch,
+  - [ ] wrong `batch_hash`,
+  - [ ] wrong `batch_id`,
+  - [ ] wrong `CharacterRootAccount.authority`,
+  - [ ] wrong signature-domain fields.
+
+### Slice 3) Time, season, and throughput controls
+
+- [ ] Enforce monotonic time anchor validation (`first_battle_ts >= cursor.last_committed_battle_ts`, `last_battle_ts >= first_battle_ts`).
+- [ ] Implement season eligibility and stale-progress expiry rules.
+- [ ] Implement deterministic throughput cap checks.
+- [ ] Enforce `settlement_paused` behavior per locked policy.
+- [ ] Add end-to-end tests for:
+  - [ ] delayed submission success,
+  - [ ] grace-window boundary pass/fail,
+  - [ ] season regression,
+  - [ ] pre-character timestamp rejection,
+  - [ ] throughput boundary pass/fail.
+
+### Slice 4) World legality and deterministic rewards
+
+- [ ] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
 - [ ] Implement histogram integrity checks (sum/count, non-zero counts, duplicates forbidden).
 - [ ] Implement world eligibility checks for all referenced zones.
 - [ ] Implement zone/enemy legality checks against registry mapping.
-- [ ] Implement reward cap checks using registry-bound policy.
-- [ ] Implement optional loadout revision check.
+- [ ] Implement deterministic EXP derivation from histogram + registry data with `u128` intermediate math and overflow rejection.
+- [ ] Treat `optional_loadout_revision` as metadata-only and ignore it in canonical MVP settlement validation.
+- [ ] Add end-to-end tests for:
+  - [ ] illegal zone access,
+  - [ ] illegal zone→enemy pair,
+  - [ ] duplicate histogram entry,
+  - [ ] zero-count histogram entry,
+  - [ ] EXP arithmetic overflow / invalid registry input.
+
+### Slice 5) Progression completeness and compute envelope
+
 - [ ] Apply progression transitions with monotonic rules.
-- [ ] Persist cursor updates.
-
-### 5) Account access wiring + compute envelope
-
-- [ ] Enforce required account set and mutability constraints in instruction account validation.
+- [ ] Persist cursor updates across sequential successful batches.
 - [ ] Support multi-page zone progress account access for large batches.
+- [ ] Enforce required account mutability/read-only constraints across the full canonical account set.
 - [ ] Benchmark compute for worst-case allowed batch (`battle_count=32`, histogram entries=64).
+- [ ] Add end-to-end sequential-batch tests covering page access and cumulative progression.
 
-### 6) Server batch construction + submission orchestration
-
-- [ ] Implement contiguous batch construction target (`target_batch_size=20`).
-- [ ] Enforce strict oldest-first submission continuity.
-- [ ] Store batch metadata for retries/reconciliation and support tooling.
-
-### 7) Testing + verification gates
-
-- [ ] Add deterministic success/failure vectors for every invariant.
-- [ ] Add replay/out-of-order test matrix across sequential batches.
-- [ ] Add boundary tests for max-size payloads and arithmetic behavior.
-- [ ] Add signature-domain replay tests (wrong cluster/program/character root).
-
-### 8) MVP+1 optional
+### Slice 6) Ops and optional auditability
 
 - [ ] Decide and implement `BattleSettlementBatchReceiptAccount` if promoted.
-- [ ] Add receipt indexing/dispute support tooling.
+- [ ] Add receipt indexing/dispute support tooling if receipts are enabled.
+- [ ] Implement `CharacterLoadoutAccount` only if another MVP domain requires it; it is not part of canonical settlement validation.
 
-### 9) Explicitly deferred
+### Explicitly deferred
 
 - [ ] Inventory/drop settlement domains.
 - [ ] On-chain learning persistence extensions.
@@ -699,31 +914,62 @@ Use this checklist as the execution tracker for implementing the full unified pl
 ---
 
 
-## 14.1) Implementation Mapping Appendix (Normative)
+## 14.1) Slice-to-Code Mapping Appendix (Normative)
 
-- **Types layer:** `types/settlement.ts`
-  - remove canonical reliance on `expDelta` and `attestationExpirySlot` for `schema_version >= 2`,
-  - add `firstBattleTs`, `lastBattleTs`, `seasonId`, and cursor fields `lastCommittedBattleTs`, `lastCommittedSeasonId`.
-- **Validation logic:** `lib/solana/settlementBatchValidation.ts`
-  - remove expiry-slot freshness gate,
-  - insert validation order: authority/signature -> continuity -> season eligibility -> throughput -> legality/reward derivation,
-  - enforce deterministic throughput formula and season/grace failures.
-- **Serialization/hash domain:** settlement payload canonical encoding path
-  - freeze V2 field order from section 6.4; reject unknown/legacy fields under V2.
-- **Tests:** `tests/settlementBatchValidation.test.ts`
-  - add positive/negative vectors for delayed submission, grace-expiry rejection, season regression, pre-character timestamp, throughput boundary pass/fail, and season transition continuity.
+- **Slice 0: harness**
+  - Anchor localnet setup (`Anchor.toml`, managed validator flow, persistent-validator flow),
+  - integration test harness and fixture builders,
+  - signing helpers for server attestation and player permit,
+  - relay transaction assembly helpers.
+- **Slice 1: happy path**
+  - localnet Anchor program deployment/bootstrap helpers,
+  - `ProgramConfigAccount` initialization and minimum registry seeding,
+  - character creation/bootstrap instructions for character-owned accounts and cursor defaults,
+  - account layout/types for the minimum MVP-core account set,
+  - canonical serialization for `batch_hash` preimage, server attestation, and player permit,
+  - `ApplyBattleSettlementBatchV1` happy-path validation/application,
+  - end-to-end happy-path settlement test.
+- **Slice 2: replay/sequencing**
+  - continuity validation logic,
+  - permit-domain binding checks,
+  - retry/reconciliation metadata in server submission path,
+  - replay/out-of-order integration tests.
+- **Slice 3: time/season/throughput**
+  - season/grace validation logic,
+  - deterministic throughput formula enforcement,
+  - delayed-submission and boundary integration tests.
+- **Slice 4: legality/rewards**
+  - histogram integrity validation,
+  - zone/world legality checks,
+  - deterministic EXP derivation and overflow rejection,
+  - illegal-claim integration tests.
+- **Slice 5: progression/envelope**
+  - full progression application,
+  - multi-page zone progress access,
+  - account mutability/read-only hardening,
+  - compute benchmarking and sequential-batch tests.
+- **Slice 6: ops/audit**
+  - operator runbook + error-code map,
+  - optional receipt implementation and tooling.
 
 ## 14.2) QA-Readiness Test Matrix (Required)
 
-1. Delayed submission accepted with valid continuity/season/throughput.
-2. Prior-season batch rejected after `commit_grace_end_ts`.
-3. Prior-season batch accepted at `commit_grace_end_ts - 1`.
-4. Season regression rejected (`season_id < cursor.last_committed_season_id`).
-5. Pre-character timestamp rejected.
-6. Throughput exact boundary pass.
-7. Throughput +1 overflow fail.
-8. Equal timestamp single battle pass, multi-battle fail.
-9. Replay/out-of-order batch rejection still enforced with delayed submission model.
+1. Slice 1 happy-path settlement succeeds end to end through the real relayer flow.
+2. Replay/out-of-order batch rejection is enforced in Slice 2.
+3. Wrong `cluster_id`/`program_id`/`character_root_pubkey` in server attestation is rejected in Slice 2.
+4. Wrong `cluster_id`/`program_id`/`character_root_pubkey`/`player_authority` in player authorization permit is rejected in Slice 2.
+5. Player permit with wrong `batch_hash` or wrong `batch_id` is rejected in Slice 2.
+6. Settlement is rejected when `CharacterRootAccount.authority != player_authority` in Slice 2.
+7. Settlement is rejected when required ed25519 verification instructions are missing, malformed, or incorrectly ordered in Slice 2.
+8. Delayed submission is accepted with valid continuity/season/throughput in Slice 3.
+9. Prior-season batch is rejected after `commit_grace_end_ts` in Slice 3.
+10. Prior-season batch is accepted at `commit_grace_end_ts - 1` in Slice 3.
+11. Season regression is rejected in Slice 3.
+12. Pre-character timestamp is rejected in Slice 3.
+13. Throughput exact boundary pass and +1 fail are both covered in Slice 3.
+14. Illegal zone access, illegal zone→enemy pairs, duplicate histogram entries, and zero-count histogram entries are rejected in Slice 4.
+15. Deterministic EXP derivation success/failure, including overflow/invalid-registry cases, is covered in Slice 4.
+16. Sequential successful batches, multi-page progression access, and compute-envelope checks are covered in Slice 5.
 
 ## 15) Section 13 Decision Locks (Lean MVP Defaults)
 
@@ -732,8 +978,8 @@ These decisions are now **locked for MVP** to unblock implementation.
 ### 15.1 Product & trust boundaries (locks)
 
 1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
-2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch (array size may expand later without schema break).
-3. **Paused behavior:** when `settlement_paused = true`, all player settlement submissions are blocked; no admin bypass path in MVP.
+2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch plus separate player off-chain authorization permit; player is not required to be the transaction signer in MVP.
+3. **Paused behavior:** when `settlement_paused = true`, all settlement submissions are blocked; no admin bypass path in MVP.
 4. **Freshness policy:** no attestation expiry gate in MVP V2; freshness is enforced via monotonic timestamps, season/grace eligibility, and throughput bounds.
 
 ### 15.2 Batch identity, ordering, replay semantics (locks)
@@ -745,10 +991,18 @@ These decisions are now **locked for MVP** to unblock implementation.
 
 ### 15.3 Payload canonicalization & signature domain (locks)
 
-1. Canonical serialization is strict field-order Borsh-compatible encoding for all section 6.2 fields (without `exp_delta`).
+1. Canonical serialization is strict field-order Borsh-compatible encoding for the server attestation over all section 6.2 fields (without `exp_delta`), plus a separate canonical player authorization permit message.
 
-   Canonical field order for hashing/signing:
-   `character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
+   `batch_hash` is computed over the canonical payload preimage that excludes `batch_hash` itself and excludes signature bytes/instruction metadata.
+
+   Canonical field order for `batch_hash` preimage:
+   `character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, schema_version, signature_scheme`.
+
+   Canonical field order for server attestation hashing/signing:
+   `program_id, cluster_id, character_root_pubkey, character_id, batch_id, start_nonce, end_nonce, battle_count, first_battle_ts, last_battle_ts, season_id, start_state_hash, end_state_hash, zone_progress_delta, encounter_histogram, optional_loadout_revision, batch_hash, schema_version, signature_scheme`.
+   
+   Canonical field order for player authorization hashing/signing:
+   `program_id, cluster_id, player_authority_pubkey, character_root_pubkey, batch_hash, batch_id, signature_scheme`.
 2. `cluster_id` is an explicit `u8` enum in signed domain (`1=localnet`, `2=devnet`, `3=testnet`, `4=mainnet-beta`).
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
@@ -769,7 +1023,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 
 ### 15.6 Optional components to lock now (locks)
 
-1. `optional_loadout_revision` remains optional in MVP policy.
+1. `optional_loadout_revision` remains metadata-only in MVP and is not enforced during canonical settlement validation.
 2. `BattleSettlementBatchReceiptAccount` remains MVP+1 (not MVP-core).
 3. Launch `max_histogram_entries_per_batch = 64`; governance can lower/raise through program config update.
 4. Server batch construction targets 20 battles but may adapt size as long as on-chain constraints are met.
