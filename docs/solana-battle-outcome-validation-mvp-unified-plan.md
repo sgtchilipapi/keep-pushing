@@ -174,7 +174,8 @@ Purpose:
 ## 4.4 Replay/sequencing anchor (required)
 
 10. **CharacterSettlementBatchCursorAccount** (**required, canonical replay/continuity state**)  
-    PDA: `[b"character_settlement_batch_cursor", character_root_pubkey]`
+    PDA: `[b"character_batch_cursor", character_root_pubkey]`  
+    Note: the longer descriptive seed label was shortened because Solana PDA seed components are limited to 32 bytes.
 
     Required fields:
 
@@ -789,17 +790,40 @@ Use this checklist as the execution tracker. Each slice should finish with at le
 ### Slice 0) Governance + harness
 
 - [x] Resolve and freeze all Section 13 decision points with lean MVP choices.
-- [ ] Publish error-code map and operator runbook for settlement failures.
-- [ ] Set up Anchor-based local development (`Anchor.toml` on `localnet`) for slices 0-5.
-- [ ] Create canonical test fixtures for one character / one zone / one enemy / one valid batch.
-- [ ] Verify managed local workflow: `anchor test`.
-- [ ] Verify persistent local-validator workflow: `solana-test-validator` + `anchor test --skip-local-validator`.
+- [x] Publish error-code map and operator runbook for settlement failures.
+- [x] Set up Anchor-based local development (`Anchor.toml` on `localnet`) for slices 0-5.
+- [x] Create canonical test fixtures for one character / one zone / one enemy / one valid batch.
+- [x] Verify managed local workflow: `anchor test`.
+- [x] Verify persistent local-validator workflow: `solana-test-validator` + `anchor test --skip-local-validator`.
 - [ ] Build integration helpers for:
   - [ ] server attestation signing,
   - [ ] player permit signing,
   - [ ] ed25519 instruction insertion,
   - [ ] relayer submission,
   - [ ] post-transaction state assertions.
+
+### Slice 0) Current `runana-program` Status Snapshot
+
+Observed in `runana-program` at this stage:
+
+- Anchor is already in use.
+- `Anchor.toml` sets `provider.cluster = "localnet"` and includes a `programs.localnet` entry.
+- The managed local workflow has been verified with a successful `anchor test` run.
+- The persistent-validator workflow has been verified with a successful `anchor test --skip-local-validator` run against `solana-test-validator`.
+- Canonical Slice 0 fixtures now exist in `runana-program/tests/src/fixtures.rs` and are verified by `runana-program/tests/src/test_canonical_fixtures.rs`.
+- The on-chain program is still the default `initialize` skeleton.
+- The current test harness is still only a minimal `initialize` smoke test.
+- Settlement accounts, canonical payload types, signature-domain helpers, and relayer-flow integration helpers are not implemented yet.
+
+Assessment:
+
+- The repo now qualifies for the third Slice 0 checklist item.
+- Slice 0 as a whole remains open.
+
+What is still missing for Slice 0 completion:
+
+1. Integration helpers for server attestation signing, player permit signing, ed25519 instruction insertion, relayer submission, and post-transaction assertions.
+2. Replacement of the initialize-only harness with settlement-oriented vertical-slice tests.
 
 ### Slice 1) Happy-path single-batch settlement
 
@@ -1027,3 +1051,173 @@ These decisions are now **locked for MVP** to unblock implementation.
 2. `BattleSettlementBatchReceiptAccount` remains MVP+1 (not MVP-core).
 3. Launch `max_histogram_entries_per_batch = 64`; governance can lower/raise through program config update.
 4. Server batch construction targets 20 battles but may adapt size as long as on-chain constraints are met.
+
+---
+
+## 16) MVP Settlement Error-Code Map (Initial Publication)
+
+This section satisfies the Slice 0 requirement to publish an error-code map and operator runbook early.
+
+These are **canonical support codes**, not a promise about final Anchor numeric discriminants. Final on-chain/server implementations must map 1:1 into these support buckets for observability, support triage, and replay diagnostics.
+
+Interpretation rules:
+
+1. The first failing invariant should determine the surfaced support code.
+2. Do not silently collapse distinct continuity failures into a generic replay error.
+3. If a request fails before instruction execution, no settlement support code is guaranteed; use transport/RPC diagnostics first.
+4. Support codes must be stable across retries and across client/server surfaces for the same root cause.
+
+| Support code | Canonical failure bucket | Trigger / meaning | Operator default action |
+| --- | --- | --- | --- |
+| `SETTLE-OPS-001` | settlement paused | `settlement_paused = true` blocked submission | Do not retry until governance/admin unpauses; no MVP bypass path |
+| `SETTLE-AUTH-101` | missing or malformed server attestation verification | server ed25519 verification instruction missing, malformed, or not in canonical position | Rebuild transaction assembly; safe to retry after relayer fix |
+| `SETTLE-AUTH-102` | untrusted server signer | attestation signer not present in `ProgramConfigAccount.trusted_server_signers` | Verify active server key and config; retry only after config/key correction |
+| `SETTLE-AUTH-103` | server signature domain mismatch | server attestation domain fields do not match `program_id`, `cluster_id`, or `character_root_pubkey` | Rebuild canonical attestation bytes; do not blind retry |
+| `SETTLE-AUTH-111` | missing or malformed player permit verification | player ed25519 verification instruction missing, malformed, or incorrectly ordered | Rebuild transaction assembly; safe to retry after relayer fix |
+| `SETTLE-AUTH-112` | player permit domain mismatch | player permit domain fields do not match `program_id`, `cluster_id`, `player_authority`, `character_root_pubkey`, `batch_hash`, or `batch_id` | Rebuild permit payload and recollect authorization if needed |
+| `SETTLE-AUTH-113` | character authority mismatch | `CharacterRootAccount.authority != player_authority` | Verify ownership binding; escalate to support if player expected a different wallet |
+| `SETTLE-ACCT-201` | invalid account derivation or ownership | required PDA/account owner/account mutability/read-only constraints are wrong | Fix account list derivation or bootstrap state; retry after correction |
+| `SETTLE-PAYLOAD-211` | batch hash mismatch | on-chain recomputed `batch_hash` differs from payload-provided `batch_hash` | Recompute canonical serialization; do not blind retry |
+| `SETTLE-CONT-301` | nonce gap | `start_nonce` is older/newer than strict oldest-first expectation | Find the missing older batch first; do not skip ahead |
+| `SETTLE-CONT-302` | state-hash mismatch | `start_state_hash` does not equal cursor `last_committed_state_hash` | Replay backlog and reconstruct expected prior batch chain before retry |
+| `SETTLE-CONT-303` | batch-id gap | `batch_id` is not the next strict per-character batch id | Submit the oldest missing batch first or rebuild batch numbering |
+| `SETTLE-CONT-304` | nonce-range mismatch | `(end_nonce - start_nonce + 1)` is inconsistent with declared battle range/payload semantics | Regenerate the batch payload; do not retry unchanged |
+| `SETTLE-TIME-401` | pre-character timestamp | first battle occurred before character creation anchor | Treat as invalid data; investigate server batch construction |
+| `SETTLE-TIME-402` | battle timestamp regression | `last_battle_ts < first_battle_ts` or monotonic time anchor rules fail | Regenerate batch timestamps; do not retry unchanged |
+| `SETTLE-TIME-403` | season regression | batch season moved backward relative to committed cursor | Submit backlog in order or regenerate batch against correct season |
+| `SETTLE-TIME-404` | prior-season grace expired | uncommitted prior-season progress was submitted after `commit_grace_end_ts` | Do not retry unchanged; prior-season uncommitted progress is lost in MVP |
+| `SETTLE-TIME-405` | throughput exceeded | deterministic interval math shows impossible battle density | Investigate server batching/timestamping; split or delay future batches |
+| `SETTLE-WORLD-501` | illegal zone access | batch references a zone the character has not unlocked or cannot legally enter | Investigate progression state and server encounter selection |
+| `SETTLE-WORLD-502` | illegal zone-enemy pair | histogram references an enemy not legal for the zone registry mapping | Fix registry data or encounter generation; retry only after correction |
+| `SETTLE-WORLD-503` | invalid zone progress delta | `zone_progress_delta` violates monotonic policy or conflicts with canonical rules | Regenerate progression delta from valid world state |
+| `SETTLE-WORLD-504` | summary/page inconsistency | summary progression and page data conflict at validation time | Repair underlying state before resubmission; no instruction-side repair path |
+| `SETTLE-HIST-601` | histogram count mismatch | histogram totals do not match declared `battle_count` | Recompute histogram from canonical battle list |
+| `SETTLE-HIST-602` | duplicate histogram entry | same `(zone_id, enemy_id)` tuple appears more than once | Normalize histogram before signing |
+| `SETTLE-HIST-603` | zero-count histogram entry | histogram contains zero-count rows | Remove anomalous entries and rebuild payload |
+| `SETTLE-HIST-604` | histogram entry limit exceeded | batch exceeds `max_histogram_entries_per_batch` | Split the batch and resubmit in strict continuity order |
+| `SETTLE-REWARD-701` | invalid registry input | registry data required for deterministic EXP derivation is missing or invalid | Repair registry/config state before retry |
+| `SETTLE-REWARD-702` | EXP arithmetic overflow | deterministic EXP math overflowed under `u128` intermediate policy | Treat as invalid config/data; investigate registry multipliers immediately |
+| `SETTLE-VERS-801` | unsupported version or signature scheme | unknown instruction version or `signature_scheme` | Upgrade client/relayer payload generation to the canonical supported scheme |
+
+---
+
+## 17) MVP Operator Runbook For Settlement Failures (Initial Publication)
+
+This is the initial Slice 0 runbook publication. Production hardening, richer reconciliation storage, and optional receipt tooling remain part of Slice 6.
+
+### 17.1 Required incident artifacts
+
+For every failed settlement, capture:
+
+- transaction signature, if one exists,
+- support code from section 16, if one exists,
+- `character_id`,
+- `character_root_pubkey`,
+- `player_authority_pubkey`,
+- `batch_id`,
+- `batch_hash`,
+- `start_nonce` / `end_nonce`,
+- `first_battle_ts` / `last_battle_ts`,
+- `season_id`,
+- relayer request id / internal trace id,
+- active `cluster_id`,
+- trusted server signer pubkey used for the attestation.
+
+### 17.2 Triage sequence
+
+1. Determine whether the failure happened before chain execution, during preflight, or on-chain after instruction execution began.
+2. If there is no on-chain execution, inspect relayer/RPC transport first before using the support-code map.
+3. If there is an on-chain failure, map it to exactly one support code from section 16.
+4. Decide whether the failure is:
+   - safe same-payload retry,
+   - rebuild-and-retry,
+   - state-repair required,
+   - permanent rejection.
+5. Record the outcome against the batch so replay diagnostics stay deterministic.
+
+### 17.3 Retry policy
+
+Safe same-payload retry:
+
+- transport timeout or dropped RPC submission where no on-chain execution occurred,
+- temporary relayer delivery failure before validator acceptance.
+
+Rebuild transaction, then retry:
+
+- `SETTLE-AUTH-101`
+- `SETTLE-AUTH-103`
+- `SETTLE-AUTH-111`
+- `SETTLE-AUTH-112`
+- `SETTLE-ACCT-201`
+- `SETTLE-PAYLOAD-211`
+- `SETTLE-HIST-601`
+- `SETTLE-HIST-602`
+- `SETTLE-HIST-603`
+
+Repair config/state/data first, then retry:
+
+- `SETTLE-AUTH-102`
+- `SETTLE-AUTH-113`
+- `SETTLE-WORLD-501`
+- `SETTLE-WORLD-502`
+- `SETTLE-WORLD-503`
+- `SETTLE-WORLD-504`
+- `SETTLE-REWARD-701`
+- `SETTLE-REWARD-702`
+- `SETTLE-VERS-801`
+
+Do not blindly retry unchanged payload:
+
+- `SETTLE-OPS-001`
+- `SETTLE-CONT-301`
+- `SETTLE-CONT-302`
+- `SETTLE-CONT-303`
+- `SETTLE-CONT-304`
+- `SETTLE-TIME-401`
+- `SETTLE-TIME-402`
+- `SETTLE-TIME-403`
+- `SETTLE-TIME-404`
+- `SETTLE-TIME-405`
+- `SETTLE-HIST-604`
+
+### 17.4 Family-specific operator actions
+
+Auth failures:
+
+- Verify the correct `cluster_id`, `program_id`, `character_root_pubkey`, `player_authority_pubkey`, and `batch_id` were serialized into the signed domains.
+- Confirm both ed25519 verification instructions are present before `ApplyBattleSettlementBatchV1`.
+- Confirm the attestation signer is the currently trusted server signer for the active environment.
+
+Continuity failures:
+
+- Query the character cursor state first.
+- Identify the oldest missing batch and submit backlog strictly oldest-first.
+- Never skip a missing batch to force a newer batch through.
+
+Time / season / throughput failures:
+
+- Compare the submitted interval against the committed cursor anchors.
+- If grace has expired, treat prior-season uncommitted progress as permanently lost for MVP.
+- If throughput was exceeded, adjust future server batching and timestamping policy; do not mutate historical timestamps just to pass validation.
+
+World / progression failures:
+
+- Verify the character's unlocked zones and the current summary/page progression state.
+- Verify zone-to-enemy legality against registry data.
+- If summary/page data are inconsistent, repair state out of band before resubmission.
+
+Reward / registry failures:
+
+- Inspect enemy archetype EXP values and zone policy multipliers.
+- Treat overflow as a configuration or data bug, not a recoverable player-facing transient.
+
+### 17.5 Player-support guidance
+
+- If the failure is auth or relayer assembly related, tell the player the submission can be retried after server-side correction.
+- If the failure is continuity related, explain that older uncommitted progress must settle first.
+- If the failure is grace expiry related, explain that MVP policy permanently expires prior-season uncommitted progress after `commit_grace_end_ts`.
+- If the failure is `settlement_paused`, explain that settlement is temporarily disabled globally and no admin bypass exists in MVP.
+
+### 17.6 Implementation requirement
+
+When the on-chain program and relayer are implemented, every surfaced settlement rejection must map to one support code in section 16 and follow the retry/remediation policy in this runbook.
