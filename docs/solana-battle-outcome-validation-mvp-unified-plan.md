@@ -956,14 +956,16 @@ Next implementation frontier:
 
 ### Slice 5) Progression completeness and compute envelope
 
-- [ ] Apply progression transitions with monotonic rules.
-- [ ] Persist cursor updates across sequential successful batches.
-- [ ] Support multi-page zone progress account access for large batches.
-- [ ] Enforce required account mutability/read-only constraints across the full canonical account set.
+- [x] Apply progression transitions with monotonic rules.
+- [x] Persist cursor updates across sequential successful batches.
+- [x] Support multi-page zone progress account access for large batches.
+- [x] Enforce required account mutability/read-only constraints across the implemented settlement account envelope.
 - [ ] Benchmark compute for worst-case allowed batch (`battle_count=32`, histogram entries=64).
-- [ ] Add end-to-end sequential-batch tests covering page access and cumulative progression.
+- [x] Add end-to-end sequential-batch tests covering page access and cumulative progression.
 
 ### Slice 6) Ops and optional auditability
+
+Status: explicitly deferred after Slice 5.
 
 - [ ] Decide and implement `BattleSettlementBatchReceiptAccount` if promoted.
 - [ ] Add receipt indexing/dispute support tooling if receipts are enabled.
@@ -971,6 +973,7 @@ Next implementation frontier:
 
 ### Explicitly deferred
 
+- [ ] Slice 6 ops and optional auditability workstream.
 - [ ] Inventory/drop settlement domains.
 - [ ] On-chain learning persistence extensions.
 - [ ] Persistent enemy instance domains.
