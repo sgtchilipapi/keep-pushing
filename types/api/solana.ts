@@ -3,6 +3,37 @@ export type PlayerOwnedTransactionKind =
   | "battle_settlement"
   | "player_owned_instruction";
 
+export interface SettlementCursorExpectation {
+  lastCommittedEndNonce: number;
+  lastCommittedBatchId: number;
+  lastCommittedStateHash: string;
+}
+
+export interface SettlementPermitDomain {
+  programId: string;
+  clusterId: number;
+  playerAuthority: string;
+  characterRootPubkey: string;
+  batchHash: string;
+  batchId: number;
+  signatureScheme: number;
+}
+
+export interface SettlementRelayMetadata {
+  relayRequestId?: string;
+  characterId: string;
+  characterRootPubkey: string;
+  batchId: number;
+  batchHash: string;
+  startNonce: number;
+  endNonce: number;
+  startStateHash: string;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  continuityKey: string;
+  reconciliationKey: string;
+}
+
 export interface PreparedPlayerOwnedTransaction {
   kind: PlayerOwnedTransactionKind;
   authority: string;
@@ -11,6 +42,7 @@ export interface PreparedPlayerOwnedTransaction {
   messageSha256Hex: string;
   requiresPlayerSignature: true;
   serverBroadcast: true;
+  settlementRelay?: SettlementRelayMetadata;
 }
 
 export interface SubmittedPlayerOwnedTransaction {
@@ -21,6 +53,7 @@ export interface SubmittedPlayerOwnedTransaction {
   signedTransactionBase64: string;
   signedTransactionSha256Hex: string;
   acceptedForBroadcast: true;
+  settlementRelay?: SettlementRelayMetadata;
 }
 
 export interface PrepareCharacterCreationTransactionRequest {
@@ -33,7 +66,15 @@ export interface PrepareSettlementTransactionRequest {
   playerAuthority: string;
   feePayer: string;
   characterId: string;
+  characterRootPubkey: string;
   batchId: number;
+  batchHash: string;
+  startNonce: number;
+  endNonce: number;
+  startStateHash: string;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  relayRequestId?: string;
   serializedMessageBase64: string;
 }
 

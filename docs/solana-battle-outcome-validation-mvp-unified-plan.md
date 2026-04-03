@@ -172,9 +172,35 @@ Purpose:
 - trusted server attestation governance,
 - settlement policy controls and emergency pause.
 
-## 4.4 Replay/sequencing anchor (required)
+Explicit MVP scope lock:
 
-10. **CharacterSettlementBatchCursorAccount** (**required, canonical replay/continuity state**)  
+- `ProgramConfigAccount` remains global-only.
+- Seasonal timing/grace policy does **not** live in `ProgramConfigAccount`.
+
+## 4.4 Season policy anchor (required for Slice 3+)
+
+10. **SeasonPolicyAccount** (**required for canonical time/season validation**)  
+    PDA: `[b"season_policy", season_id_u32]`
+
+    Required fields:
+
+- `version: u8`
+- `bump: u8`
+- `season_id: u32`
+- `season_start_ts: u64`
+- `season_end_ts: u64`
+- `commit_grace_end_ts: u64`
+- `updated_at_slot: u64`
+
+Purpose:
+
+- canonical per-season timing policy,
+- historical season-window lookup by `season_id`,
+- delayed-submission grace enforcement without mutating global config.
+
+## 4.5 Replay/sequencing anchor (required)
+
+11. **CharacterSettlementBatchCursorAccount** (**required, canonical replay/continuity state**)  
     PDA: `[b"character_batch_cursor", character_root_pubkey]`  
     Note: the longer descriptive seed label was shortened because Solana PDA seed components are limited to 32 bytes.
 
@@ -194,9 +220,9 @@ Purpose:
 - anti-replay anchor,
 - state-transition chaining between batches.
 
-## 4.5 Receipt/audit (explicit decision)
+## 4.6 Receipt/audit (explicit decision)
 
-11. **BattleSettlementBatchReceiptAccount** (**MVP optional, recommended MVP+1**)  
+12. **BattleSettlementBatchReceiptAccount** (**MVP optional, recommended MVP+1**)  
     PDA (recommended): `[b"battle_batch_receipt", character_root_pubkey, end_nonce_u64]`
 
 Decision:
@@ -326,6 +352,7 @@ Required accounts:
 - read: `player_authority` (not a transaction signer; used as permit subject / ownership identity)
 - read: `SysvarInstructions` (to inspect ed25519 verification instructions for server + player signatures)
 - read: `ProgramConfigAccount`
+- read: `SeasonPolicyAccount(payload.season_id)`
 - write: `CharacterRootAccount`
 - write: `CharacterStatsAccount` (if level/stat change)
 - read/write: `CharacterWorldProgressAccount`
@@ -366,7 +393,11 @@ Required accounts:
    - require `last_battle_ts >= first_battle_ts`,
    - require `first_battle_ts >= character_creation_ts`,
    - require `season_id >= cursor.last_committed_season_id` (unless explicit migration instruction),
-   - enforce season window + grace eligibility and stale-progress expiry rules.
+   - load `SeasonPolicyAccount(season_id)` and require:
+     - `first_battle_ts >= season_start_ts`,
+     - `last_battle_ts <= season_end_ts`,
+     - current chain time `<= commit_grace_end_ts`,
+   - reject once grace closes even if the batch itself is otherwise continuous.
 
 5. **Throughput cap checks**
    - compute deterministic `allowed_battles` from section 9.3 integer formula,
@@ -825,10 +856,12 @@ Assessment:
 
 - Slice 0 remains complete.
 - Slice 1 happy-path settlement is complete in `runana-program`.
+- Slice 2 replay/sequencing defenses are complete in `runana-program`.
+- Slice 3 time/season/throughput controls now use a dedicated per-season `SeasonPolicyAccount` instead of storing season lifecycle state in `ProgramConfigAccount`.
 
 Next implementation frontier:
 
-1. Slice 2 replay and sequencing defenses.
+1. Slice 4 world legality and deterministic rewards.
 
 
 ! Observations and Questions: Can a character be created with a timestamp < the current season start?
@@ -880,31 +913,31 @@ Next implementation frontier:
 
 ### Slice 2) Replay and sequencing defenses
 
-- [ ] Implement derivation/ownership checks.
-- [ ] Implement continuity checks (`start_nonce`, `start_state_hash`, `batch_id`, nonce range).
-- [ ] Require the player authorization permit to bind `program_id`, `cluster_id`, `player_authority`, `character_root_pubkey`, `batch_hash`, and `batch_id`.
-- [ ] Enforce strict oldest-first submission continuity in the relayer path.
-- [ ] Store batch metadata needed for retry/reconciliation and replay diagnostics.
-- [ ] Add end-to-end negative tests for:
-  - [ ] replayed batch,
-  - [ ] out-of-order batch,
-  - [ ] wrong `batch_hash`,
-  - [ ] wrong `batch_id`,
-  - [ ] wrong `CharacterRootAccount.authority`,
-  - [ ] wrong signature-domain fields.
+- [x] Implement derivation/ownership checks.
+- [x] Implement continuity checks (`start_nonce`, `start_state_hash`, `batch_id`, nonce range).
+- [x] Require the player authorization permit to bind `program_id`, `cluster_id`, `player_authority`, `character_root_pubkey`, `batch_hash`, and `batch_id`.
+- [x] Enforce strict oldest-first submission continuity in the relayer path.
+- [x] Store batch metadata needed for retry/reconciliation and replay diagnostics.
+- [x] Add end-to-end negative tests for:
+  - [x] replayed batch,
+  - [x] out-of-order batch,
+  - [x] wrong `batch_hash`,
+  - [x] wrong `batch_id`,
+  - [x] wrong `CharacterRootAccount.authority`,
+  - [x] wrong signature-domain fields.
 
 ### Slice 3) Time, season, and throughput controls
 
-- [ ] Enforce monotonic time anchor validation (`first_battle_ts >= cursor.last_committed_battle_ts`, `last_battle_ts >= first_battle_ts`).
-- [ ] Implement season eligibility and stale-progress expiry rules.
-- [ ] Implement deterministic throughput cap checks.
-- [ ] Enforce `settlement_paused` behavior per locked policy.
-- [ ] Add end-to-end tests for:
-  - [ ] delayed submission success,
-  - [ ] grace-window boundary pass/fail,
-  - [ ] season regression,
-  - [ ] pre-character timestamp rejection,
-  - [ ] throughput boundary pass/fail.
+- [x] Enforce monotonic time anchor validation (`first_battle_ts >= cursor.last_committed_battle_ts`, `last_battle_ts >= first_battle_ts`).
+- [x] Implement season eligibility and stale-progress expiry rules.
+- [x] Implement deterministic throughput cap checks.
+- [x] Enforce `settlement_paused` behavior per locked policy.
+- [x] Add end-to-end tests for:
+  - [x] delayed submission success,
+  - [x] grace-window boundary pass/fail,
+  - [x] season regression,
+  - [x] pre-character timestamp rejection,
+  - [x] throughput boundary pass/fail.
 
 ### Slice 4) World legality and deterministic rewards
 
@@ -1038,21 +1071,30 @@ These decisions are now **locked for MVP** to unblock implementation.
 3. Compatibility strategy: new layouts require new `signature_scheme` discriminant and/or new instruction version; no silent reinterpretation.
 4. `batch_hash` is always recomputed on-chain and must exactly match payload-provided hash.
 
-### 15.4 World progression semantics (locks)
+### 15.4 Season policy storage (locks)
+
+1. Seasonal timing policy is stored in a dedicated `SeasonPolicyAccount(season_id)`, not in `ProgramConfigAccount`.
+2. `ProgramConfigAccount` remains global-only and does not carry mutable season lifecycle fields.
+3. Slice 3 settlement validation loads the claimed season account and enforces:
+   - battle timestamps inside the season interval,
+   - current chain time `<= commit_grace_end_ts`,
+   - stale prior-season progress expiry once grace closes.
+
+### 15.5 World progression semantics (locks)
 
 1. `locked -> cleared` is globally forbidden in MVP (no zone-level exceptions at launch).
 2. If histogram-implied progression conflicts with `zone_progress_delta`, `zone_progress_delta` is canonical and conflicts fail validation.
 3. `zone_id -> page_index_u16` mapping is `page_index = zone_id / 256` (integer division).
 4. If summary and page data are inconsistent at validation time, fail settlement (no repair path in instruction).
 
-### 15.5 Reward and balance guardrails (locks)
+### 15.6 Reward and balance guardrails (locks)
 
 1. Per-encounter EXP base input is read from `EnemyArchetypeRegistryAccount.exp_reward_base` for MVP and combined with zone policy multipliers in deterministic derivation.
 2. EXP math uses `u128` intermediates; overflow during intermediate math is rejection, not clamp.
 3. Zero-EXP non-empty batches are valid in MVP.
 4. MVP level-up side effects are limited to level/exp/stat recalculation domains only; inventory/unlocks/learning side effects are deferred.
 
-### 15.6 Optional components to lock now (locks)
+### 15.7 Optional components to lock now (locks)
 
 1. `optional_loadout_revision` remains metadata-only in MVP and is not enforced during canonical settlement validation.
 2. `BattleSettlementBatchReceiptAccount` remains MVP+1 (not MVP-core).
