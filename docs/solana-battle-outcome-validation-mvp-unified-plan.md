@@ -941,18 +941,18 @@ Next implementation frontier:
 
 ### Slice 4) World legality and deterministic rewards
 
-- [ ] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
-- [ ] Implement histogram integrity checks (sum/count, non-zero counts, duplicates forbidden).
-- [ ] Implement world eligibility checks for all referenced zones.
-- [ ] Implement zone/enemy legality checks against registry mapping.
-- [ ] Implement deterministic EXP derivation from histogram + registry data with `u128` intermediate math and overflow rejection.
-- [ ] Treat `optional_loadout_revision` as metadata-only and ignore it in canonical MVP settlement validation.
-- [ ] Add end-to-end tests for:
-  - [ ] illegal zone access,
-  - [ ] illegal zone→enemy pair,
-  - [ ] duplicate histogram entry,
-  - [ ] zero-count histogram entry,
-  - [ ] EXP arithmetic overflow / invalid registry input.
+- [x] Implement policy checks (`max_battles_per_batch`, `max_histogram_entries_per_batch`).
+- [x] Implement histogram integrity checks (sum/count, non-zero counts, duplicates forbidden).
+- [x] Implement world eligibility checks for all referenced zones.
+- [x] Implement zone/enemy legality checks against registry mapping.
+- [x] Implement deterministic EXP derivation from histogram + registry data with `u128` intermediate math and overflow rejection.
+- [x] Treat `optional_loadout_revision` as metadata-only and ignore it in canonical MVP settlement validation.
+- [x] Add end-to-end tests for:
+  - [x] illegal zone access,
+  - [x] illegal zone→enemy pair,
+  - [x] duplicate histogram entry,
+  - [x] zero-count histogram entry,
+  - [x] EXP arithmetic overflow / invalid registry input.
 
 ### Slice 5) Progression completeness and compute envelope
 
