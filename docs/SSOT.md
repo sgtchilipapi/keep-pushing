@@ -65,6 +65,8 @@ For Solana settlement in MVP, trust boundaries are explicitly split:
 
 - The **server remains authoritative** for battle simulation details.
 - The **on-chain program enforces bounded legality/economic constraints**.
+- For **player-owned on-chain actions**, the **player wallet** is the canonical transaction fee payer and transaction signer.
+- The server may prepare and broadcast player-signed transactions, but **broadcast origin is not an on-chain validity condition**.
 
 Security objective:
 
@@ -112,6 +114,7 @@ Compatibility policy:
 Player-facing lifecycle rule:
 
 - Commit within grace or lose uncommitted prior-season progress.
+- Player-owned Solana transactions are funded by the player wallet, even when the server broadcasts them.
 
 Security caveat (must remain explicit):
 

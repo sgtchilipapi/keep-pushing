@@ -62,6 +62,7 @@ export function applyBattleSettlementBatchV1(
     enemyArchetypes,
   } = context;
 
+  // Fee payer selection is handled when the transaction is prepared, not in settlement validation.
   // 1) Derivation and ownership (approximated in off-chain TS model).
   assertCondition(characterRoot.authority === playerAuthority, "ERR_UNAUTHORIZED", "player is not character authority");
   assertCondition(characterRoot.characterId === payload.characterId, "ERR_CHARACTER_MISMATCH", "character id mismatch");

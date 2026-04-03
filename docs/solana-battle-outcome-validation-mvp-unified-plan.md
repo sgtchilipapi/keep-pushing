@@ -81,7 +81,7 @@ Mental model:
 
 1. **Battle execution (off-chain):** server simulates battles.
 2. **Batch construction (off-chain):** server seals contiguous battle batches (recommended: ~20 battles).
-3. **Deferred authorization + submission:** player can keep playing; later authorizes batches and the relayer/server submits them sequentially.
+3. **Deferred authorization + submission:** player can keep playing; later authorizes batches, signs a player-paid transaction, and the server may broadcast those signed batches sequentially.
 4. **On-chain validation:** program validates each batch against authority, continuity, legality, reward bounds, replay rules.
 5. **On-chain apply:** only minimal progression + cursor accounts are updated.
 
@@ -145,6 +145,7 @@ These values can be governance-tuned later, but are canonical for MVP launch.
 7. **ZoneEnemySetAccount**  
    PDA: `[b"zone_enemy_set", zone_id_u16]`  
    Purpose: authoritative zone→enemy-archetype legality mapping.
+   Canonical semantics: one `zone_id` maps to a bounded set of legal `enemy_archetype_id` values for that zone. The exact storage layout is implementation-defined; the MVP validation requirement is set-membership semantics, not a one-enemy-only model.
 
 8. **EnemyArchetypeRegistryAccount**  
    PDA: `[b"enemy_archetype", enemy_archetype_id_u16]`  
@@ -284,7 +285,8 @@ MVP uses a **dual-signature authorization model**:
 
 - **server attestation signature**: authorizes the sealed settlement batch contents,
 - **player authorization signature**: authorizes applying that sealed batch to the player's character,
-- the transaction submitter/fee payer MAY be a relayer and is **not** the authorization source.
+- for player-owned transactions, the player wallet is the transaction signer and fee payer,
+- the server may broadcast the fully signed transaction, but broadcast origin is **not** an on-chain validity signal.
 
 To prevent signature replay across environments/programs, both signed message domains must include:
 
@@ -378,7 +380,7 @@ Required accounts:
    - each referenced `zone_id` must be currently unlocked or become valid via allowed progression transition rules in same batch.
 
 8. **Zone/enemy legality checks**
-   - each `(zone_id, enemy_archetype_id)` must exist in `ZoneEnemySetAccount(zone_id)`.
+   - each `(zone_id, enemy_archetype_id)` must be a member of the legal enemy set represented by `ZoneEnemySetAccount(zone_id)`.
 
 9. **Deterministic EXP derivation checks**
    - derive `derived_exp_delta` from `encounter_histogram` and registry/policy fields using the deterministic integer formula in section 8.1,
@@ -435,7 +437,7 @@ Rules:
 ## 9) Histogram Validation Invariants (Required)
 
 1. `sum(count) == battle_count`.
-2. Every histogram pair is zone-legal (`enemy ∈ zone_enemy_set`).
+2. Every histogram pair is zone-legal (`enemy ∈ zone_enemy_set`), where `zone_enemy_set` is the bounded legal enemy set for that zone.
 3. Referenced zones must be world-legal for the character under transition constraints.
 4. EXP is derived deterministically from histogram + registry/policy fields (no EXP input claims).
 5. Duplicate `(zone_id, enemy_archetype_id)` entries are invalid.
@@ -535,7 +537,8 @@ Definition:
 
 - each slice must produce one shippable end-to-end path across:
   - player authorization UX/message generation,
-  - relayer/server transaction assembly,
+  - player-paid transaction preparation,
+  - server broadcast of player-signed transactions,
   - on-chain validation/application,
   - automated integration tests,
   - operator observability for that path.
@@ -550,7 +553,8 @@ The goal is to validate real system integration early instead of finishing all a
 - establish local integration harness covering:
   - player permit signing,
   - server attestation signing,
-  - relayer transaction assembly,
+  - player-paid transaction assembly,
+  - server broadcast flow,
   - Solana execution + assertion helpers,
 - establish local Solana development workflow per Anchor local-development guidance:
   - default path: run `anchor test` against `localnet` so the validator/program/test lifecycle is managed automatically,
@@ -605,15 +609,15 @@ Exit criteria:
   - build server attestation bytes,
   - build player permit bytes,
   - collect player authorization,
-  - assemble relay transaction with both ed25519 verification instructions,
-  - submit successfully,
+  - prepare a player-paid transaction with both ed25519 verification instructions,
+  - broadcast the unchanged player-signed transaction successfully,
 - add one end-to-end test that executes a successful settlement from permit request through on-chain apply.
 
 Exit criteria:
 
 - one real settlement batch succeeds end to end in integration tests,
 - character progression and cursor state update correctly,
-- no manual transaction crafting is required outside the tested relay flow.
+- no manual transaction crafting is required outside the tested player-paid broadcast flow.
 
 ### Slice 2: Replay and sequencing defenses
 
@@ -799,10 +803,10 @@ Use this checklist as the execution tracker. Each slice should finish with at le
   - [x] server attestation signing,
   - [x] player permit signing,
   - [x] ed25519 instruction insertion,
-  - [x] relayer submission,
+  - [x] player-paid transaction submission via server broadcast,
   - [x] post-transaction state assertions.
 
-### Slice 0) Current `runana-program` Status Snapshot
+### Slice 1) Current `runana-program` Status Snapshot
 
 Observed in `runana-program` at this stage:
 
@@ -812,63 +816,67 @@ Observed in `runana-program` at this stage:
 - The persistent-validator workflow has been verified with a successful `anchor test --skip-local-validator` run against `solana-test-validator`.
 - Canonical Slice 0 fixtures now exist in `runana-program/tests/src/fixtures.rs` and are verified by `runana-program/tests/src/test_canonical_fixtures.rs`.
 - Integration helpers now exist in `runana-program/tests/src/integration_helpers.rs` and are unit-verified by `runana-program/tests/src/test_integration_helpers.rs`.
-- The on-chain program now includes a settlement-shaped smoke instruction `ApplyBattleSettlementBatchV1` that validates dual-ed25519 pre-instruction presence, canonical `batch_hash` recomputation, nonce-range math, and histogram sum/count integrity.
-- The current networked harness now targets the settlement-shaped smoke path instead of `initialize`, while still deferring real settlement account/state application to Slice 1.
+- The on-chain program now includes the minimum Slice 1 account set and happy-path bootstrap instructions for `ProgramConfigAccount`, zone registries, enemy registries, character creation, and `CharacterSettlementBatchCursorAccount`.
+- `ApplyBattleSettlementBatchV1` now performs real happy-path settlement application: canonical `batch_hash` recomputation, dual-ed25519 message verification, character ownership binding, continuity checks, deterministic EXP application, and cursor persistence.
+- The networked harness now bootstraps localnet fixture state and submits one real settlement batch end to end instead of only exercising the prior smoke path.
+- The networked harness currently submits the Slice 1 settlement as a player-paid v0 transaction with an address lookup table so the canonical dual-ed25519 settlement flow fits within Solana transaction size limits on localnet.
 
 Assessment:
 
-- The repo now qualifies for the third Slice 0 checklist item.
-- Slice 0 is complete.
+- Slice 0 remains complete.
+- Slice 1 happy-path settlement is complete in `runana-program`.
 
 Next implementation frontier:
 
-1. Slice 1 happy-path settlement accounts, bootstrap state, and real progression/cursor mutation.
+1. Slice 2 replay and sequencing defenses.
 
+
+! Observations and Questions: Can a character be created with a timestamp < the current season start?
 ### Slice 1) Happy-path single-batch settlement
 
-- [ ] Implement and test minimum account layouts + PDA derivations for:
-  - [ ] CharacterRootAccount
-  - [ ] CharacterStatsAccount
-  - [ ] CharacterWorldProgressAccount
-  - [ ] CharacterZoneProgressPageAccount
-  - [ ] ZoneRegistryAccount
-  - [ ] ZoneEnemySetAccount
-  - [ ] EnemyArchetypeRegistryAccount
-  - [ ] ProgramConfigAccount
-  - [ ] CharacterSettlementBatchCursorAccount
-- [ ] Deploy the Anchor program to localnet as part of the happy-path integration flow.
-- [ ] Initialize `ProgramConfigAccount` on localnet.
-- [ ] Seed minimum registry state on localnet:
-  - [ ] `ZoneRegistryAccount`
-  - [ ] `ZoneEnemySetAccount`
-  - [ ] `EnemyArchetypeRegistryAccount`
-- [ ] Implement character creation/bootstrap path that creates and initializes:
-  - [ ] `CharacterRootAccount`
-  - [ ] `CharacterStatsAccount`
-  - [ ] `CharacterWorldProgressAccount`
-  - [ ] initial `CharacterZoneProgressPageAccount` entries as needed
-  - [ ] `CharacterSettlementBatchCursorAccount`
-- [ ] Initialize cursor defaults during character creation:
-  - [ ] `last_committed_end_nonce = 0`
-  - [ ] `last_committed_state_hash = genesis_state_hash(character_root)`
-  - [ ] `last_committed_batch_id = 0`
-  - [ ] `last_committed_battle_ts = character_creation_ts`
-  - [ ] `last_committed_season_id = season_id_at_character_creation`
-- [ ] Implement `ApplyBattleSettlementBatchV1` happy-path instruction data layout exactly as frozen.
-- [ ] Align `types/settlement.ts` with canonical schema (`*_battle_ts`, season cursors, no server `expDelta`, `signature_scheme = ed25519_dual_sig_v1`).
-- [ ] Implement canonical serialization for:
-  - [ ] `batch_hash` preimage (excluding `batch_hash` itself and excluding signature bytes/instruction metadata),
-  - [ ] server attestation,
-  - [ ] player authorization permit.
-- [ ] Recompute and equality-check `batch_hash` on-chain.
-- [ ] Parse `SysvarInstructions` and verify both ed25519 instructions.
-- [ ] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
-- [ ] Bind verified player authorization to `CharacterRootAccount.authority`.
-- [ ] Require readonly `player_authority` account and readonly `SysvarInstructions` account in the canonical instruction account list.
-- [ ] Build the canonical player permit bytes from `program_id`, `cluster_id`, `player_authority_pubkey`, `character_root_pubkey`, `batch_hash`, `batch_id`, and `signature_scheme`.
-- [ ] Construct relay transactions that include both ed25519 verification instructions before `ApplyBattleSettlementBatchV1`.
-- [ ] Submit one successful settlement transaction through the relayer/server.
-- [ ] Add one happy-path end-to-end test asserting progression and cursor updates.
+- [x] Implement and test minimum account layouts + PDA derivations for:
+  - [x] CharacterRootAccount
+  - [x] CharacterStatsAccount
+  - [x] CharacterWorldProgressAccount
+  - [x] CharacterZoneProgressPageAccount
+  - [x] ZoneRegistryAccount
+  - [x] ZoneEnemySetAccount
+  - [x] EnemyArchetypeRegistryAccount
+  - [x] ProgramConfigAccount
+  - [x] CharacterSettlementBatchCursorAccount
+- [x] Deploy the Anchor program to localnet as part of the happy-path integration flow.
+- [x] Initialize `ProgramConfigAccount` on localnet.
+- [x] Seed minimum registry state on localnet:
+  - [x] `ZoneRegistryAccount`
+  - [x] `ZoneEnemySetAccount`
+  - [x] `EnemyArchetypeRegistryAccount`
+- [x] Implement character creation/bootstrap path that creates and initializes:
+  - [x] `CharacterRootAccount`
+  - [x] `CharacterStatsAccount`
+  - [x] `CharacterWorldProgressAccount`
+  - [x] initial `CharacterZoneProgressPageAccount` entries as needed
+  - [x] `CharacterSettlementBatchCursorAccount`
+- [x] Initialize cursor defaults during character creation:
+  - [x] `last_committed_end_nonce = 0`
+  - [x] `last_committed_state_hash = genesis_state_hash(character_root)`
+  - [x] `last_committed_batch_id = 0`
+  - [x] `last_committed_battle_ts = character_creation_ts`
+  - [x] `last_committed_season_id = season_id_at_character_creation`
+- [x] Implement `ApplyBattleSettlementBatchV1` happy-path instruction data layout exactly as frozen.
+- [x] Align the schema surface used by this repo with the canonical settlement schema (`runana-program` does not currently contain a `types/settlement.ts` file; the canonical schema is represented here in Rust instruction/types + fixtures).
+- [x] Implement canonical serialization for:
+  - [x] `batch_hash` preimage (excluding `batch_hash` itself and excluding signature bytes/instruction metadata),
+  - [x] server attestation,
+  - [x] player authorization permit.
+- [x] Recompute and equality-check `batch_hash` on-chain.
+- [x] Parse `SysvarInstructions` and verify both ed25519 instructions.
+- [x] Accept only `trusted_server_signers` from `ProgramConfigAccount`.
+- [x] Bind verified player authorization to `CharacterRootAccount.authority`.
+- [x] Require readonly `player_authority` account and readonly `SysvarInstructions` account in the canonical instruction account list.
+- [x] Build the canonical player permit bytes from `program_id`, `cluster_id`, `player_authority_pubkey`, `character_root_pubkey`, `batch_hash`, `batch_id`, and `signature_scheme`.
+- [x] Construct player-paid transactions that include both ed25519 verification instructions before `ApplyBattleSettlementBatchV1`.
+- [x] Submit one successful settlement transaction through server broadcast of the player-signed transaction.
+- [x] Add one happy-path end-to-end test asserting progression and cursor updates.
 
 ### Slice 2) Replay and sequencing defenses
 
@@ -1001,7 +1009,7 @@ These decisions are now **locked for MVP** to unblock implementation.
 ### 15.1 Product & trust boundaries (locks)
 
 1. **Dispute/remediation path:** no on-chain dispute flow in MVP; disputes are handled off-chain by support + ops replay tooling.
-2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch plus separate player off-chain authorization permit; player is not required to be the transaction signer in MVP.
+2. **Signer model:** single trusted server signer key in `trusted_server_signers` at launch plus separate player off-chain authorization permit; the player is the transaction signer and fee payer for player-owned flows in MVP.
 3. **Paused behavior:** when `settlement_paused = true`, all settlement submissions are blocked; no admin bypass path in MVP.
 4. **Freshness policy:** no attestation expiry gate in MVP V2; freshness is enforced via monotonic timestamps, season/grace eligibility, and throughput bounds.
 
