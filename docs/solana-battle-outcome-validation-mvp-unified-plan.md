@@ -720,17 +720,23 @@ Exit criteria:
 
 - the full canonical MVP validation sequence is implemented for production-sized batches within compute limits.
 
-### Slice 6: Ops and optional auditability
+### Slice 6: Canonical mixed-registry batching
 
-- publish operator runbook + error-code map,
-- add retry/reconciliation metadata storage in the relay path,
-- decide whether `BattleSettlementBatchReceiptAccount` is promoted,
-- if promoted, implement receipts and receipt-based support tooling.
+- correct the interim single-registry-tuple settlement limitation in place,
+- allow one settlement batch to reference multiple `zone_id`s and multiple `enemy_archetype_id`s,
+- require the canonical settlement account envelope to include:
+  - additional `CharacterZoneProgressPageAccount`s in ascending `page_index` order,
+  - all referenced `ZoneRegistryAccount`s in ascending `zone_id` order,
+  - all referenced `ZoneEnemySetAccount`s in ascending `zone_id` order,
+  - all referenced `EnemyArchetypeRegistryAccount`s in ascending `enemy_archetype_id` order,
+- define `ZoneEnemySetAccount` as one bounded, sorted, unique legal-enemy set per zone,
+- validate legality and derive EXP per histogram row against the matching zone/enemy registries.
 
 Exit criteria:
 
-- settlement flow is supportable in production,
-- optional receipt path is either explicitly deferred or integrated end to end.
+- mixed-zone and mixed-enemy batches settle end to end through the existing canonical instruction,
+- missing/duplicate/out-of-order grouped remaining accounts are rejected deterministically,
+- mixed-registry legality and EXP derivation are proven through integrated success/failure tests.
 
 ---
 
@@ -963,17 +969,18 @@ Next implementation frontier:
 - [ ] Benchmark compute for worst-case allowed batch (`battle_count=32`, histogram entries=64).
 - [x] Add end-to-end sequential-batch tests covering page access and cumulative progression.
 
-### Slice 6) Ops and optional auditability
+### Slice 6) Canonical mixed-registry batching
 
-Status: explicitly deferred after Slice 5.
-
-- [ ] Decide and implement `BattleSettlementBatchReceiptAccount` if promoted.
-- [ ] Add receipt indexing/dispute support tooling if receipts are enabled.
-- [ ] Implement `CharacterLoadoutAccount` only if another MVP domain requires it; it is not part of canonical settlement validation.
+- [x] Evolve `ApplyBattleSettlementBatchV1` in place to accept canonical grouped remaining accounts for mixed zones and enemies.
+- [x] Promote `ZoneEnemySetAccount` to one bounded sorted unique legal-enemy set per zone.
+- [x] Validate every histogram row against the matching zone registry, zone enemy set membership, and enemy registry.
+- [x] Derive EXP per histogram row and sum it across mixed batches with overflow rejection preserved.
+- [x] Reject missing, duplicate, out-of-order, and extra grouped remaining accounts deterministically.
+- [x] Add end-to-end tests for mixed-zone success, mixed-enemy success, grouped-account failures, overflow, and sequential mixed batches.
 
 ### Explicitly deferred
 
-- [ ] Slice 6 ops and optional auditability workstream.
+- [ ] Ops and optional auditability workstream after Slice 6.
 - [ ] Inventory/drop settlement domains.
 - [ ] On-chain learning persistence extensions.
 - [ ] Persistent enemy instance domains.
@@ -1015,9 +1022,10 @@ Status: explicitly deferred after Slice 5.
   - multi-page zone progress access,
   - account mutability/read-only hardening,
   - compute benchmarking and sequential-batch tests.
-- **Slice 6: ops/audit**
-  - operator runbook + error-code map,
-  - optional receipt implementation and tooling.
+- **Slice 6: mixed batching**
+  - canonical grouped remaining-account validation,
+  - bounded per-zone enemy membership sets,
+  - mixed-row legality and EXP derivation tests.
 
 ## 14.2) QA-Readiness Test Matrix (Required)
 
@@ -1037,6 +1045,7 @@ Status: explicitly deferred after Slice 5.
 14. Illegal zone access, illegal zone→enemy pairs, duplicate histogram entries, and zero-count histogram entries are rejected in Slice 4.
 15. Deterministic EXP derivation success/failure, including overflow/invalid-registry cases, is covered in Slice 4.
 16. Sequential successful batches, multi-page progression access, and compute-envelope checks are covered in Slice 5.
+17. Mixed-zone and mixed-enemy batches, including missing/misordered grouped registry accounts and mixed-row EXP overflow, are covered in Slice 6.
 
 ## 15) Section 13 Decision Locks (Lean MVP Defaults)
 
@@ -1155,7 +1164,7 @@ Interpretation rules:
 
 ## 17) MVP Operator Runbook For Settlement Failures (Initial Publication)
 
-This is the initial Slice 0 runbook publication. Production hardening, richer reconciliation storage, and optional receipt tooling remain part of Slice 6.
+This is the initial Slice 0 runbook publication. Production hardening, richer reconciliation storage, and optional receipt tooling remain explicitly deferred after Slice 6.
 
 ### 17.1 Required incident artifacts
 
