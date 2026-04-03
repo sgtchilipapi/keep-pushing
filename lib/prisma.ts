@@ -24,6 +24,369 @@ type CharacterCreateInput = {
   passiveSkills: string[];
 };
 
+export type CharacterChainCreationStatus =
+  | 'NOT_STARTED'
+  | 'PENDING'
+  | 'SUBMITTED'
+  | 'CONFIRMED'
+  | 'FAILED';
+
+export type BattleOutcomeLedgerStatus = 'PENDING' | 'SEALED' | 'COMMITTED';
+export type SettlementBatchStatus = 'SEALED' | 'PREPARED' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+export type SettlementSubmissionAttemptStatus = 'STARTED' | 'BROADCAST' | 'CONFIRMED' | 'FAILED' | 'TIMEOUT';
+
+export type CharacterChainState = {
+  id: string;
+  playerAuthorityPubkey: string | null;
+  chainCharacterIdHex: string | null;
+  characterRootPubkey: string | null;
+  chainCreationStatus: CharacterChainCreationStatus;
+  chainCreationTxSignature: string | null;
+  chainCreatedAt: Date | null;
+  chainCreationTs: number | null;
+  chainCreationSeasonId: number | null;
+  lastReconciledEndNonce: number | null;
+  lastReconciledStateHash: string | null;
+  lastReconciledBatchId: number | null;
+  lastReconciledBattleTs: number | null;
+  lastReconciledSeasonId: number | null;
+  lastReconciledAt: Date | null;
+};
+
+export type UpdateCharacterChainIdentityInput = {
+  playerAuthorityPubkey: string;
+  chainCharacterIdHex: string;
+  characterRootPubkey: string;
+  chainCreationStatus: CharacterChainCreationStatus;
+  chainCreationTxSignature?: string | null;
+  chainCreatedAt?: Date | null;
+  chainCreationTs?: number | null;
+  chainCreationSeasonId?: number | null;
+};
+
+export type UpdateCharacterCursorSnapshotInput = {
+  lastReconciledEndNonce: number;
+  lastReconciledStateHash: string;
+  lastReconciledBatchId: number;
+  lastReconciledBattleTs: number;
+  lastReconciledSeasonId: number;
+  lastReconciledAt?: Date;
+};
+
+export type BattleOutcomeLedgerRecord = {
+  id: string;
+  characterId: string;
+  battleId: string;
+  battleNonce: number;
+  battleTs: number;
+  seasonId: number;
+  zoneId: number;
+  enemyArchetypeId: number;
+  zoneProgressDelta: unknown;
+  settlementStatus: BattleOutcomeLedgerStatus;
+  sealedBatchId: string | null;
+  committedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateBattleOutcomeLedgerInput = {
+  characterId: string;
+  battleId: string;
+  battleNonce: number;
+  battleTs: number;
+  seasonId: number;
+  zoneId: number;
+  enemyArchetypeId: number;
+  zoneProgressDelta: unknown;
+};
+
+export type SettlementBatchRecord = {
+  id: string;
+  characterId: string;
+  batchId: number;
+  startNonce: number;
+  endNonce: number;
+  battleCount: number;
+  firstBattleTs: number;
+  lastBattleTs: number;
+  seasonId: number;
+  startStateHash: string;
+  endStateHash: string;
+  zoneProgressDelta: unknown;
+  encounterHistogram: unknown;
+  optionalLoadoutRevision: number | null;
+  batchHash: string;
+  schemaVersion: number;
+  signatureScheme: number;
+  status: SettlementBatchStatus;
+  failureCategory: string | null;
+  failureCode: string | null;
+  latestMessageSha256Hex: string | null;
+  latestSignedTxSha256Hex: string | null;
+  latestTransactionSignature: string | null;
+  preparedAt: Date | null;
+  submittedAt: Date | null;
+  confirmedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateSettlementBatchInput = {
+  characterId: string;
+  batchId: number;
+  startNonce: number;
+  endNonce: number;
+  battleCount: number;
+  firstBattleTs: number;
+  lastBattleTs: number;
+  seasonId: number;
+  startStateHash: string;
+  endStateHash: string;
+  zoneProgressDelta: unknown;
+  encounterHistogram: unknown;
+  optionalLoadoutRevision?: number | null;
+  batchHash: string;
+  schemaVersion: number;
+  signatureScheme: number;
+  sealedBattleIds?: string[];
+};
+
+export type UpdateSettlementBatchStatusInput = {
+  status: SettlementBatchStatus;
+  failureCategory?: string | null;
+  failureCode?: string | null;
+  latestMessageSha256Hex?: string | null;
+  latestSignedTxSha256Hex?: string | null;
+  latestTransactionSignature?: string | null;
+  preparedAt?: Date | null;
+  submittedAt?: Date | null;
+  confirmedAt?: Date | null;
+  failedAt?: Date | null;
+};
+
+export type SettlementSubmissionAttemptRecord = {
+  id: string;
+  settlementBatchId: string;
+  attemptNumber: number;
+  status: SettlementSubmissionAttemptStatus;
+  messageSha256Hex: string | null;
+  signedTransactionSha256Hex: string | null;
+  transactionSignature: string | null;
+  rpcError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  submittedAt: Date | null;
+  resolvedAt: Date | null;
+};
+
+export type CreateSettlementSubmissionAttemptInput = {
+  settlementBatchId: string;
+  attemptNumber: number;
+  status?: SettlementSubmissionAttemptStatus;
+  messageSha256Hex?: string | null;
+  signedTransactionSha256Hex?: string | null;
+  transactionSignature?: string | null;
+  rpcError?: string | null;
+  submittedAt?: Date | null;
+  resolvedAt?: Date | null;
+};
+
+type CharacterChainStateRow = {
+  id: string;
+  playerAuthorityPubkey: string | null;
+  chainCharacterIdHex: string | null;
+  characterRootPubkey: string | null;
+  chainCreationStatus: CharacterChainCreationStatus;
+  chainCreationTxSignature: string | null;
+  chainCreatedAt: Date | null;
+  chainCreationTs: string | number | null;
+  chainCreationSeasonId: number | null;
+  lastReconciledEndNonce: string | number | null;
+  lastReconciledStateHash: string | null;
+  lastReconciledBatchId: string | number | null;
+  lastReconciledBattleTs: string | number | null;
+  lastReconciledSeasonId: number | null;
+  lastReconciledAt: Date | null;
+};
+
+type BattleOutcomeLedgerRow = {
+  id: string;
+  characterId: string;
+  battleId: string;
+  battleNonce: string | number;
+  battleTs: string | number;
+  seasonId: number;
+  zoneId: number;
+  enemyArchetypeId: number;
+  zoneProgressDeltaJson: unknown;
+  settlementStatus: BattleOutcomeLedgerStatus;
+  sealedBatchId: string | null;
+  committedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type SettlementBatchRow = {
+  id: string;
+  characterId: string;
+  batchId: string | number;
+  startNonce: string | number;
+  endNonce: string | number;
+  battleCount: number;
+  firstBattleTs: string | number;
+  lastBattleTs: string | number;
+  seasonId: number;
+  startStateHash: string;
+  endStateHash: string;
+  zoneProgressDeltaJson: unknown;
+  encounterHistogramJson: unknown;
+  optionalLoadoutRevision: number | null;
+  batchHash: string;
+  schemaVersion: number;
+  signatureScheme: number;
+  status: SettlementBatchStatus;
+  failureCategory: string | null;
+  failureCode: string | null;
+  latestMessageSha256Hex: string | null;
+  latestSignedTxSha256Hex: string | null;
+  latestTransactionSignature: string | null;
+  preparedAt: Date | null;
+  submittedAt: Date | null;
+  confirmedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type SettlementSubmissionAttemptRow = {
+  id: string;
+  settlementBatchId: string;
+  attemptNumber: number;
+  status: SettlementSubmissionAttemptStatus;
+  messageSha256Hex: string | null;
+  signedTransactionSha256Hex: string | null;
+  transactionSignature: string | null;
+  rpcError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  submittedAt: Date | null;
+  resolvedAt: Date | null;
+};
+
+function parseNullableSafeInteger(value: string | number | null | undefined, field: string): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`ERR_INVALID_DB_INTEGER: ${field} was not a safe integer`);
+  }
+
+  return parsed;
+}
+
+function parseRequiredSafeInteger(value: string | number, field: string): number {
+  const parsed = parseNullableSafeInteger(value, field);
+  if (parsed === null) {
+    throw new Error(`ERR_MISSING_DB_INTEGER: ${field} was unexpectedly null`);
+  }
+
+  return parsed;
+}
+
+function mapCharacterChainState(row: CharacterChainStateRow): CharacterChainState {
+  return {
+    id: row.id,
+    playerAuthorityPubkey: row.playerAuthorityPubkey,
+    chainCharacterIdHex: row.chainCharacterIdHex,
+    characterRootPubkey: row.characterRootPubkey,
+    chainCreationStatus: row.chainCreationStatus,
+    chainCreationTxSignature: row.chainCreationTxSignature,
+    chainCreatedAt: row.chainCreatedAt,
+    chainCreationTs: parseNullableSafeInteger(row.chainCreationTs, 'chainCreationTs'),
+    chainCreationSeasonId: row.chainCreationSeasonId,
+    lastReconciledEndNonce: parseNullableSafeInteger(row.lastReconciledEndNonce, 'lastReconciledEndNonce'),
+    lastReconciledStateHash: row.lastReconciledStateHash,
+    lastReconciledBatchId: parseNullableSafeInteger(row.lastReconciledBatchId, 'lastReconciledBatchId'),
+    lastReconciledBattleTs: parseNullableSafeInteger(row.lastReconciledBattleTs, 'lastReconciledBattleTs'),
+    lastReconciledSeasonId: row.lastReconciledSeasonId,
+    lastReconciledAt: row.lastReconciledAt
+  };
+}
+
+function mapBattleOutcomeLedger(row: BattleOutcomeLedgerRow): BattleOutcomeLedgerRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    battleId: row.battleId,
+    battleNonce: parseRequiredSafeInteger(row.battleNonce, 'battleNonce'),
+    battleTs: parseRequiredSafeInteger(row.battleTs, 'battleTs'),
+    seasonId: row.seasonId,
+    zoneId: row.zoneId,
+    enemyArchetypeId: row.enemyArchetypeId,
+    zoneProgressDelta: row.zoneProgressDeltaJson,
+    settlementStatus: row.settlementStatus,
+    sealedBatchId: row.sealedBatchId,
+    committedAt: row.committedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapSettlementBatch(row: SettlementBatchRow): SettlementBatchRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    batchId: parseRequiredSafeInteger(row.batchId, 'batchId'),
+    startNonce: parseRequiredSafeInteger(row.startNonce, 'startNonce'),
+    endNonce: parseRequiredSafeInteger(row.endNonce, 'endNonce'),
+    battleCount: row.battleCount,
+    firstBattleTs: parseRequiredSafeInteger(row.firstBattleTs, 'firstBattleTs'),
+    lastBattleTs: parseRequiredSafeInteger(row.lastBattleTs, 'lastBattleTs'),
+    seasonId: row.seasonId,
+    startStateHash: row.startStateHash,
+    endStateHash: row.endStateHash,
+    zoneProgressDelta: row.zoneProgressDeltaJson,
+    encounterHistogram: row.encounterHistogramJson,
+    optionalLoadoutRevision: row.optionalLoadoutRevision,
+    batchHash: row.batchHash,
+    schemaVersion: row.schemaVersion,
+    signatureScheme: row.signatureScheme,
+    status: row.status,
+    failureCategory: row.failureCategory,
+    failureCode: row.failureCode,
+    latestMessageSha256Hex: row.latestMessageSha256Hex,
+    latestSignedTxSha256Hex: row.latestSignedTxSha256Hex,
+    latestTransactionSignature: row.latestTransactionSignature,
+    preparedAt: row.preparedAt,
+    submittedAt: row.submittedAt,
+    confirmedAt: row.confirmedAt,
+    failedAt: row.failedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapSettlementSubmissionAttempt(row: SettlementSubmissionAttemptRow): SettlementSubmissionAttemptRecord {
+  return {
+    id: row.id,
+    settlementBatchId: row.settlementBatchId,
+    attemptNumber: row.attemptNumber,
+    status: row.status,
+    messageSha256Hex: row.messageSha256Hex,
+    signedTransactionSha256Hex: row.signedTransactionSha256Hex,
+    transactionSignature: row.transactionSignature,
+    rpcError: row.rpcError,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    submittedAt: row.submittedAt,
+    resolvedAt: row.resolvedAt
+  };
+}
+
 export const prisma = {
   user: {
     async create() {
@@ -154,6 +517,529 @@ export const prisma = {
       } finally {
         client.release();
       }
+    },
+    async updateChainIdentity(characterId: string, input: UpdateCharacterChainIdentityInput) {
+      const result = await pool.query<CharacterChainStateRow>(
+        `UPDATE "Character"
+        SET
+          "playerAuthorityPubkey" = $2,
+          "chainCharacterIdHex" = $3,
+          "characterRootPubkey" = $4,
+          "chainCreationStatus" = $5,
+          "chainCreationTxSignature" = $6,
+          "chainCreatedAt" = $7,
+          "chainCreationTs" = $8,
+          "chainCreationSeasonId" = $9
+        WHERE id = $1
+        RETURNING
+          id,
+          "playerAuthorityPubkey",
+          "chainCharacterIdHex",
+          "characterRootPubkey",
+          "chainCreationStatus",
+          "chainCreationTxSignature",
+          "chainCreatedAt",
+          "chainCreationTs",
+          "chainCreationSeasonId",
+          "lastReconciledEndNonce",
+          "lastReconciledStateHash",
+          "lastReconciledBatchId",
+          "lastReconciledBattleTs",
+          "lastReconciledSeasonId",
+          "lastReconciledAt"`,
+        [
+          characterId,
+          input.playerAuthorityPubkey,
+          input.chainCharacterIdHex,
+          input.characterRootPubkey,
+          input.chainCreationStatus,
+          input.chainCreationTxSignature ?? null,
+          input.chainCreatedAt ?? null,
+          input.chainCreationTs ?? null,
+          input.chainCreationSeasonId ?? null
+        ]
+      );
+
+      return result.rows[0] ? mapCharacterChainState(result.rows[0]) : null;
+    },
+    async updateCursorSnapshot(characterId: string, input: UpdateCharacterCursorSnapshotInput) {
+      const result = await pool.query<CharacterChainStateRow>(
+        `UPDATE "Character"
+        SET
+          "lastReconciledEndNonce" = $2,
+          "lastReconciledStateHash" = $3,
+          "lastReconciledBatchId" = $4,
+          "lastReconciledBattleTs" = $5,
+          "lastReconciledSeasonId" = $6,
+          "lastReconciledAt" = $7
+        WHERE id = $1
+        RETURNING
+          id,
+          "playerAuthorityPubkey",
+          "chainCharacterIdHex",
+          "characterRootPubkey",
+          "chainCreationStatus",
+          "chainCreationTxSignature",
+          "chainCreatedAt",
+          "chainCreationTs",
+          "chainCreationSeasonId",
+          "lastReconciledEndNonce",
+          "lastReconciledStateHash",
+          "lastReconciledBatchId",
+          "lastReconciledBattleTs",
+          "lastReconciledSeasonId",
+          "lastReconciledAt"`,
+        [
+          characterId,
+          input.lastReconciledEndNonce,
+          input.lastReconciledStateHash,
+          input.lastReconciledBatchId,
+          input.lastReconciledBattleTs,
+          input.lastReconciledSeasonId,
+          input.lastReconciledAt ?? new Date()
+        ]
+      );
+
+      return result.rows[0] ? mapCharacterChainState(result.rows[0]) : null;
+    },
+    async findChainState(characterId: string) {
+      const result = await pool.query<CharacterChainStateRow>(
+        `SELECT
+          id,
+          "playerAuthorityPubkey",
+          "chainCharacterIdHex",
+          "characterRootPubkey",
+          "chainCreationStatus",
+          "chainCreationTxSignature",
+          "chainCreatedAt",
+          "chainCreationTs",
+          "chainCreationSeasonId",
+          "lastReconciledEndNonce",
+          "lastReconciledStateHash",
+          "lastReconciledBatchId",
+          "lastReconciledBattleTs",
+          "lastReconciledSeasonId",
+          "lastReconciledAt"
+        FROM "Character"
+        WHERE id = $1
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapCharacterChainState(result.rows[0]) : null;
+    }
+  },
+  battleOutcomeLedger: {
+    async create(input: CreateBattleOutcomeLedgerInput) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `INSERT INTO "BattleOutcomeLedger"
+          (
+            "characterId",
+            "battleId",
+            "battleNonce",
+            "battleTs",
+            "seasonId",
+            "zoneId",
+            "enemyArchetypeId",
+            "zoneProgressDeltaJson"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+        RETURNING
+          id,
+          "characterId",
+          "battleId",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          input.characterId,
+          input.battleId,
+          input.battleNonce,
+          input.battleTs,
+          input.seasonId,
+          input.zoneId,
+          input.enemyArchetypeId,
+          JSON.stringify(input.zoneProgressDelta)
+        ]
+      );
+
+      return mapBattleOutcomeLedger(result.rows[0]);
+    },
+    async listNextPendingForCharacter(characterId: string, limit: number) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `SELECT
+          id,
+          "characterId",
+          "battleId",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleOutcomeLedger"
+        WHERE "characterId" = $1 AND "settlementStatus" = 'PENDING'
+        ORDER BY "battleNonce" ASC
+        LIMIT $2`,
+        [characterId, limit]
+      );
+
+      return result.rows.map(mapBattleOutcomeLedger);
+    },
+    async markCommittedForBatch(sealedBatchId: string, committedAt = new Date()) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `UPDATE "BattleOutcomeLedger"
+        SET
+          "settlementStatus" = 'COMMITTED',
+          "committedAt" = $2
+        WHERE "sealedBatchId" = $1
+        RETURNING
+          id,
+          "characterId",
+          "battleId",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"`,
+        [sealedBatchId, committedAt]
+      );
+
+      return result.rows.map(mapBattleOutcomeLedger);
+    }
+  },
+  settlementBatch: {
+    async createSealed(input: CreateSettlementBatchInput) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const batchResult = await client.query<SettlementBatchRow>(
+          `INSERT INTO "SettlementBatch"
+            (
+              "characterId",
+              "batchId",
+              "startNonce",
+              "endNonce",
+              "battleCount",
+              "firstBattleTs",
+              "lastBattleTs",
+              "seasonId",
+              "startStateHash",
+              "endStateHash",
+              "zoneProgressDeltaJson",
+              "encounterHistogramJson",
+              "optionalLoadoutRevision",
+              "batchHash",
+              "schemaVersion",
+              "signatureScheme"
+            )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16)
+          RETURNING
+            id,
+            "characterId",
+            "batchId",
+            "startNonce",
+            "endNonce",
+            "battleCount",
+            "firstBattleTs",
+            "lastBattleTs",
+            "seasonId",
+            "startStateHash",
+            "endStateHash",
+            "zoneProgressDeltaJson",
+            "encounterHistogramJson",
+            "optionalLoadoutRevision",
+            "batchHash",
+            "schemaVersion",
+            "signatureScheme",
+            "status",
+            "failureCategory",
+            "failureCode",
+            "latestMessageSha256Hex",
+            "latestSignedTxSha256Hex",
+            "latestTransactionSignature",
+            "preparedAt",
+            "submittedAt",
+            "confirmedAt",
+            "failedAt",
+            "createdAt",
+            "updatedAt"`,
+          [
+            input.characterId,
+            input.batchId,
+            input.startNonce,
+            input.endNonce,
+            input.battleCount,
+            input.firstBattleTs,
+            input.lastBattleTs,
+            input.seasonId,
+            input.startStateHash,
+            input.endStateHash,
+            JSON.stringify(input.zoneProgressDelta),
+            JSON.stringify(input.encounterHistogram),
+            input.optionalLoadoutRevision ?? null,
+            input.batchHash,
+            input.schemaVersion,
+            input.signatureScheme
+          ]
+        );
+
+        const batch = batchResult.rows[0];
+
+        if ((input.sealedBattleIds?.length ?? 0) > 0) {
+          const sealResult = await client.query(
+            `UPDATE "BattleOutcomeLedger"
+            SET
+              "settlementStatus" = 'SEALED',
+              "sealedBatchId" = $1
+            WHERE "id" = ANY($2::text[]) AND "characterId" = $3`,
+            [batch.id, input.sealedBattleIds, input.characterId]
+          );
+
+          if (sealResult.rowCount !== input.sealedBattleIds?.length) {
+            throw new Error('ERR_BATTLE_LEDGER_SEAL_MISMATCH: failed to seal the expected battle ledger rows');
+          }
+        }
+
+        await client.query('COMMIT');
+        return mapSettlementBatch(batch);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async findById(id: string) {
+      const result = await pool.query<SettlementBatchRow>(
+        `SELECT
+          id,
+          "characterId",
+          "batchId",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementBatch"
+        WHERE id = $1
+        LIMIT 1`,
+        [id]
+      );
+
+      return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
+    },
+    async findNextUnconfirmedForCharacter(characterId: string) {
+      const result = await pool.query<SettlementBatchRow>(
+        `SELECT
+          id,
+          "characterId",
+          "batchId",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementBatch"
+        WHERE "characterId" = $1 AND "status" <> 'CONFIRMED'
+        ORDER BY "batchId" ASC
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
+    },
+    async updateStatus(id: string, input: UpdateSettlementBatchStatusInput) {
+      const result = await pool.query<SettlementBatchRow>(
+        `UPDATE "SettlementBatch"
+        SET
+          "status" = $2,
+          "failureCategory" = $3,
+          "failureCode" = $4,
+          "latestMessageSha256Hex" = $5,
+          "latestSignedTxSha256Hex" = $6,
+          "latestTransactionSignature" = $7,
+          "preparedAt" = $8,
+          "submittedAt" = $9,
+          "confirmedAt" = $10,
+          "failedAt" = $11
+        WHERE id = $1
+        RETURNING
+          id,
+          "characterId",
+          "batchId",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          id,
+          input.status,
+          input.failureCategory ?? null,
+          input.failureCode ?? null,
+          input.latestMessageSha256Hex ?? null,
+          input.latestSignedTxSha256Hex ?? null,
+          input.latestTransactionSignature ?? null,
+          input.preparedAt ?? null,
+          input.submittedAt ?? null,
+          input.confirmedAt ?? null,
+          input.failedAt ?? null
+        ]
+      );
+
+      return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
+    }
+  },
+  settlementSubmissionAttempt: {
+    async create(input: CreateSettlementSubmissionAttemptInput) {
+      const result = await pool.query<SettlementSubmissionAttemptRow>(
+        `INSERT INTO "SettlementSubmissionAttempt"
+          (
+            "settlementBatchId",
+            "attemptNumber",
+            "status",
+            "messageSha256Hex",
+            "signedTransactionSha256Hex",
+            "transactionSignature",
+            "rpcError",
+            "submittedAt",
+            "resolvedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING
+          id,
+          "settlementBatchId",
+          "attemptNumber",
+          "status",
+          "messageSha256Hex",
+          "signedTransactionSha256Hex",
+          "transactionSignature",
+          "rpcError",
+          "createdAt",
+          "updatedAt",
+          "submittedAt",
+          "resolvedAt"`,
+        [
+          input.settlementBatchId,
+          input.attemptNumber,
+          input.status ?? 'STARTED',
+          input.messageSha256Hex ?? null,
+          input.signedTransactionSha256Hex ?? null,
+          input.transactionSignature ?? null,
+          input.rpcError ?? null,
+          input.submittedAt ?? null,
+          input.resolvedAt ?? null
+        ]
+      );
+
+      return mapSettlementSubmissionAttempt(result.rows[0]);
+    },
+    async listByBatch(settlementBatchId: string) {
+      const result = await pool.query<SettlementSubmissionAttemptRow>(
+        `SELECT
+          id,
+          "settlementBatchId",
+          "attemptNumber",
+          "status",
+          "messageSha256Hex",
+          "signedTransactionSha256Hex",
+          "transactionSignature",
+          "rpcError",
+          "createdAt",
+          "updatedAt",
+          "submittedAt",
+          "resolvedAt"
+        FROM "SettlementSubmissionAttempt"
+        WHERE "settlementBatchId" = $1
+        ORDER BY "attemptNumber" ASC`,
+        [settlementBatchId]
+      );
+
+      return result.rows.map(mapSettlementSubmissionAttempt);
     }
   }
 };

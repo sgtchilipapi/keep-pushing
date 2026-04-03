@@ -8,6 +8,7 @@ import type {
   SubmittedPlayerOwnedTransaction,
   SubmitSignedPlayerOwnedTransactionRequest,
 } from "../../types/api/solana";
+import type { SettlementBatchPayloadV2 } from "../../types/settlement";
 
 function assertNonEmptyString(value: string, field: string): void {
   if (value.trim().length === 0) {
@@ -52,10 +53,13 @@ function assertFieldMatch(
 function buildSettlementRelayMetadata(
   request: PrepareSettlementTransactionRequest,
 ): SettlementRelayMetadata {
-  assertNonEmptyString(request.characterId, "characterId");
+  const { payload } = request;
+
+  assertNonEmptyString(payload.characterId, "payload.characterId");
   assertNonEmptyString(request.characterRootPubkey, "characterRootPubkey");
-  assertNonEmptyString(request.batchHash, "batchHash");
-  assertNonEmptyString(request.startStateHash, "startStateHash");
+  assertNonEmptyString(payload.batchHash, "payload.batchHash");
+  assertNonEmptyString(payload.startStateHash, "payload.startStateHash");
+  assertNonEmptyString(payload.endStateHash, "payload.endStateHash");
   assertNonEmptyString(
     request.expectedCursor.lastCommittedStateHash,
     "expectedCursor.lastCommittedStateHash",
@@ -68,36 +72,48 @@ function buildSettlementRelayMetadata(
   );
   assertNonEmptyString(request.permitDomain.batchHash, "permitDomain.batchHash");
 
-  assertInteger(request.batchId, "batchId", 1);
-  assertInteger(request.startNonce, "startNonce", 1);
-  assertInteger(request.endNonce, "endNonce", 1);
+  assertCanonicalSettlementPayload(payload);
+  assertInteger(request.expectedCursor.lastCommittedBattleTs, "lastCommittedBattleTs", 0);
+  assertInteger(request.expectedCursor.lastCommittedSeasonId, "lastCommittedSeasonId", 0);
   assertInteger(request.expectedCursor.lastCommittedEndNonce, "lastCommittedEndNonce", 0);
   assertInteger(request.expectedCursor.lastCommittedBatchId, "lastCommittedBatchId", 0);
   assertInteger(request.permitDomain.clusterId, "clusterId", 1);
   assertInteger(request.permitDomain.batchId, "permitDomain.batchId", 1);
   assertInteger(request.permitDomain.signatureScheme, "signatureScheme", 0);
 
-  if (request.endNonce < request.startNonce) {
+  if (payload.endNonce < payload.startNonce) {
     throw new Error(
       "ERR_INVALID_NONCE_RANGE: endNonce must be greater than or equal to startNonce",
     );
   }
 
-  if (request.startNonce !== request.expectedCursor.lastCommittedEndNonce + 1) {
+  if (payload.startNonce !== request.expectedCursor.lastCommittedEndNonce + 1) {
     throw new Error(
       "ERR_BATCH_OUT_OF_ORDER: settlement startNonce must be the next oldest uncommitted nonce",
     );
   }
 
-  if (request.batchId !== request.expectedCursor.lastCommittedBatchId + 1) {
+  if (payload.batchId !== request.expectedCursor.lastCommittedBatchId + 1) {
     throw new Error(
       "ERR_BATCH_ID_GAP: settlement batchId must be the next oldest uncommitted batch id",
     );
   }
 
-  if (request.startStateHash !== request.expectedCursor.lastCommittedStateHash) {
+  if (payload.startStateHash !== request.expectedCursor.lastCommittedStateHash) {
     throw new Error(
       "ERR_START_STATE_HASH_MISMATCH: settlement startStateHash must match the committed cursor",
+    );
+  }
+
+  if (payload.firstBattleTs < request.expectedCursor.lastCommittedBattleTs) {
+    throw new Error(
+      "ERR_BATTLE_TS_REGRESSION: settlement firstBattleTs must not regress behind the committed cursor",
+    );
+  }
+
+  if (payload.seasonId < request.expectedCursor.lastCommittedSeasonId) {
+    throw new Error(
+      "ERR_SEASON_REGRESSION: settlement seasonId must not regress behind the committed cursor",
     );
   }
 
@@ -107,23 +123,54 @@ function buildSettlementRelayMetadata(
     request.permitDomain.characterRootPubkey,
     "characterRootPubkey",
   );
-  assertFieldMatch(request.batchHash, request.permitDomain.batchHash, "batchHash");
-  assertFieldMatch(request.batchId, request.permitDomain.batchId, "batchId");
+  assertFieldMatch(payload.batchHash, request.permitDomain.batchHash, "batchHash");
+  assertFieldMatch(payload.batchId, request.permitDomain.batchId, "batchId");
+  assertFieldMatch(payload.signatureScheme, request.permitDomain.signatureScheme, "signatureScheme");
 
   return {
     relayRequestId: request.relayRequestId,
-    characterId: request.characterId,
+    characterId: payload.characterId,
     characterRootPubkey: request.characterRootPubkey,
-    batchId: request.batchId,
-    batchHash: request.batchHash,
-    startNonce: request.startNonce,
-    endNonce: request.endNonce,
-    startStateHash: request.startStateHash,
+    batchId: payload.batchId,
+    batchHash: payload.batchHash,
+    startNonce: payload.startNonce,
+    endNonce: payload.endNonce,
+    startStateHash: payload.startStateHash,
+    endStateHash: payload.endStateHash,
+    firstBattleTs: payload.firstBattleTs,
+    lastBattleTs: payload.lastBattleTs,
+    seasonId: payload.seasonId,
+    schemaVersion: payload.schemaVersion,
+    signatureScheme: payload.signatureScheme,
     expectedCursor: request.expectedCursor,
     permitDomain: request.permitDomain,
-    continuityKey: `${request.characterId}:${request.expectedCursor.lastCommittedEndNonce}->${request.endNonce}`,
-    reconciliationKey: `${request.characterId}:${request.batchId}:${request.batchHash}`,
+    continuityKey: `${payload.characterId}:${request.expectedCursor.lastCommittedEndNonce}->${payload.endNonce}`,
+    reconciliationKey: `${payload.characterId}:${payload.batchId}:${payload.batchHash}`,
   };
+}
+
+function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): void {
+  assertInteger(payload.batchId, "payload.batchId", 1);
+  assertInteger(payload.startNonce, "payload.startNonce", 1);
+  assertInteger(payload.endNonce, "payload.endNonce", 1);
+  assertInteger(payload.battleCount, "payload.battleCount", 1);
+  assertInteger(payload.firstBattleTs, "payload.firstBattleTs", 0);
+  assertInteger(payload.lastBattleTs, "payload.lastBattleTs", 0);
+  assertInteger(payload.seasonId, "payload.seasonId", 0);
+  assertInteger(payload.schemaVersion, "payload.schemaVersion", 2);
+  assertInteger(payload.signatureScheme, "payload.signatureScheme", 0);
+
+  if (payload.schemaVersion !== 2) {
+    throw new Error(
+      "ERR_UNSUPPORTED_SETTLEMENT_SCHEMA: canonical settlement preparation requires schemaVersion = 2",
+    );
+  }
+
+  if (payload.signatureScheme !== 0) {
+    throw new Error(
+      "ERR_UNSUPPORTED_SIGNATURE_SCHEME: canonical settlement preparation requires signatureScheme = 0",
+    );
+  }
 }
 
 function buildPreparedTransaction(

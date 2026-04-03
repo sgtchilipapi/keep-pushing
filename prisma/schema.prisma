@@ -4,7 +4,36 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+}
+
+enum CharacterChainCreationStatus {
+  NOT_STARTED
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+enum BattleOutcomeLedgerStatus {
+  PENDING
+  SEALED
+  COMMITTED
+}
+
+enum SettlementBatchStatus {
+  SEALED
+  PREPARED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+enum SettlementSubmissionAttemptStatus {
+  STARTED
+  BROADCAST
+  CONFIRMED
+  FAILED
+  TIMEOUT
 }
 
 model User {
@@ -27,6 +56,20 @@ model Character {
   spd              Int
   accuracyBP       Int
   evadeBP          Int
+  playerAuthorityPubkey String?
+  chainCharacterIdHex   String?                     @unique
+  characterRootPubkey   String?                     @unique
+  chainCreationStatus   CharacterChainCreationStatus @default(NOT_STARTED)
+  chainCreationTxSignature String?
+  chainCreatedAt        DateTime?
+  chainCreationTs       BigInt?
+  chainCreationSeasonId Int?
+  lastReconciledEndNonce BigInt?
+  lastReconciledStateHash String?
+  lastReconciledBatchId BigInt?
+  lastReconciledBattleTs BigInt?
+  lastReconciledSeasonId Int?
+  lastReconciledAt      DateTime?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -34,8 +77,11 @@ model Character {
   equippedSkills   EquippedSkill[]
   equippedPassives EquippedPassive[]
   inventoryItems   InventoryItem[]
+  battleOutcomes   BattleOutcomeLedger[]
+  settlementBatches SettlementBatch[]
 
   @@index([userId])
+  @@index([chainCreationStatus])
 }
 
 model SkillUnlock {
@@ -86,4 +132,86 @@ model InventoryItem {
 
   @@unique([characterId, itemId])
   @@index([characterId])
+}
+
+model BattleOutcomeLedger {
+  id                   String                   @id @default(cuid())
+  characterId          String
+  battleId             String                   @unique
+  battleNonce          BigInt
+  battleTs             BigInt
+  seasonId             Int
+  zoneId               Int
+  enemyArchetypeId     Int
+  zoneProgressDeltaJson Json
+  settlementStatus     BattleOutcomeLedgerStatus @default(PENDING)
+  sealedBatchId        String?
+  committedAt          DateTime?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  character            Character                @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  sealedBatch          SettlementBatch?         @relation("SealedBattles", fields: [sealedBatchId], references: [id], onDelete: SetNull)
+
+  @@unique([characterId, battleNonce])
+  @@index([characterId, settlementStatus, battleNonce])
+  @@index([sealedBatchId])
+}
+
+model SettlementBatch {
+  id                        String                     @id @default(cuid())
+  characterId               String
+  batchId                   BigInt
+  startNonce                BigInt
+  endNonce                  BigInt
+  battleCount               Int
+  firstBattleTs             BigInt
+  lastBattleTs              BigInt
+  seasonId                  Int
+  startStateHash            String
+  endStateHash              String
+  zoneProgressDeltaJson     Json
+  encounterHistogramJson    Json
+  optionalLoadoutRevision   Int?
+  batchHash                 String
+  schemaVersion             Int
+  signatureScheme           Int
+  status                    SettlementBatchStatus     @default(SEALED)
+  failureCategory           String?
+  failureCode               String?
+  latestMessageSha256Hex    String?
+  latestSignedTxSha256Hex   String?
+  latestTransactionSignature String?
+  preparedAt                DateTime?
+  submittedAt               DateTime?
+  confirmedAt               DateTime?
+  failedAt                  DateTime?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  character                 Character                 @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  sealedBattles             BattleOutcomeLedger[]     @relation("SealedBattles")
+  submissionAttempts        SettlementSubmissionAttempt[]
+
+  @@unique([characterId, batchId])
+  @@unique([characterId, batchHash])
+  @@index([characterId, status, batchId])
+  @@index([characterId, startNonce, endNonce])
+}
+
+model SettlementSubmissionAttempt {
+  id                       String                            @id @default(cuid())
+  settlementBatchId        String
+  attemptNumber            Int
+  status                   SettlementSubmissionAttemptStatus @default(STARTED)
+  messageSha256Hex         String?
+  signedTransactionSha256Hex String?
+  transactionSignature     String?
+  rpcError                 String?
+  createdAt                DateTime                          @default(now())
+  updatedAt                DateTime                          @updatedAt
+  submittedAt              DateTime?
+  resolvedAt               DateTime?
+  settlementBatch          SettlementBatch                   @relation(fields: [settlementBatchId], references: [id], onDelete: Cascade)
+
+  @@unique([settlementBatchId, attemptNumber])
+  @@index([settlementBatchId, status, attemptNumber])
 }

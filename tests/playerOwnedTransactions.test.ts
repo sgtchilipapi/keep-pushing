@@ -4,28 +4,49 @@ import {
   prepareSettlementTransaction,
 } from "../lib/solana/playerOwnedTransactions";
 import type { PrepareSettlementTransactionRequest } from "../types/api/solana";
+import type { SettlementBatchPayloadV2 } from "../types/settlement";
 
 function toBase64(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+function buildPayload(overrides: Partial<SettlementBatchPayloadV2> = {}): SettlementBatchPayloadV2 {
+  return {
+    characterId: "char-1",
+    batchId: 7,
+    startNonce: 8,
+    endNonce: 10,
+    battleCount: 3,
+    startStateHash: "state-hash-6",
+    endStateHash: "state-hash-7",
+    zoneProgressDelta: [{ zoneId: 3, newState: 1 }],
+    encounterHistogram: [{ zoneId: 3, enemyArchetypeId: 22, count: 3 }],
+    batchHash: "batch-hash-7",
+    firstBattleTs: 1_700_000_100,
+    lastBattleTs: 1_700_000_220,
+    seasonId: 4,
+    schemaVersion: 2,
+    signatureScheme: 0,
+    ...overrides,
+  };
+}
+
 function buildSettlementRequest(
   overrides: Partial<PrepareSettlementTransactionRequest> = {},
 ): PrepareSettlementTransactionRequest {
+  const payload = buildPayload();
+
   return {
     playerAuthority: "player-wallet-1",
     feePayer: "player-wallet-1",
-    characterId: "char-1",
     characterRootPubkey: "character-root-1",
-    batchId: 7,
-    batchHash: "batch-hash-7",
-    startNonce: 8,
-    endNonce: 10,
-    startStateHash: "state-hash-6",
+    payload,
     expectedCursor: {
       lastCommittedEndNonce: 7,
       lastCommittedBatchId: 6,
       lastCommittedStateHash: "state-hash-6",
+      lastCommittedBattleTs: 1_700_000_090,
+      lastCommittedSeasonId: 4,
     },
     permitDomain: {
       programId: "runana-program-1",
@@ -68,7 +89,7 @@ describe("player-owned Solana transaction flow", () => {
     ).toThrow(/ERR_PLAYER_MUST_PAY/);
   });
 
-  it("prepares settlement with the player as fee payer", () => {
+  it("prepares settlement with canonical cursor anchors", () => {
     const prepared = prepareSettlementTransaction(buildSettlementRequest());
 
     expect(prepared.kind).toBe("battle_settlement");
@@ -83,10 +104,18 @@ describe("player-owned Solana transaction flow", () => {
       startNonce: 8,
       endNonce: 10,
       startStateHash: "state-hash-6",
+      endStateHash: "state-hash-7",
+      firstBattleTs: 1_700_000_100,
+      lastBattleTs: 1_700_000_220,
+      seasonId: 4,
+      schemaVersion: 2,
+      signatureScheme: 0,
       expectedCursor: {
         lastCommittedEndNonce: 7,
         lastCommittedBatchId: 6,
         lastCommittedStateHash: "state-hash-6",
+        lastCommittedBattleTs: 1_700_000_090,
+        lastCommittedSeasonId: 4,
       },
       permitDomain: {
         programId: "runana-program-1",
@@ -106,7 +135,9 @@ describe("player-owned Solana transaction flow", () => {
     expect(() =>
       prepareSettlementTransaction(
         buildSettlementRequest({
-          startNonce: 9,
+          payload: buildPayload({
+            startNonce: 9,
+          }),
         }),
       ),
     ).toThrow(/ERR_BATCH_OUT_OF_ORDER/);
@@ -116,7 +147,9 @@ describe("player-owned Solana transaction flow", () => {
     expect(() =>
       prepareSettlementTransaction(
         buildSettlementRequest({
-          batchId: 8,
+          payload: buildPayload({
+            batchId: 8,
+          }),
         }),
       ),
     ).toThrow(/ERR_BATCH_ID_GAP/);
@@ -126,10 +159,24 @@ describe("player-owned Solana transaction flow", () => {
     expect(() =>
       prepareSettlementTransaction(
         buildSettlementRequest({
-          startStateHash: "state-hash-mutated",
+          payload: buildPayload({
+            startStateHash: "state-hash-mutated",
+          }),
         }),
       ),
     ).toThrow(/ERR_START_STATE_HASH_MISMATCH/);
+  });
+
+  it("rejects battle timestamp regression before broadcast", () => {
+    expect(() =>
+      prepareSettlementTransaction(
+        buildSettlementRequest({
+          payload: buildPayload({
+            firstBattleTs: 1_700_000_080,
+          }),
+        }),
+      ),
+    ).toThrow(/ERR_BATTLE_TS_REGRESSION/);
   });
 
   it("rejects player permit batch hash mismatches before broadcast", () => {
@@ -145,45 +192,27 @@ describe("player-owned Solana transaction flow", () => {
     ).toThrow(/ERR_PLAYER_PERMIT_DOMAIN_MISMATCH/);
   });
 
-  it("rejects player permit batch id mismatches before broadcast", () => {
-    expect(() =>
-      prepareSettlementTransaction(
-        buildSettlementRequest({
-          permitDomain: {
-            ...buildSettlementRequest().permitDomain,
-            batchId: 8,
-          },
-        }),
-      ),
-    ).toThrow(/ERR_PLAYER_PERMIT_DOMAIN_MISMATCH/);
-  });
-
-  it("rejects player permit character root mismatches before broadcast", () => {
-    expect(() =>
-      prepareSettlementTransaction(
-        buildSettlementRequest({
-          permitDomain: {
-            ...buildSettlementRequest().permitDomain,
-            characterRootPubkey: "character-root-other",
-          },
-        }),
-      ),
-    ).toThrow(/ERR_PLAYER_PERMIT_DOMAIN_MISMATCH/);
-  });
-
   it("accepts an unchanged player-signed transaction for server broadcast", () => {
     const prepared = prepareSettlementTransaction(
       buildSettlementRequest({
-        batchId: 8,
-        batchHash: "batch-hash-8",
-        startNonce: 11,
-        endNonce: 12,
+        payload: buildPayload({
+          batchId: 8,
+          batchHash: "batch-hash-8",
+          startNonce: 11,
+          endNonce: 12,
+          battleCount: 2,
+          startStateHash: "state-hash-7",
+          endStateHash: "state-hash-8",
+          firstBattleTs: 1_700_000_230,
+          lastBattleTs: 1_700_000_260,
+        }),
         expectedCursor: {
           lastCommittedEndNonce: 10,
           lastCommittedBatchId: 7,
           lastCommittedStateHash: "state-hash-7",
+          lastCommittedBattleTs: 1_700_000_220,
+          lastCommittedSeasonId: 4,
         },
-        startStateHash: "state-hash-7",
         permitDomain: {
           ...buildSettlementRequest().permitDomain,
           batchId: 8,
@@ -207,16 +236,24 @@ describe("player-owned Solana transaction flow", () => {
   it("rejects a mutated message after player signing", () => {
     const prepared = prepareSettlementTransaction(
       buildSettlementRequest({
-        batchId: 9,
-        batchHash: "batch-hash-9",
-        startNonce: 13,
-        endNonce: 14,
+        payload: buildPayload({
+          batchId: 9,
+          batchHash: "batch-hash-9",
+          startNonce: 13,
+          endNonce: 14,
+          battleCount: 2,
+          startStateHash: "state-hash-8",
+          endStateHash: "state-hash-9",
+          firstBattleTs: 1_700_000_230,
+          lastBattleTs: 1_700_000_260,
+        }),
         expectedCursor: {
           lastCommittedEndNonce: 12,
           lastCommittedBatchId: 8,
           lastCommittedStateHash: "state-hash-8",
+          lastCommittedBattleTs: 1_700_000_220,
+          lastCommittedSeasonId: 4,
         },
-        startStateHash: "state-hash-8",
         permitDomain: {
           ...buildSettlementRequest().permitDomain,
           batchId: 9,

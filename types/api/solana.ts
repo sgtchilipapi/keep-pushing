@@ -1,3 +1,9 @@
+import type {
+  SettlementBatchPayloadV2,
+  SettlementSchemaVersion,
+  SettlementSignatureScheme,
+} from "../settlement";
+
 export type PlayerOwnedTransactionKind =
   | "character_create"
   | "battle_settlement"
@@ -7,6 +13,8 @@ export interface SettlementCursorExpectation {
   lastCommittedEndNonce: number;
   lastCommittedBatchId: number;
   lastCommittedStateHash: string;
+  lastCommittedBattleTs: number;
+  lastCommittedSeasonId: number;
 }
 
 export interface SettlementPermitDomain {
@@ -16,7 +24,7 @@ export interface SettlementPermitDomain {
   characterRootPubkey: string;
   batchHash: string;
   batchId: number;
-  signatureScheme: number;
+  signatureScheme: SettlementSignatureScheme;
 }
 
 export interface SettlementRelayMetadata {
@@ -28,6 +36,12 @@ export interface SettlementRelayMetadata {
   startNonce: number;
   endNonce: number;
   startStateHash: string;
+  endStateHash: string;
+  firstBattleTs: number;
+  lastBattleTs: number;
+  seasonId: number;
+  schemaVersion: SettlementSchemaVersion;
+  signatureScheme: SettlementSignatureScheme;
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
   continuityKey: string;
@@ -65,13 +79,8 @@ export interface PrepareCharacterCreationTransactionRequest {
 export interface PrepareSettlementTransactionRequest {
   playerAuthority: string;
   feePayer: string;
-  characterId: string;
   characterRootPubkey: string;
-  batchId: number;
-  batchHash: string;
-  startNonce: number;
-  endNonce: number;
-  startStateHash: string;
+  payload: SettlementBatchPayloadV2;
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
   relayRequestId?: string;

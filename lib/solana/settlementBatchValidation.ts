@@ -1,11 +1,11 @@
 import {
-  ApplyBattleSettlementBatchV1Payload,
-  SettlementValidationContext,
   SettlementApplyResult,
+  SettlementBatchPayloadV2,
+  SettlementValidationContext,
   ZoneState,
 } from "../../types/settlement";
 
-const XP_PER_LEVEL = 100;
+const THROUGHPUT_CAP_PER_MINUTE = 20;
 
 function assertCondition(condition: boolean, code: string, message: string): asserts condition {
   if (!condition) {
@@ -13,68 +13,81 @@ function assertCondition(condition: boolean, code: string, message: string): ass
   }
 }
 
-function validateZoneTransition(current: ZoneState, next: ZoneState, allowDirectLockedToCleared: boolean): void {
-  if (next < current) {
-    throw new Error("ERR_ZONE_STATE_DOWNGRADE: zone state cannot downgrade");
-  }
-
-  if (current === 0 && next === 2 && !allowDirectLockedToCleared) {
-    throw new Error("ERR_ZONE_INVALID_TRANSITION: locked->cleared is forbidden by policy");
-  }
+function zoneStateAfterBatch(
+  zoneId: number,
+  zoneStates: Map<number, ZoneState>,
+  payload: SettlementBatchPayloadV2,
+): ZoneState {
+  const current = zoneStates.get(zoneId) ?? 0;
+  const delta = payload.zoneProgressDelta.find((entry) => entry.zoneId === zoneId);
+  return delta ? Math.max(current, delta.newState) as ZoneState : current;
 }
 
-function recomputeWorldSummary(zoneStates: Map<number, ZoneState>): {
-  highestMainZoneUnlocked: number;
-  highestMainZoneCleared: number;
-} {
-  let highestMainZoneUnlocked = 0;
-  let highestMainZoneCleared = 0;
+function deriveExpDelta(
+  payload: SettlementBatchPayloadV2,
+  context: SettlementValidationContext,
+): number {
+  let totalExp = 0;
 
-  for (const [zoneId, state] of zoneStates.entries()) {
-    if (state >= 1) {
-      highestMainZoneUnlocked = Math.max(highestMainZoneUnlocked, zoneId);
-    }
-    if (state >= 2) {
-      highestMainZoneCleared = Math.max(highestMainZoneCleared, zoneId);
-    }
+  for (const entry of payload.encounterHistogram) {
+    const zoneRegistry = context.zoneRegistry.get(entry.zoneId);
+    assertCondition(Boolean(zoneRegistry), "ERR_UNKNOWN_ZONE", "histogram references unknown zone");
+    assertCondition(
+      (zoneRegistry?.expMultiplierDen ?? 0) > 0,
+      "ERR_INVALID_ZONE_CONFIG",
+      "zone exp multiplier denominator must be > 0",
+    );
+
+    const enemyArchetype = context.enemyArchetypes.get(entry.enemyArchetypeId);
+    assertCondition(
+      Boolean(enemyArchetype),
+      "ERR_UNKNOWN_ENEMY_ARCHETYPE",
+      "enemy archetype registry entry missing",
+    );
+
+    const weightedExp = Math.floor(
+      (entry.count *
+        (enemyArchetype?.expRewardBase ?? 0) *
+        (zoneRegistry?.expMultiplierNum ?? 0)) /
+        (zoneRegistry?.expMultiplierDen ?? 1),
+    );
+
+    totalExp += weightedExp;
   }
 
-  return { highestMainZoneUnlocked, highestMainZoneCleared };
+  return totalExp;
 }
 
 export function applyBattleSettlementBatchV1(
-  payload: ApplyBattleSettlementBatchV1Payload,
+  payload: SettlementBatchPayloadV2,
   context: SettlementValidationContext,
 ): SettlementApplyResult {
   const {
     programConfig,
     currentSlot,
+    currentUnixTimestamp,
     playerAuthority,
     characterRoot,
     characterStats,
     characterWorldProgress,
     zoneStates,
-    loadout,
     cursor,
     serverSigner,
+    seasonPolicy,
     zoneRegistry,
     zoneEnemySet,
     enemyArchetypes,
   } = context;
 
-  // Fee payer selection is handled when the transaction is prepared, not in settlement validation.
-  // 1) Derivation and ownership (approximated in off-chain TS model).
   assertCondition(characterRoot.authority === playerAuthority, "ERR_UNAUTHORIZED", "player is not character authority");
   assertCondition(characterRoot.characterId === payload.characterId, "ERR_CHARACTER_MISMATCH", "character id mismatch");
 
-  // 2) Program config checks.
   assertCondition(!programConfig.settlementPaused, "ERR_SETTLEMENT_PAUSED", "settlement is paused");
   assertCondition(
-    programConfig.trustedServerSigners.includes(serverSigner),
+    programConfig.trustedServerSigner === serverSigner,
     "ERR_UNTRUSTED_SERVER_SIGNER",
     "server signer is not trusted",
   );
-  assertCondition(payload.attestationExpirySlot >= currentSlot, "ERR_ATTESTATION_EXPIRED", "attestation is expired");
   assertCondition(
     payload.battleCount <= programConfig.maxBattlesPerBatch,
     "ERR_BATCH_TOO_LARGE",
@@ -85,8 +98,9 @@ export function applyBattleSettlementBatchV1(
     "ERR_HISTOGRAM_TOO_LARGE",
     "histogram entry count exceeds max policy",
   );
+  assertCondition(payload.schemaVersion === 2, "ERR_SCHEMA_VERSION", "schema version must be canonical V2");
+  assertCondition(payload.signatureScheme === 0, "ERR_SIGNATURE_SCHEME", "signature scheme must be ed25519 domain 0");
 
-  // 3) Batch continuity checks.
   assertCondition(
     payload.startNonce === cursor.lastCommittedEndNonce + 1,
     "ERR_NONCE_GAP",
@@ -105,7 +119,6 @@ export function applyBattleSettlementBatchV1(
     "battle count must equal nonce range",
   );
 
-  // 4) Histogram integrity checks.
   const keySet = new Set<string>();
   let histogramBattleTotal = 0;
 
@@ -127,24 +140,89 @@ export function applyBattleSettlementBatchV1(
 
   const zoneDeltaMap = new Map<number, ZoneState>();
   for (const delta of payload.zoneProgressDelta) {
-    assertCondition(zoneRegistry.has(delta.zoneId), "ERR_UNKNOWN_ZONE_DELTA", "zone delta references unknown zone");
+    assertCondition(
+      delta.newState === 1 || delta.newState === 2,
+      "ERR_INVALID_ZONE_DELTA",
+      "zone progress delta state must be unlocked or cleared",
+    );
     assertCondition(!zoneDeltaMap.has(delta.zoneId), "ERR_DUPLICATE_ZONE_DELTA", "duplicate zone progress delta zone id");
     zoneDeltaMap.set(delta.zoneId, delta.newState);
+
+    const currentState = zoneStates.get(delta.zoneId) ?? 0;
+    const isAllowedTransition = (
+      currentState === 0 && delta.newState === 1
+    ) || (
+      currentState === 1 && (delta.newState === 1 || delta.newState === 2)
+    ) || (
+      currentState === 2 && delta.newState === 2
+    );
+
+    assertCondition(
+      isAllowedTransition,
+      "ERR_INVALID_ZONE_DELTA",
+      "zone progress delta is not a legal monotonic transition",
+    );
   }
 
-  // 5-7) World eligibility, zone/enemy legality, reward bounds.
-  let maxAllowedExp = 0;
+  assertCondition(
+    seasonPolicy.seasonId === payload.seasonId,
+    "ERR_SEASON_POLICY_MISMATCH",
+    "season policy must match payload season id",
+  );
+  assertCondition(
+    seasonPolicy.seasonStartTs < seasonPolicy.seasonEndTs &&
+      seasonPolicy.seasonEndTs <= seasonPolicy.commitGraceEndTs,
+    "ERR_INVALID_SEASON_POLICY",
+    "season policy ordering is invalid",
+  );
+  assertCondition(
+    payload.firstBattleTs >= characterRoot.characterCreationTs,
+    "ERR_PRE_CHARACTER_TIMESTAMP",
+    "first battle timestamp predates character creation",
+  );
+  assertCondition(
+    payload.firstBattleTs >= cursor.lastCommittedBattleTs,
+    "ERR_BATTLE_TS_REGRESSION",
+    "first battle timestamp regresses behind the cursor",
+  );
+  assertCondition(
+    payload.lastBattleTs >= payload.firstBattleTs,
+    "ERR_BATTLE_TS_ORDER",
+    "last battle timestamp must be >= first battle timestamp",
+  );
+  assertCondition(
+    payload.seasonId >= cursor.lastCommittedSeasonId,
+    "ERR_SEASON_REGRESSION",
+    "season id regresses behind the cursor",
+  );
+  assertCondition(
+    payload.firstBattleTs >= seasonPolicy.seasonStartTs,
+    "ERR_SEASON_WINDOW_CLOSED",
+    "first battle timestamp falls before season start",
+  );
+  assertCondition(
+    payload.lastBattleTs <= seasonPolicy.seasonEndTs,
+    "ERR_SEASON_WINDOW_CLOSED",
+    "last battle timestamp falls after season end",
+  );
+  assertCondition(
+    currentUnixTimestamp <= seasonPolicy.commitGraceEndTs,
+    "ERR_SEASON_WINDOW_CLOSED",
+    "current time is beyond season commit grace",
+  );
+
+  const intervalSeconds = payload.lastBattleTs - payload.firstBattleTs;
+  const allowedBattles = Math.floor((intervalSeconds * THROUGHPUT_CAP_PER_MINUTE) / 60) + 1;
+  assertCondition(
+    payload.battleCount <= allowedBattles,
+    "ERR_THROUGHPUT_EXCEEDED",
+    "battle count exceeds throughput cap for the claimed interval",
+  );
+
   for (const entry of payload.encounterHistogram) {
-    const zoneMeta = zoneRegistry.get(entry.zoneId);
-    assertCondition(Boolean(zoneMeta), "ERR_UNKNOWN_ZONE", "histogram references unknown zone");
-
-    const currentState = zoneStates.get(entry.zoneId) ?? 0;
-    const deltaState = zoneDeltaMap.get(entry.zoneId);
-    const projectedState = deltaState ?? currentState;
-
-    // referenced zone must be currently unlocked, or become unlocked/cleared in same batch.
+    const effectiveZoneState = zoneStateAfterBatch(entry.zoneId, zoneStates, payload);
     assertCondition(
-      projectedState >= 1,
+      effectiveZoneState >= 1,
       "ERR_LOCKED_ZONE_REFERENCE",
       "batch references zone that is not unlocked for this character",
     );
@@ -156,63 +234,44 @@ export function applyBattleSettlementBatchV1(
       "ERR_ILLEGAL_ZONE_ENEMY_PAIR",
       "enemy archetype is not legal for referenced zone",
     );
-
-    const enemy = enemyArchetypes.get(entry.enemyArchetypeId);
-    assertCondition(Boolean(enemy), "ERR_UNKNOWN_ENEMY_ARCHETYPE", "enemy archetype registry entry missing");
-    maxAllowedExp += entry.count * (enemy?.expCapPerEncounter ?? 0);
-  }
-
-  assertCondition(payload.expDelta <= maxAllowedExp, "ERR_EXP_OVER_CAP", "exp delta exceeds registry-derived cap");
-
-  // 8) Optional loadout consistency.
-  if (payload.optionalLoadoutRevision !== undefined) {
-    assertCondition(Boolean(loadout), "ERR_LOADOUT_REQUIRED", "loadout account required when loadout revision is provided");
+    assertCondition(zoneRegistry.has(entry.zoneId), "ERR_UNKNOWN_ZONE", "zone registry entry missing");
     assertCondition(
-      loadout?.loadoutRevision === payload.optionalLoadoutRevision,
-      "ERR_LOADOUT_REVISION_MISMATCH",
-      "loadout revision mismatch",
+      enemyArchetypes.has(entry.enemyArchetypeId),
+      "ERR_UNKNOWN_ENEMY_ARCHETYPE",
+      "enemy archetype registry entry missing",
     );
   }
 
-  // 9) Apply progression transitions.
   const nextZoneStates = new Map(zoneStates);
   for (const [zoneId, nextState] of zoneDeltaMap.entries()) {
-    const zoneMeta = zoneRegistry.get(zoneId);
-    assertCondition(Boolean(zoneMeta), "ERR_UNKNOWN_ZONE_DELTA", "zone delta references unknown zone");
-
-    const currentState = nextZoneStates.get(zoneId) ?? 0;
-    validateZoneTransition(currentState, nextState, Boolean(zoneMeta?.allowDirectLockedToCleared));
-    nextZoneStates.set(zoneId, nextState);
+    const priorState = nextZoneStates.get(zoneId) ?? 0;
+    if (nextState > priorState) {
+      nextZoneStates.set(zoneId, nextState);
+    }
   }
 
-  let nextExp = characterRoot.exp + payload.expDelta;
-  let nextLevel = characterRoot.level;
-  let leveledUp = false;
-
-  while (nextExp >= XP_PER_LEVEL) {
-    nextExp -= XP_PER_LEVEL;
-    nextLevel += 1;
-    leveledUp = true;
+  let highestUnlockedZoneId = characterWorldProgress.highestUnlockedZoneId;
+  let highestClearedZoneId = characterWorldProgress.highestClearedZoneId;
+  for (const [zoneId, state] of nextZoneStates.entries()) {
+    if (state >= 1) {
+      highestUnlockedZoneId = Math.max(highestUnlockedZoneId, zoneId);
+    }
+    if (state >= 2) {
+      highestClearedZoneId = Math.max(highestClearedZoneId, zoneId);
+    }
   }
 
-  const recomputedSummary = recomputeWorldSummary(nextZoneStates);
+  const expDelta = deriveExpDelta(payload, context);
 
-  // 10) Persist batch cursor.
   return {
-    characterRoot: {
-      ...characterRoot,
-      level: nextLevel,
-      exp: nextExp,
-    },
+    characterRoot,
     characterStats: {
       ...characterStats,
-      lastRecalcSlot: leveledUp ? currentSlot : characterStats.lastRecalcSlot,
+      totalExp: characterStats.totalExp + expDelta,
     },
     characterWorldProgress: {
-      ...characterWorldProgress,
-      highestMainZoneUnlocked: recomputedSummary.highestMainZoneUnlocked,
-      highestMainZoneCleared: recomputedSummary.highestMainZoneCleared,
-      updatedAtSlot: currentSlot,
+      highestUnlockedZoneId,
+      highestClearedZoneId,
     },
     zoneStates: nextZoneStates,
     cursor: {
@@ -220,6 +279,8 @@ export function applyBattleSettlementBatchV1(
       lastCommittedEndNonce: payload.endNonce,
       lastCommittedStateHash: payload.endStateHash,
       lastCommittedBatchId: payload.batchId,
+      lastCommittedBattleTs: payload.lastBattleTs,
+      lastCommittedSeasonId: payload.seasonId,
       updatedAtSlot: currentSlot,
     },
   };
