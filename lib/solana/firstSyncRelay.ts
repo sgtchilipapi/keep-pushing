@@ -25,6 +25,7 @@ import {
   type PrepareFirstSyncRebaseInput,
   prepareFirstSyncRebase,
 } from './firstSyncRebasing';
+import { prepareFirstSyncCharacterAnchor } from './firstSyncCharacterAnchor';
 import {
   buildPreparedVersionedTransaction,
   deserializeVersionedTransactionBase64,
@@ -45,6 +46,7 @@ import {
   buildApplyBattleSettlementBatchV1Instruction,
   buildCanonicalSettlementMessages,
 } from './runanaSettlementInstructions';
+import { settlementBatchRecordToPayload } from './settlementSealing';
 import {
   createRunanaConnection,
   loadRunanaSettlementLookupTables,
@@ -53,6 +55,7 @@ import {
   resolveRunanaProgramId,
 } from './runanaClient';
 import {
+  computeGenesisStateHashHex,
   deriveCharacterBatchCursorPda,
   deriveProgramConfigPda,
   RUNANA_CLUSTER_ID_LOCALNET,
@@ -76,6 +79,7 @@ export interface FirstSyncRelayDependencies {
     deps?: Parameters<typeof prepareFirstSyncRebase>[1],
   ) => ReturnType<typeof prepareFirstSyncRebase>;
   buildPreparedTransaction?: typeof buildPreparedVersionedTransaction;
+  prismaClient?: Pick<typeof prisma, 'character' | 'settlementBatch'>;
 }
 
 type FirstSyncPrismaLike = {
@@ -267,29 +271,88 @@ export async function prepareSolanaFirstSync(
   const commitment = deps.commitment ?? resolveRunanaCommitment();
   const programId = deps.programId ?? resolveRunanaProgramId();
   const clusterId = deps.clusterId ?? RUNANA_CLUSTER_ID_LOCALNET;
+  const prismaClient = deps.prismaClient ?? prisma;
   const prepareRebase = deps.prepareFirstSyncRebase ?? prepareFirstSyncRebase;
-  const rebased = await prepareRebase({
-    characterId: input.characterId,
-    authority: authority.toBase58(),
-    feePayer: feePayer.toBase58(),
-  });
-  const firstDraft = rebased.batchDrafts[0];
+  const existingBatch = await prismaClient.settlementBatch.findNextUnconfirmedForCharacter(
+    input.characterId,
+  );
 
-  if (firstDraft === undefined) {
-    throw new Error('ERR_NO_FIRST_SYNC_BATCH: first-sync rebasing produced no settlement batches');
+  let payload: FirstSyncPreparationBase['payload'];
+  let expectedCursor: SettlementCursorExpectation;
+  let characterRoot: PublicKey;
+  let chainCharacterIdHex: string;
+  let characterRootPubkey: string;
+  let characterCreationTs: number;
+  let seasonIdAtCreation: number;
+  let initialUnlockedZoneId: number;
+  let localCharacterId: string;
+
+  if (existingBatch !== null) {
+    const anchor = await prepareFirstSyncCharacterAnchor({
+      characterId: input.characterId,
+      authority: authority.toBase58(),
+      feePayer: feePayer.toBase58(),
+    });
+    const chainState = await prismaClient.character.findChainState(input.characterId);
+    if (
+      chainState === null ||
+      chainState.chainCharacterIdHex === null ||
+      chainState.characterRootPubkey === null ||
+      chainState.chainCreationTs === null ||
+      chainState.chainCreationSeasonId === null
+    ) {
+      throw new Error(
+        'ERR_CHARACTER_CHAIN_IDENTITY_MISSING: character is missing reserved first-sync identity fields',
+      );
+    }
+
+    chainCharacterIdHex = chainState.chainCharacterIdHex;
+    characterRootPubkey = chainState.characterRootPubkey;
+    characterRoot = new PublicKey(characterRootPubkey);
+    characterCreationTs = chainState.chainCreationTs;
+    seasonIdAtCreation = chainState.chainCreationSeasonId;
+    localCharacterId = input.characterId;
+    payload = settlementBatchRecordToPayload(existingBatch, chainCharacterIdHex);
+    expectedCursor = {
+      lastCommittedEndNonce: 0,
+      lastCommittedBatchId: 0,
+      lastCommittedStateHash: computeGenesisStateHashHex(characterRoot, chainCharacterIdHex),
+      lastCommittedBattleTs: characterCreationTs,
+      lastCommittedSeasonId: seasonIdAtCreation,
+    };
+    initialUnlockedZoneId = anchor.initialUnlockedZoneId;
+  } else {
+    const rebased = await prepareRebase({
+      characterId: input.characterId,
+      authority: authority.toBase58(),
+      feePayer: feePayer.toBase58(),
+    });
+    const firstDraft = rebased.batchDrafts[0];
+
+    if (firstDraft === undefined) {
+      throw new Error('ERR_NO_FIRST_SYNC_BATCH: first-sync rebasing produced no settlement batches');
+    }
+
+    payload = firstDraft.payload;
+    characterRootPubkey = rebased.reservedIdentity.characterRootPubkey;
+    characterRoot = new PublicKey(characterRootPubkey);
+    chainCharacterIdHex = rebased.reservedIdentity.chainCharacterIdHex;
+    expectedCursor = expectedCursorFromGenesis({ genesisCursor: rebased.genesisCursor });
+    characterCreationTs = rebased.anchor.characterCreationTs;
+    seasonIdAtCreation = rebased.anchor.seasonIdAtCreation;
+    initialUnlockedZoneId = rebased.anchor.initialUnlockedZoneId;
+    localCharacterId = rebased.anchor.characterId;
   }
 
-  const characterRoot = new PublicKey(rebased.reservedIdentity.characterRootPubkey);
-  const expectedCursor = expectedCursorFromGenesis({ genesisCursor: rebased.genesisCursor });
   const permitDomain = permitDomainFromDraft({
     programId,
     clusterId,
     authority: authority.toBase58(),
-    characterRootPubkey: rebased.reservedIdentity.characterRootPubkey,
-    payload: firstDraft.payload,
+    characterRootPubkey,
+    payload,
   });
   const canonicalMessages = buildCanonicalSettlementMessages({
-    payload: firstDraft.payload,
+    payload,
     playerAuthority: authority,
     characterRoot,
     programId,
@@ -300,7 +363,7 @@ export async function prepareSolanaFirstSync(
   if (!input.playerAuthorizationSignatureBase64) {
     return {
       phase: 'authorize',
-      payload: firstDraft.payload,
+      payload,
       expectedCursor,
       permitDomain,
       playerAuthorizationMessageBase64,
@@ -326,13 +389,13 @@ export async function prepareSolanaFirstSync(
     payer: feePayer,
     authority,
     programId,
-    characterIdHex: rebased.reservedIdentity.chainCharacterIdHex,
-    characterCreationTs: rebased.anchor.characterCreationTs,
-    seasonIdAtCreation: rebased.anchor.seasonIdAtCreation,
-    initialUnlockedZoneId: rebased.anchor.initialUnlockedZoneId,
+    characterIdHex: chainCharacterIdHex,
+    characterCreationTs,
+    seasonIdAtCreation,
+    initialUnlockedZoneId,
   });
   const settlementInstructionAccounts = buildCanonicalSettlementInstructionAccounts({
-    payload: firstDraft.payload,
+    payload,
     playerAuthority: authority,
     characterRootPubkey: characterRoot,
     programId,
@@ -347,7 +410,7 @@ export async function prepareSolanaFirstSync(
     signature: playerAuthorizationSignature,
   });
   const settlementInstruction = buildApplyBattleSettlementBatchV1Instruction({
-    payload: firstDraft.payload,
+    payload,
     instructionAccounts: settlementInstructionAccounts,
     programId,
   });
@@ -389,18 +452,18 @@ export async function prepareSolanaFirstSync(
     serializedMessageBase64: preparedVersioned.serializedMessageBase64,
     serializedTransactionBase64: preparedVersioned.serializedTransactionBase64,
     characterCreation: {
-      localCharacterId: rebased.anchor.characterId,
-      chainCharacterIdHex: rebased.reservedIdentity.chainCharacterIdHex,
-      characterRootPubkey: rebased.reservedIdentity.characterRootPubkey,
-      characterCreationTs: rebased.anchor.characterCreationTs,
-      seasonIdAtCreation: rebased.anchor.seasonIdAtCreation,
-      initialUnlockedZoneId: rebased.anchor.initialUnlockedZoneId,
+      localCharacterId,
+      chainCharacterIdHex,
+      characterRootPubkey,
+      characterCreationTs,
+      seasonIdAtCreation,
+      initialUnlockedZoneId,
       recentBlockhash: preparedVersioned.recentBlockhash,
       lastValidBlockHeight: preparedVersioned.lastValidBlockHeight,
     },
     settlement: {
-      characterRootPubkey: rebased.reservedIdentity.characterRootPubkey,
-      payload: firstDraft.payload,
+      characterRootPubkey,
+      payload,
       expectedCursor,
       permitDomain,
     },
@@ -408,7 +471,7 @@ export async function prepareSolanaFirstSync(
 
   return {
     phase: 'sign_transaction',
-    payload: firstDraft.payload,
+    payload,
     expectedCursor,
     permitDomain,
     playerAuthorizationMessageBase64,

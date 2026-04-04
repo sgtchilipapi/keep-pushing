@@ -9,7 +9,7 @@ Current-program-over-doc precedence:
 
 ## Status
 
-Status: In progress. Steps 1-7 are implemented and committed. Steps 8-9 remain.
+Status: In progress. Steps 1-8 are implemented and committed. Step 9 remains.
 
 ## Summary
 
@@ -264,7 +264,7 @@ This matters because the current program validates against the `character_creati
 
 7. Completed. Reuse the existing settlement lifecycle after the first sync instead of inventing a parallel pipeline. Once batch 1 confirms, reconcile the on-chain cursor back into the local character row, mark the character chain-confirmed, and transition any remaining rebased backlog batches into the normal sealing and relay flow.
 
-8. Tighten retry and idempotency behavior before calling the feature done. Repeated first-sync prepare calls must reuse the same reserved identity and rebased batch metadata where appropriate, failed submissions must not duplicate nonce assignment or batch creation, and archived stale backlog must remain excluded consistently.
+8. Completed. Tighten retry and idempotency behavior before calling the feature done. Repeated first-sync prepare calls must reuse the same reserved identity and rebased batch metadata where appropriate, failed submissions must not duplicate nonce assignment or batch creation, and archived stale backlog must remain excluded consistently.
 
 9. Finish with end-to-end verification in the same order the feature is meant to operate. Cover local-first encounter execution, provisional progression updates, first-sync preparation, atomic create-plus-settle submission, cursor reconciliation, and continued settlement of later rebased backlog through the existing pipeline.
 

@@ -10,6 +10,10 @@ jest.mock('../lib/solana/firstSyncRebasing', () => ({
   prepareFirstSyncRebase: jest.fn(),
 }));
 
+jest.mock('../lib/solana/firstSyncCharacterAnchor', () => ({
+  prepareFirstSyncCharacterAnchor: jest.fn(),
+}));
+
 const prismaMock = {
   character: {
     findChainState: jest.fn(),
@@ -17,6 +21,7 @@ const prismaMock = {
     updateCursorSnapshot: jest.fn(),
   },
   settlementBatch: {
+    findNextUnconfirmedForCharacter: jest.fn(),
     findByCharacterAndBatchId: jest.fn(),
     createSealed: jest.fn(),
     updateStatus: jest.fn(),
@@ -47,6 +52,7 @@ import {
   prepareSolanaFirstSync,
   submitSolanaFirstSync,
 } from '../lib/solana/firstSyncRelay';
+import { prepareFirstSyncCharacterAnchor } from '../lib/solana/firstSyncCharacterAnchor';
 import { prepareFirstSyncRebase } from '../lib/solana/firstSyncRebasing';
 import {
   accountCharacterIdHex,
@@ -59,6 +65,7 @@ import { prepareFirstSyncTransaction } from '../lib/solana/playerOwnedTransactio
 import { RUNANA_PROGRAM_ID, computeAnchorInstructionDiscriminator } from '../lib/solana/runanaProgram';
 
 const prepareFirstSyncRebaseMock = jest.mocked(prepareFirstSyncRebase);
+const prepareFirstSyncCharacterAnchorMock = jest.mocked(prepareFirstSyncCharacterAnchor);
 const fetchProgramConfigAccountMock = jest.mocked(fetchProgramConfigAccount);
 const fetchCharacterRootAccountMock = jest.mocked(fetchCharacterRootAccount);
 const fetchCharacterSettlementBatchCursorAccountMock = jest.mocked(
@@ -163,6 +170,15 @@ describe('firstSyncRelay', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     accountStateHashHexMock.mockImplementation((value) => Buffer.from(value).toString('hex'));
+    prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(null);
+    prepareFirstSyncCharacterAnchorMock.mockResolvedValue({
+      characterId: 'character-1',
+      authority: '',
+      feePayer: '',
+      characterCreationTs: 1_700_000_000,
+      seasonIdAtCreation: 4,
+      initialUnlockedZoneId: 1,
+    });
   });
 
   it('returns the player authorization message before transaction assembly', async () => {
@@ -258,6 +274,48 @@ describe('firstSyncRelay', () => {
     expect(result.preparedTransaction.kind).toBe('player_owned_instruction');
     expect(result.preparedTransaction.characterCreationRelay?.localCharacterId).toBe('character-1');
     expect(result.preparedTransaction.settlementRelay?.batchId).toBe(1);
+  });
+
+  it('reuses an existing unconfirmed first-sync batch on prepare retries', async () => {
+    const authority = Keypair.generate().publicKey.toBase58();
+    const preparedRebase = buildPreparedRebase(authority);
+    const persistedBatch = buildPersistedBatch(preparedRebase);
+
+    prismaMock.character.findChainState.mockResolvedValue({
+      id: 'character-1',
+      playerAuthorityPubkey: authority,
+      chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
+      characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+      chainCreationStatus: 'FAILED',
+      chainCreationTxSignature: 'sig-1',
+      chainCreatedAt: null,
+      chainCreationTs: preparedRebase.anchor.characterCreationTs,
+      chainCreationSeasonId: preparedRebase.anchor.seasonIdAtCreation,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      lastReconciledAt: null,
+    });
+    prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(persistedBatch);
+
+    const result = await prepareSolanaFirstSync(
+      {
+        characterId: 'character-1',
+        authority,
+      },
+      {
+        prismaClient: prismaMock as never,
+        prepareFirstSyncRebase: prepareFirstSyncRebaseMock,
+      },
+    );
+
+    expect(result.phase).toBe('authorize');
+    expect(result.payload.batchHash).toBe(persistedBatch.batchHash);
+    expect(result.expectedCursor.lastCommittedStateHash).toHaveLength(64);
+    expect(prepareFirstSyncRebaseMock).not.toHaveBeenCalled();
+    expect(prepareFirstSyncCharacterAnchorMock).toHaveBeenCalledTimes(1);
   });
 
   it('submits the atomic first sync, confirms batch 1, and queues later batches for normal settlement', async () => {
