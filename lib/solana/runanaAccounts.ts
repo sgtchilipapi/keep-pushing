@@ -189,6 +189,14 @@ class AccountDataReader {
       throw new Error(`ERR_ACCOUNT_DATA_REMAINDER: ${accountName} decoder left unread bytes`);
     }
   }
+
+  assertRemainingZeroPadding(accountName: string): void {
+    const remainder = this.data.subarray(this.offset);
+    if (remainder.some((value) => value !== 0)) {
+      throw new Error(`ERR_ACCOUNT_DATA_REMAINDER: ${accountName} decoder found non-zero padding bytes`);
+    }
+    this.offset = this.data.length;
+  }
 }
 
 function decodeAccountBase(pubkey: PublicKey, accountInfo: AccountInfo<Buffer>): DecodedRunanaAccountBase {
@@ -383,7 +391,7 @@ export function decodeZoneEnemySetAccount(
     allowedEnemyArchetypeIds: reader.readVecU16(),
   };
 
-  reader.assertFullyRead('ZoneEnemySetAccount');
+  reader.assertRemainingZeroPadding('ZoneEnemySetAccount');
   return decoded;
 }
 
