@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { Commitment, Connection, Keypair, PublicKey } from '@solana/web3.js';
+import {
+  AddressLookupTableAccount,
+  Commitment,
+  Connection,
+  Keypair,
+  PublicKey,
+} from '@solana/web3.js';
 
 import { RUNANA_PROGRAM_ID } from './runanaProgram';
 
@@ -42,6 +48,43 @@ export function resolveRunanaProgramId(env: NodeJS.ProcessEnv = process.env): Pu
 
 export function createRunanaConnection(env: NodeJS.ProcessEnv = process.env): Connection {
   return new Connection(resolveRunanaRpcUrl(env), resolveRunanaCommitment(env));
+}
+
+export function resolveRunanaSettlementLookupTableAddresses(
+  env: NodeJS.ProcessEnv = process.env,
+): PublicKey[] {
+  const raw =
+    env.RUNANA_SETTLEMENT_LOOKUP_TABLES?.trim() ??
+    env.RUNANA_SETTLEMENT_LOOKUP_TABLE_ADDRESSES?.trim();
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => new PublicKey(value));
+}
+
+export async function loadRunanaSettlementLookupTables(
+  connection: Connection,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AddressLookupTableAccount[]> {
+  const addresses = resolveRunanaSettlementLookupTableAddresses(env);
+  const lookupTables: AddressLookupTableAccount[] = [];
+
+  for (const address of addresses) {
+    const result = await connection.getAddressLookupTable(address);
+    if (result.value === null) {
+      throw new Error(
+        `ERR_MISSING_SETTLEMENT_LOOKUP_TABLE: configured lookup table ${address.toBase58()} was not found`,
+      );
+    }
+    lookupTables.push(result.value);
+  }
+
+  return lookupTables;
 }
 
 export function loadKeypairFromFile(filePath: string): Keypair {

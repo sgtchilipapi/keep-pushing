@@ -583,6 +583,8 @@ Backend/server:
   - backend can recover interrupted settlement attempts without double-committing or skipping older backlog
 
 ### Step 9 — Add minimal API surface
+- Status:
+  - complete
 - Objective:
   - expose only the player flows needed for create and settlement relay
 - Files/modules affected:

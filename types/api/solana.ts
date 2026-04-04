@@ -116,3 +116,38 @@ export interface SubmitSignedPlayerOwnedTransactionRequest {
   signedMessageBase64: string;
   signedTransactionBase64: string;
 }
+
+export interface PrepareSettlementRouteRequest {
+  characterId: string;
+  authority: string;
+  feePayer?: string;
+  relayRequestId?: string;
+  playerAuthorizationSignatureBase64?: string;
+}
+
+export interface SettlementPreparationBase {
+  settlementBatchId: string;
+  payload: SettlementBatchPayloadV2;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  playerAuthorizationMessageBase64: string;
+}
+
+export interface SettlementAuthorizationPhase extends SettlementPreparationBase {
+  phase: "authorize";
+}
+
+export interface SettlementPreparedPhase extends SettlementPreparationBase {
+  phase: "sign_transaction";
+  playerAuthorizationSignatureBase64: string;
+  serverAttestationMessageBase64: string;
+  preparedTransaction: PreparedPlayerOwnedTransaction;
+}
+
+export type PrepareSettlementRouteResponse =
+  | SettlementAuthorizationPhase
+  | SettlementPreparedPhase;
+
+export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {
+  settlementBatchId: string;
+}
