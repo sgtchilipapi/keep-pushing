@@ -41,6 +41,7 @@ import {
 const STARTER_ACTIVE_SKILLS = ['1001', '1002'];
 const STARTER_PASSIVES = ['2001', '2002'];
 const DEFAULT_CHARACTER_NAME = 'Rookie';
+const MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS = 5;
 
 interface CreatedCharacterRecord {
   id: string;
@@ -166,6 +167,29 @@ function defaultCharacterIdHex(): string {
 
 function toUnixTimestampSeconds(now: Date): number {
   return Math.floor(now.getTime() / 1000);
+}
+
+function isRetryableCharacterIdentityCollision(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybePgError = error as {
+    code?: unknown;
+    constraint?: unknown;
+    message?: unknown;
+  };
+  const constraint =
+    typeof maybePgError.constraint === 'string' ? maybePgError.constraint : '';
+  const message = typeof maybePgError.message === 'string' ? maybePgError.message : '';
+
+  return (
+    maybePgError.code === '23505' &&
+    (constraint === 'Character_chainCharacterIdHex_key' ||
+      constraint === 'Character_characterRootPubkey_key' ||
+      message.includes('chainCharacterIdHex') ||
+      message.includes('characterRootPubkey'))
+  );
 }
 
 function createStarterCharacter(userId: string, name: string): Promise<CreatedCharacterRecord> {
@@ -305,7 +329,6 @@ export async function prepareSolanaCharacterCreation(
   const programId = deps.programId ?? resolveRunanaProgramId();
   const now = (deps.now ?? (() => new Date()))();
   const characterCreationTs = toUnixTimestampSeconds(now);
-  const chainCharacterIdHex = (deps.generateCharacterIdHex ?? defaultCharacterIdHex)();
 
   await validateBootstrapPreconditions({
     connection,
@@ -315,33 +338,71 @@ export async function prepareSolanaCharacterCreation(
     initialUnlockedZoneId: input.initialUnlockedZoneId,
   });
 
-  const createInstruction = buildCreateCharacterInstruction({
-    payer: feePayer,
-    authority,
-    programId,
-    characterIdHex: chainCharacterIdHex,
-    characterCreationTs,
-    seasonIdAtCreation: input.seasonIdAtCreation,
-    initialUnlockedZoneId: input.initialUnlockedZoneId,
-  });
-
-  const preparedTransactionBytes = await buildPreparedVersionedTransaction({
-    connection: connection as Connection,
-    feePayer,
-    instructions: [createInstruction.instruction],
-    commitment,
-  });
-
   const character = await createStarterCharacter(input.userId, name);
-  await updateCharacterChainState({
-    characterId: character.id,
-    playerAuthorityPubkey: authority.toBase58(),
-    chainCharacterIdHex,
-    characterRootPubkey: createInstruction.characterRoot.toBase58(),
-    chainCreationStatus: 'PENDING',
-    chainCreationTs: characterCreationTs,
-    chainCreationSeasonId: input.seasonIdAtCreation,
-  });
+  const generateCharacterIdHex = deps.generateCharacterIdHex ?? defaultCharacterIdHex;
+
+  let chainCharacterIdHex = '';
+  let createInstruction: ReturnType<typeof buildCreateCharacterInstruction> | null = null;
+  let preparedTransactionBytes: Awaited<ReturnType<typeof buildPreparedVersionedTransaction>> | null =
+    null;
+
+  for (
+    let attempt = 1;
+    attempt <= MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS;
+    attempt += 1
+  ) {
+    chainCharacterIdHex = generateCharacterIdHex();
+    createInstruction = buildCreateCharacterInstruction({
+      payer: feePayer,
+      authority,
+      programId,
+      characterIdHex: chainCharacterIdHex,
+      characterCreationTs,
+      seasonIdAtCreation: input.seasonIdAtCreation,
+      initialUnlockedZoneId: input.initialUnlockedZoneId,
+    });
+
+    preparedTransactionBytes = await buildPreparedVersionedTransaction({
+      connection: connection as Connection,
+      feePayer,
+      instructions: [createInstruction.instruction],
+      commitment,
+    });
+
+    try {
+      await updateCharacterChainState({
+        characterId: character.id,
+        playerAuthorityPubkey: authority.toBase58(),
+        chainCharacterIdHex,
+        characterRootPubkey: createInstruction.characterRoot.toBase58(),
+        chainCreationStatus: 'PENDING',
+        chainCreationTs: characterCreationTs,
+        chainCreationSeasonId: input.seasonIdAtCreation,
+      });
+      break;
+    } catch (error) {
+      if (
+        attempt < MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS &&
+        isRetryableCharacterIdentityCollision(error)
+      ) {
+        continue;
+      }
+
+      if (attempt >= MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS && isRetryableCharacterIdentityCollision(error)) {
+        throw new Error(
+          'ERR_CHARACTER_ID_COLLISION_EXHAUSTED: could not assign a unique character identity after repeated collisions',
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  if (createInstruction === null || preparedTransactionBytes === null || chainCharacterIdHex.length === 0) {
+    throw new Error(
+      'ERR_CHARACTER_PREPARE_INTERNAL: character creation prepare did not produce a chain identity',
+    );
+  }
 
   const preparedTransaction = prepareCharacterCreationTransaction({
     authority: authority.toBase58(),
