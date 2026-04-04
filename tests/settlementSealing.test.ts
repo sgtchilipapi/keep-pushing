@@ -120,6 +120,46 @@ describe('settlementSealing', () => {
     expect(draft.payload.seasonId).toBe(4);
   });
 
+  it('seals encounter-produced battle rows without requiring zone progress deltas', () => {
+    const draft = sealSettlementBatchDraft({
+      characterIdHex: '00112233445566778899aabbccddeeff',
+      cursor: {
+        lastCommittedEndNonce: 0,
+        lastCommittedStateHash: '11'.repeat(32),
+        lastCommittedBatchId: 0,
+        lastCommittedBattleTs: 1_700_000_050,
+        lastCommittedSeasonId: 4,
+      },
+      pendingBattles: [
+        battle({
+          id: 'encounter-a',
+          battleNonce: 1,
+          battleTs: 1_700_000_100,
+          zoneId: 2,
+          enemyArchetypeId: 100,
+          zoneProgressDelta: [],
+        }),
+        battle({
+          id: 'encounter-b',
+          battleNonce: 2,
+          battleTs: 1_700_000_110,
+          zoneId: 2,
+          enemyArchetypeId: 101,
+          zoneProgressDelta: [],
+        }),
+      ],
+      maxBattlesPerBatch: 20,
+      maxHistogramEntriesPerBatch: 20,
+    });
+
+    expect(draft.sealedBattleIds).toEqual(['encounter-a', 'encounter-b']);
+    expect(draft.payload.zoneProgressDelta).toEqual([]);
+    expect(draft.payload.encounterHistogram).toEqual([
+      { zoneId: 2, enemyArchetypeId: 100, count: 1 },
+      { zoneId: 2, enemyArchetypeId: 101, count: 1 },
+    ]);
+  });
+
   it('rejects a gap before the oldest pending battle', () => {
     expect(() =>
       sealSettlementBatchDraft({

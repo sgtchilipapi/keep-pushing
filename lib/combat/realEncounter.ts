@@ -24,6 +24,7 @@ import {
   loadCharacterBattleReadyRecord,
 } from './combatSnapshotAssembly';
 import { selectEncounterForZone } from './encounterSelection';
+import { buildEncounterSettlementPersistenceInput } from './encounterSettlement';
 
 export interface ExecuteRealEncounterInput {
   characterId: string;
@@ -176,21 +177,20 @@ export async function executeRealEncounter(
     enemyInitial,
   });
 
-  const persisted = await prisma.battleRecord.allocateNonceAndCreateWithSettlementLedger({
-    battleId,
-    characterId: character.id,
-    zoneId: input.zoneId,
-    enemyArchetypeId: selectedEncounter.enemyArchetypeId,
-    seed: input.seed,
-    playerInitial,
-    enemyInitial,
-    winnerEntityId: battleResult.winnerEntityId,
-    roundsPlayed: battleResult.roundsPlayed,
-    events: battleResult.events,
-    battleTs,
-    seasonId: seasonPolicy.seasonId,
-    zoneProgressDelta: [],
-  });
+  const persisted = await prisma.battleRecord.allocateNonceAndCreateWithSettlementLedger(
+    buildEncounterSettlementPersistenceInput({
+      battleId,
+      characterId: character.id,
+      zoneId: input.zoneId,
+      enemyArchetypeId: selectedEncounter.enemyArchetypeId,
+      seed: input.seed,
+      battleTs,
+      seasonId: seasonPolicy.seasonId,
+      playerInitial,
+      enemyInitial,
+      battleResult,
+    }),
+  );
 
   return {
     battleId: persisted.ledger.battleId,
