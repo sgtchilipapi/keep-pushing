@@ -59,6 +59,31 @@ export type CharacterChainState = {
   lastReconciledAt: Date | null;
 };
 
+export type CharacterBattleReadyRecord = {
+  id: string;
+  userId: string;
+  name: string;
+  hp: number;
+  hpMax: number;
+  atk: number;
+  def: number;
+  spd: number;
+  accuracyBP: number;
+  evadeBP: number;
+  playerAuthorityPubkey: string | null;
+  chainCharacterIdHex: string | null;
+  characterRootPubkey: string | null;
+  chainCreationStatus: CharacterChainCreationStatus;
+  chainCreationSeasonId: number | null;
+  lastReconciledEndNonce: number | null;
+  lastReconciledStateHash: string | null;
+  lastReconciledBatchId: number | null;
+  lastReconciledBattleTs: number | null;
+  lastReconciledSeasonId: number | null;
+  activeSkills: string[];
+  passiveSkills: string[];
+};
+
 export type UpdateCharacterChainIdentityInput = {
   playerAuthorityPubkey: string;
   chainCharacterIdHex: string;
@@ -585,6 +610,105 @@ export const prisma = {
     async findUnique(id: string) {
       const result = await pool.query('SELECT id FROM "Character" WHERE id = $1 LIMIT 1', [id]);
       return result.rows[0] ?? null;
+    },
+    async findBattleReadyById(characterId: string): Promise<CharacterBattleReadyRecord | null> {
+      const characterResult = await pool.query<{
+        id: string;
+        userId: string;
+        name: string;
+        hp: number;
+        hpMax: number;
+        atk: number;
+        def: number;
+        spd: number;
+        accuracyBP: number;
+        evadeBP: number;
+        playerAuthorityPubkey: string | null;
+        chainCharacterIdHex: string | null;
+        characterRootPubkey: string | null;
+        chainCreationStatus: CharacterChainCreationStatus;
+        chainCreationSeasonId: number | null;
+        lastReconciledEndNonce: string | number | null;
+        lastReconciledStateHash: string | null;
+        lastReconciledBatchId: string | number | null;
+        lastReconciledBattleTs: string | number | null;
+        lastReconciledSeasonId: number | null;
+      }>(
+        `SELECT
+          id,
+          "userId",
+          name,
+          hp,
+          "hpMax",
+          atk,
+          def,
+          spd,
+          "accuracyBP",
+          "evadeBP",
+          "playerAuthorityPubkey",
+          "chainCharacterIdHex",
+          "characterRootPubkey",
+          "chainCreationStatus",
+          "chainCreationSeasonId",
+          "lastReconciledEndNonce",
+          "lastReconciledStateHash",
+          "lastReconciledBatchId",
+          "lastReconciledBattleTs",
+          "lastReconciledSeasonId"
+        FROM "Character"
+        WHERE id = $1
+        LIMIT 1`,
+        [characterId]
+      );
+      const character = characterResult.rows[0];
+      if (character === undefined) {
+        return null;
+      }
+
+      const [skills, passives] = await Promise.all([
+        pool.query<{ skillId: string }>(
+          'SELECT "skillId" FROM "EquippedSkill" WHERE "characterId" = $1 ORDER BY slot ASC',
+          [character.id]
+        ),
+        pool.query<{ passiveId: string }>(
+          'SELECT "passiveId" FROM "EquippedPassive" WHERE "characterId" = $1 ORDER BY slot ASC',
+          [character.id]
+        )
+      ]);
+
+      return {
+        id: character.id,
+        userId: character.userId,
+        name: character.name,
+        hp: character.hp,
+        hpMax: character.hpMax,
+        atk: character.atk,
+        def: character.def,
+        spd: character.spd,
+        accuracyBP: character.accuracyBP,
+        evadeBP: character.evadeBP,
+        playerAuthorityPubkey: character.playerAuthorityPubkey,
+        chainCharacterIdHex: character.chainCharacterIdHex,
+        characterRootPubkey: character.characterRootPubkey,
+        chainCreationStatus: character.chainCreationStatus,
+        chainCreationSeasonId: character.chainCreationSeasonId,
+        lastReconciledEndNonce: parseNullableSafeInteger(
+          character.lastReconciledEndNonce,
+          'lastReconciledEndNonce'
+        ),
+        lastReconciledStateHash: character.lastReconciledStateHash,
+        lastReconciledBatchId: parseNullableSafeInteger(
+          character.lastReconciledBatchId,
+          'lastReconciledBatchId'
+        ),
+        lastReconciledBattleTs: parseNullableSafeInteger(
+          character.lastReconciledBattleTs,
+          'lastReconciledBattleTs'
+        ),
+        lastReconciledSeasonId: character.lastReconciledSeasonId,
+        activeSkills: skills.rows.map((row) => row.skillId),
+        passiveSkills: passives.rows.map((row) => row.passiveId)
+      };
     },
     async updateEquip(characterId: string, activeSkills: string[], passiveSkills: string[]) {
       const client = await pool.connect();
