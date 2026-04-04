@@ -1535,6 +1535,33 @@ export const prisma = {
 
       return result.rows[0] ? mapBattleOutcomeLedger(result.rows[0]) : null;
     },
+    async findEarliestForCharacter(characterId: string) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `SELECT
+          id,
+          "characterId",
+          "battleId",
+          "localSequence",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleOutcomeLedger"
+        WHERE "characterId" = $1
+        ORDER BY "localSequence" ASC
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapBattleOutcomeLedger(result.rows[0]) : null;
+    },
     async listAwaitingFirstSyncForCharacter(characterId: string, limit: number) {
       const result = await pool.query<BattleOutcomeLedgerRow>(
         `SELECT
