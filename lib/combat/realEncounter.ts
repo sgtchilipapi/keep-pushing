@@ -4,7 +4,7 @@ import { PublicKey, type Commitment, type Connection } from '@solana/web3.js';
 
 import { simulateBattle } from '../../engine/battle/battleEngine';
 import type { BattleResult } from '../../types/battle';
-import { prisma } from '../prisma';
+import { prisma, type PersistedEncounterRecord } from '../prisma';
 import {
   fetchCharacterWorldProgressAccount,
   fetchSeasonPolicyAccount,
@@ -25,6 +25,10 @@ import {
 } from './combatSnapshotAssembly';
 import { selectEncounterForZone } from './encounterSelection';
 import { buildEncounterSettlementPersistenceInput } from './encounterSettlement';
+import {
+  applyLocalFirstBattleToProvisionalProgress,
+  assertProvisionalZoneAccess,
+} from './provisionalProgress';
 
 export interface ExecuteRealEncounterInput {
   characterId: string;
@@ -40,7 +44,7 @@ export interface ExecuteRealEncounterResult {
   battleNonce: number;
   seasonId: number;
   battleTs: number;
-  settlementStatus: 'PENDING';
+  settlementStatus: 'PENDING' | 'AWAITING_FIRST_SYNC';
   battleResult: BattleResult;
 }
 
@@ -85,10 +89,31 @@ function resolveConfiguredActiveSeasonId(args: {
   return candidate as number;
 }
 
-function assertCharacterEncounterReady(character: Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>): asserts character is NonNullable<Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>> {
+function assertCharacterExists(
+  character: Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>,
+): asserts character is NonNullable<Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>> {
   if (character === null) {
     throw new Error('ERR_CHARACTER_NOT_FOUND: character was not found');
   }
+}
+
+function isConfirmedEncounterCharacter(
+  character: NonNullable<Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>>,
+): boolean {
+  return (
+    character.chainCreationStatus === 'CONFIRMED' &&
+    character.characterRootPubkey !== null &&
+    character.lastReconciledEndNonce !== null &&
+    character.lastReconciledStateHash !== null &&
+    character.lastReconciledBatchId !== null &&
+    character.lastReconciledBattleTs !== null &&
+    character.lastReconciledSeasonId !== null
+  );
+}
+
+function assertConfirmedCharacterEncounterReady(
+  character: NonNullable<Awaited<ReturnType<typeof loadCharacterBattleReadyRecord>>>,
+): void {
   if (character.chainCreationStatus !== 'CONFIRMED') {
     throw new Error('ERR_CHARACTER_NOT_CONFIRMED: character must be chain-confirmed before encounters');
   }
@@ -141,30 +166,20 @@ export async function executeRealEncounter(
   const programId = deps.programId ?? resolveRunanaProgramId(env);
 
   const character = await loadCharacterBattleReadyRecord(input.characterId);
-  assertCharacterEncounterReady(character);
+  assertCharacterExists(character);
 
   const activeSeasonId = resolveConfiguredActiveSeasonId({
     env,
     fallbackSeasonId: character.lastReconciledSeasonId,
     chainCreationSeasonId: character.chainCreationSeasonId,
   });
-
-  const characterRootPubkey = new PublicKey(character.characterRootPubkey!);
-  const [worldProgress, seasonPolicy] = await Promise.all([
-    fetchCharacterWorldProgressAccount(
-      connection as Connection,
-      deriveCharacterWorldProgressPda(characterRootPubkey, programId),
-      commitment,
-    ),
-    fetchSeasonPolicyAccount(
-      connection as Connection,
-      deriveSeasonPolicyPda(activeSeasonId, programId),
-      commitment,
-    ),
-  ]);
+  const seasonPolicy = await fetchSeasonPolicyAccount(
+    connection as Connection,
+    deriveSeasonPolicyPda(activeSeasonId, programId),
+    commitment,
+  );
 
   assertSeasonActive(battleTs, seasonPolicy);
-  assertZoneAccess(input.zoneId, worldProgress.highestUnlockedZoneId);
 
   const selectedEncounter = selectEncounterForZone(input.zoneId, input.seed);
   const playerInitial = buildPlayerCombatSnapshot(character);
@@ -176,23 +191,82 @@ export async function executeRealEncounter(
     playerInitial,
     enemyInitial,
   });
+  let persisted: PersistedEncounterRecord;
+  let settlementStatus: ExecuteRealEncounterResult['settlementStatus'];
 
-  const persisted = await prisma.battleRecord.allocateNonceAndCreateWithSettlementLedger(
-    buildEncounterSettlementPersistenceInput({
-      battleId,
-      characterId: character.id,
+  if (isConfirmedEncounterCharacter(character)) {
+    assertConfirmedCharacterEncounterReady(character);
+
+    const characterRootPubkey = new PublicKey(character.characterRootPubkey!);
+    const worldProgress = await fetchCharacterWorldProgressAccount(
+      connection as Connection,
+      deriveCharacterWorldProgressPda(characterRootPubkey, programId),
+      commitment,
+    );
+    assertZoneAccess(input.zoneId, worldProgress.highestUnlockedZoneId);
+
+    persisted = await prisma.battleRecord.allocateNonceAndCreateWithSettlementLedger(
+      buildEncounterSettlementPersistenceInput({
+        battleId,
+        characterId: character.id,
+        zoneId: input.zoneId,
+        enemyArchetypeId: selectedEncounter.enemyArchetypeId,
+        seed: input.seed,
+        battleTs,
+        seasonId: seasonPolicy.seasonId,
+        playerInitial,
+        enemyInitial,
+        battleResult,
+      }),
+    );
+    if (persisted.ledger.battleNonce === null) {
+      throw new Error(
+        'ERR_BATTLE_NONCE_UNAVAILABLE: confirmed-character encounter did not persist a battle nonce',
+      );
+    }
+    settlementStatus = 'PENDING';
+  } else {
+    const provisionalProgress = await prisma.characterProvisionalProgress.findByCharacterId(character.id);
+    if (provisionalProgress === null) {
+      throw new Error(
+        `ERR_CHARACTER_PROVISIONAL_PROGRESS_NOT_FOUND: character ${character.id} is missing provisional progress`,
+      );
+    }
+
+    assertProvisionalZoneAccess(input.zoneId, provisionalProgress.highestUnlockedZoneId);
+    const updatedProgress = applyLocalFirstBattleToProvisionalProgress({
+      progress: provisionalProgress,
       zoneId: input.zoneId,
-      enemyArchetypeId: selectedEncounter.enemyArchetypeId,
-      seed: input.seed,
-      battleTs,
-      seasonId: seasonPolicy.seasonId,
-      playerInitial,
-      enemyInitial,
+      characterId: character.id,
       battleResult,
-    }),
-  );
-  if (persisted.ledger.battleNonce === null) {
-    throw new Error('ERR_BATTLE_NONCE_UNAVAILABLE: confirmed-character encounter did not persist a battle nonce');
+    });
+
+    persisted = await prisma.battleRecord.createAwaitingFirstSyncWithProgress({
+      ...buildEncounterSettlementPersistenceInput({
+        battleId,
+        characterId: character.id,
+        zoneId: input.zoneId,
+        enemyArchetypeId: selectedEncounter.enemyArchetypeId,
+        seed: input.seed,
+        battleTs,
+        seasonId: seasonPolicy.seasonId,
+        playerInitial,
+        enemyInitial,
+        battleResult,
+      }),
+      zoneProgressDelta: updatedProgress.zoneProgressDelta,
+      provisionalProgress: {
+        highestUnlockedZoneId: updatedProgress.highestUnlockedZoneId,
+        highestClearedZoneId: updatedProgress.highestClearedZoneId,
+        zoneStates: updatedProgress.zoneStates,
+      },
+    });
+    if (persisted.ledger.battleNonce !== null) {
+      throw new Error(
+        'ERR_LOCAL_FIRST_NONCE_PRESENT: local-first encounter unexpectedly persisted a finalized battle nonce',
+      );
+    }
+    settlementStatus = 'AWAITING_FIRST_SYNC';
   }
 
   return {
@@ -200,10 +274,10 @@ export async function executeRealEncounter(
     characterId: persisted.ledger.characterId,
     zoneId: persisted.ledger.zoneId,
     enemyArchetypeId: persisted.ledger.enemyArchetypeId,
-    battleNonce: persisted.ledger.battleNonce,
+    battleNonce: persisted.ledger.localSequence,
     seasonId: persisted.ledger.seasonId,
     battleTs: persisted.ledger.battleTs,
-    settlementStatus: 'PENDING',
+    settlementStatus,
     battleResult,
   };
 }

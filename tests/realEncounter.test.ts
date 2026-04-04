@@ -15,6 +15,10 @@ jest.mock('../engine/battle/battleEngine', () => ({
 const prismaMock = {
   battleRecord: {
     allocateNonceAndCreateWithSettlementLedger: jest.fn(),
+    createAwaitingFirstSyncWithProgress: jest.fn(),
+  },
+  characterProvisionalProgress: {
+    findByCharacterId: jest.fn(),
   },
 };
 
@@ -64,6 +68,7 @@ describe('executeRealEncounter', () => {
       id: 'character-1',
       userId: 'user-1',
       name: 'Rookie',
+      createdAt: new Date('2026-04-01T10:00:00.000Z'),
       hp: 1200,
       hpMax: 1200,
       atk: 120,
@@ -119,7 +124,29 @@ describe('executeRealEncounter', () => {
         characterId: 'character-1',
         zoneId: 2,
         enemyArchetypeId: 100,
+        localSequence: 5,
         battleNonce: 5,
+        seasonId: 1,
+        battleTs: 1_700_000_100,
+      },
+    });
+    prismaMock.characterProvisionalProgress.findByCharacterId.mockResolvedValue({
+      id: 'progress-1',
+      characterId: 'character-1',
+      highestUnlockedZoneId: 2,
+      highestClearedZoneId: 1,
+      zoneStates: { '1': 2, '2': 1 },
+      createdAt: new Date('2026-04-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-04-01T10:00:00.000Z'),
+    });
+    prismaMock.battleRecord.createAwaitingFirstSyncWithProgress.mockResolvedValue({
+      ledger: {
+        battleId: 'battle-1',
+        characterId: 'character-1',
+        zoneId: 2,
+        enemyArchetypeId: 100,
+        localSequence: 5,
+        battleNonce: null,
         seasonId: 1,
         battleTs: 1_700_000_100,
       },
@@ -157,6 +184,7 @@ describe('executeRealEncounter', () => {
       seasonId: 1,
       settlementStatus: 'PENDING',
     });
+    expect(prismaMock.battleRecord.createAwaitingFirstSyncWithProgress).not.toHaveBeenCalled();
   });
 
   it('delegates nonce allocation to the transactional persistence helper', async () => {
@@ -179,24 +207,67 @@ describe('executeRealEncounter', () => {
     );
   });
 
-  it('rejects characters that are not chain-confirmed', async () => {
+  it('executes a local-first encounter and persists an awaiting-first-sync battle', async () => {
     (loadCharacterBattleReadyRecord as jest.Mock).mockResolvedValue({
+      id: 'character-1',
+      userId: 'user-1',
+      name: 'Rookie',
+      createdAt: new Date('2026-04-01T10:00:00.000Z'),
+      hp: 1200,
+      hpMax: 1200,
+      atk: 120,
+      def: 70,
+      spd: 100,
+      accuracyBP: 8000,
+      evadeBP: 1200,
+      playerAuthorityPubkey: null,
+      chainCharacterIdHex: null,
+      characterRootPubkey: null,
       chainCreationStatus: 'PENDING',
+      chainCreationSeasonId: 1,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      activeSkills: ['1001', '1002'],
+      passiveSkills: ['2001', '2002'],
     });
 
-    await expect(
-      executeRealEncounter(
-        {
-          characterId: 'character-1',
-          zoneId: 2,
-          seed: 77,
-        },
-        {
-          now: () => new Date('2023-11-14T22:15:00.000Z'),
-          env: encounterEnv,
-        },
-      ),
-    ).rejects.toThrow(/ERR_CHARACTER_NOT_CONFIRMED/);
+    const result = await executeRealEncounter(
+      {
+        characterId: 'character-1',
+        zoneId: 2,
+        seed: 77,
+      },
+      {
+        now: () => new Date('2023-11-14T22:15:00.000Z'),
+        env: encounterEnv,
+      },
+    );
+
+    expect(fetchCharacterWorldProgressAccount).not.toHaveBeenCalled();
+    expect(prismaMock.characterProvisionalProgress.findByCharacterId).toHaveBeenCalledWith(
+      'character-1',
+    );
+    expect(prismaMock.battleRecord.createAwaitingFirstSyncWithProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        characterId: 'character-1',
+        zoneId: 2,
+        zoneProgressDelta: [
+          { zoneId: 2, newState: 2 },
+          { zoneId: 3, newState: 1 },
+        ],
+        provisionalProgress: expect.objectContaining({
+          highestUnlockedZoneId: 3,
+          highestClearedZoneId: 2,
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      battleNonce: 5,
+      settlementStatus: 'AWAITING_FIRST_SYNC',
+    });
   });
 
   it('rejects locked zones', async () => {
@@ -217,5 +288,48 @@ describe('executeRealEncounter', () => {
         },
       ),
     ).rejects.toThrow(/ERR_ZONE_LOCKED/);
+  });
+
+  it('rejects local-first encounters when provisional progress is missing', async () => {
+    (loadCharacterBattleReadyRecord as jest.Mock).mockResolvedValue({
+      id: 'character-1',
+      userId: 'user-1',
+      name: 'Rookie',
+      createdAt: new Date('2026-04-01T10:00:00.000Z'),
+      hp: 1200,
+      hpMax: 1200,
+      atk: 120,
+      def: 70,
+      spd: 100,
+      accuracyBP: 8000,
+      evadeBP: 1200,
+      playerAuthorityPubkey: null,
+      chainCharacterIdHex: null,
+      characterRootPubkey: null,
+      chainCreationStatus: 'PENDING',
+      chainCreationSeasonId: 1,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      activeSkills: ['1001', '1002'],
+      passiveSkills: ['2001', '2002'],
+    });
+    prismaMock.characterProvisionalProgress.findByCharacterId.mockResolvedValue(null);
+
+    await expect(
+      executeRealEncounter(
+        {
+          characterId: 'character-1',
+          zoneId: 2,
+          seed: 77,
+        },
+        {
+          now: () => new Date('2023-11-14T22:15:00.000Z'),
+          env: encounterEnv,
+        },
+      ),
+    ).rejects.toThrow(/ERR_CHARACTER_PROVISIONAL_PROGRESS_NOT_FOUND/);
   });
 });

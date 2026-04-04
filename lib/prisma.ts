@@ -220,6 +220,10 @@ export type PersistedEncounterRecord = {
   ledger: BattleOutcomeLedgerRecord;
 };
 
+export type CreateLocalFirstPersistedEncounterInput = CreatePersistedEncounterInput & {
+  provisionalProgress: UpdateCharacterProvisionalProgressInput;
+};
+
 export type SettlementBatchRecord = {
   id: string;
   characterId: string;
@@ -1311,6 +1315,111 @@ export const prisma = {
         await client.query('COMMIT');
 
         return persisted;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async createAwaitingFirstSyncWithProgress(
+      input: CreateLocalFirstPersistedEncounterInput
+    ): Promise<PersistedEncounterRecord> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const lockedCharacterResult = await client.query<{ id: string }>(
+          `SELECT id
+          FROM "Character"
+          WHERE id = $1
+          FOR UPDATE`,
+          [input.characterId]
+        );
+        if (lockedCharacterResult.rows[0] === undefined) {
+          throw new Error(`ERR_CHARACTER_NOT_FOUND: character ${input.characterId} was not found`);
+        }
+
+        const lockedProgressResult = await client.query<{ id: string }>(
+          `SELECT id
+          FROM "CharacterProvisionalProgress"
+          WHERE "characterId" = $1
+          FOR UPDATE`,
+          [input.characterId]
+        );
+        if (lockedProgressResult.rows[0] === undefined) {
+          throw new Error(
+            `ERR_CHARACTER_PROVISIONAL_PROGRESS_NOT_FOUND: character ${input.characterId} is missing provisional progress`,
+          );
+        }
+
+        const latestLocalSequenceResult = await client.query<{ localSequence: string | number }>(
+          `SELECT "localSequence"
+          FROM "BattleOutcomeLedger"
+          WHERE "characterId" = $1
+          ORDER BY "localSequence" DESC
+          LIMIT 1`,
+          [input.characterId]
+        );
+        const latestLocalSequence = latestLocalSequenceResult.rows[0]
+          ? parseRequiredSafeInteger(latestLocalSequenceResult.rows[0].localSequence, 'localSequence')
+          : 0;
+
+        const persisted = await insertPersistedEncounter(client, {
+          ...input,
+          localSequence: latestLocalSequence + 1,
+          battleNonce: latestLocalSequence + 1,
+        });
+
+        const ledgerResult = await client.query<BattleOutcomeLedgerRow>(
+          `UPDATE "BattleOutcomeLedger"
+          SET
+            "battleNonce" = NULL,
+            "settlementStatus" = 'AWAITING_FIRST_SYNC',
+            "updatedAt" = $2
+          WHERE id = $1
+          RETURNING
+            id,
+            "characterId",
+            "battleId",
+            "localSequence",
+            "battleNonce",
+            "battleTs",
+            "seasonId",
+            "zoneId",
+            "enemyArchetypeId",
+            "zoneProgressDeltaJson",
+            "settlementStatus",
+            "sealedBatchId",
+            "committedAt",
+            "createdAt",
+            "updatedAt"`,
+          [persisted.ledger.id, new Date()]
+        );
+
+        await client.query(
+          `UPDATE "CharacterProvisionalProgress"
+          SET
+            "highestUnlockedZoneId" = $2,
+            "highestClearedZoneId" = $3,
+            "zoneStatesJson" = $4::jsonb,
+            "updatedAt" = $5
+          WHERE "characterId" = $1`,
+          [
+            input.characterId,
+            input.provisionalProgress.highestUnlockedZoneId,
+            input.provisionalProgress.highestClearedZoneId,
+            JSON.stringify(input.provisionalProgress.zoneStates),
+            new Date(),
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+          battleRecord: persisted.battleRecord,
+          ledger: mapBattleOutcomeLedger(ledgerResult.rows[0]),
+        };
       } catch (error) {
         await client.query('ROLLBACK');
         throw error;
