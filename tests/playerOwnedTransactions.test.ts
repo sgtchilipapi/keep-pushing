@@ -1,6 +1,7 @@
 import {
   acceptSignedPlayerOwnedTransaction,
   prepareCharacterCreationTransaction,
+  prepareFirstSyncTransaction,
   prepareSettlementTransaction,
 } from "../lib/solana/playerOwnedTransactions";
 import type { PrepareSettlementTransactionRequest } from "../types/api/solana";
@@ -160,6 +161,59 @@ describe("player-owned Solana transaction flow", () => {
       continuityKey: "char-1:7->10",
       reconciliationKey: "char-1:7:batch-hash-7",
     });
+  });
+
+  it("prepares atomic first sync with both character creation and settlement relay metadata", () => {
+    const payload = buildPayload({
+      batchId: 1,
+      startNonce: 1,
+      endNonce: 2,
+      battleCount: 2,
+      firstBattleTs: 1_700_000_010,
+      lastBattleTs: 1_700_000_040,
+      batchHash: "batch-hash-1",
+    });
+
+    const prepared = prepareFirstSyncTransaction({
+      authority: "player-wallet-1",
+      feePayer: "player-wallet-1",
+      serializedMessageBase64: toBase64("first-sync-message"),
+      serializedTransactionBase64: toBase64("first-sync-transaction"),
+      characterCreation: {
+        localCharacterId: "local-character-1",
+        chainCharacterIdHex: "00112233445566778899aabbccddeeff",
+        characterRootPubkey: "character-root-1",
+        characterCreationTs: 1_700_000_000,
+        seasonIdAtCreation: 4,
+        initialUnlockedZoneId: 1,
+        recentBlockhash: "recent-blockhash-1",
+        lastValidBlockHeight: 88,
+      },
+      settlement: {
+        characterRootPubkey: "character-root-1",
+        payload,
+        expectedCursor: {
+          lastCommittedEndNonce: 0,
+          lastCommittedBatchId: 0,
+          lastCommittedStateHash: "state-hash-6",
+          lastCommittedBattleTs: 1_700_000_000,
+          lastCommittedSeasonId: 4,
+        },
+        permitDomain: {
+          programId: "runana-program-1",
+          clusterId: 1,
+          playerAuthority: "player-wallet-1",
+          characterRootPubkey: "character-root-1",
+          batchHash: "batch-hash-1",
+          batchId: 1,
+          signatureScheme: 0,
+        },
+      },
+    });
+
+    expect(prepared.kind).toBe("player_owned_instruction");
+    expect(prepared.characterCreationRelay?.localCharacterId).toBe("local-character-1");
+    expect(prepared.settlementRelay?.batchId).toBe(1);
   });
 
   it("rejects out-of-order settlement before broadcast", () => {

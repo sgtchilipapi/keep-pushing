@@ -82,6 +82,13 @@ export interface LoadSettlementInstructionEnvelopeArgs {
   programId?: PublicKey;
 }
 
+export interface BuildCanonicalSettlementInstructionAccountsArgs {
+  payload: SettlementBatchPayloadV2;
+  playerAuthority: string | PublicKey;
+  characterRootPubkey: string | PublicKey;
+  programId?: PublicKey;
+}
+
 function toPublicKey(value: string | PublicKey, field: string): PublicKey {
   try {
     return typeof value === 'string' ? new SolanaPublicKey(value) : value;
@@ -94,6 +101,96 @@ function assertCondition(condition: boolean, code: string, message: string): ass
   if (!condition) {
     throw new Error(`${code}: ${message}`);
   }
+}
+
+export function buildCanonicalSettlementInstructionAccounts(
+  args: BuildCanonicalSettlementInstructionAccountsArgs,
+): SettlementInstructionAccountRole[] {
+  const programId = args.programId ?? RUNANA_PROGRAM_ID;
+  const playerAuthority = toPublicKey(args.playerAuthority, 'playerAuthority');
+  const characterRootPubkey = toPublicKey(args.characterRootPubkey, 'characterRootPubkey');
+
+  const referencedPageIndices = referencedZonePageIndicesFromSettlementPayload(args.payload);
+  assertCondition(
+    referencedPageIndices.length > 0,
+    'ERR_EMPTY_ZONE_PAGE_ENVELOPE',
+    'settlement payload referenced no zone pages',
+  );
+
+  const referencedZoneIds = referencedZoneIdsFromSettlementPayload(args.payload);
+  const referencedEnemyArchetypeIds = referencedEnemyArchetypeIdsFromSettlementPayload(args.payload);
+  const [primaryPageIndex, ...additionalPageIndices] = referencedPageIndices;
+
+  return [
+    { role: 'playerAuthority', pubkey: playerAuthority, isSigner: false, isWritable: false },
+    {
+      role: 'instructionsSysvar',
+      pubkey: RUNANA_INSTRUCTIONS_SYSVAR_PUBKEY,
+      isSigner: false,
+      isWritable: false,
+    },
+    {
+      role: 'programConfig',
+      pubkey: deriveProgramConfigPda(programId),
+      isSigner: false,
+      isWritable: false,
+    },
+    { role: 'characterRoot', pubkey: characterRootPubkey, isSigner: false, isWritable: false },
+    {
+      role: 'characterStats',
+      pubkey: deriveCharacterStatsPda(characterRootPubkey, programId),
+      isSigner: false,
+      isWritable: true,
+    },
+    {
+      role: 'characterWorldProgress',
+      pubkey: deriveCharacterWorldProgressPda(characterRootPubkey, programId),
+      isSigner: false,
+      isWritable: true,
+    },
+    {
+      role: 'characterZoneProgressPage',
+      pubkey: deriveCharacterZoneProgressPagePda(characterRootPubkey, primaryPageIndex, programId),
+      isSigner: false,
+      isWritable: true,
+    },
+    {
+      role: 'seasonPolicy',
+      pubkey: deriveSeasonPolicyPda(args.payload.seasonId, programId),
+      isSigner: false,
+      isWritable: false,
+    },
+    {
+      role: 'characterSettlementBatchCursor',
+      pubkey: deriveCharacterBatchCursorPda(characterRootPubkey, programId),
+      isSigner: false,
+      isWritable: true,
+    },
+    ...additionalPageIndices.map((pageIndex) => ({
+      role: `additionalZoneProgressPage:${pageIndex}`,
+      pubkey: deriveCharacterZoneProgressPagePda(characterRootPubkey, pageIndex, programId),
+      isSigner: false,
+      isWritable: true,
+    })),
+    ...referencedZoneIds.map((zoneId) => ({
+      role: `zoneRegistry:${zoneId}`,
+      pubkey: deriveZoneRegistryPda(zoneId, programId),
+      isSigner: false,
+      isWritable: false,
+    })),
+    ...referencedZoneIds.map((zoneId) => ({
+      role: `zoneEnemySet:${zoneId}`,
+      pubkey: deriveZoneEnemySetPda(zoneId, programId),
+      isSigner: false,
+      isWritable: false,
+    })),
+    ...referencedEnemyArchetypeIds.map((enemyArchetypeId) => ({
+      role: `enemyArchetypeRegistry:${enemyArchetypeId}`,
+      pubkey: deriveEnemyArchetypeRegistryPda(enemyArchetypeId, programId),
+      isSigner: false,
+      isWritable: false,
+    })),
+  ];
 }
 
 export async function loadSettlementInstructionAccountEnvelope(

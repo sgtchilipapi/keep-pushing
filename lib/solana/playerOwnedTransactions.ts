@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   CharacterCreationRelayMetadata,
+  PrepareFirstSyncTransactionRequest,
   PrepareCharacterCreationTransactionRequest,
   PreparedPlayerOwnedTransaction,
   PrepareSettlementTransactionRequest,
@@ -254,6 +255,35 @@ export function prepareSettlementTransaction(
     request.serializedMessageBase64,
     request.serializedTransactionBase64 ?? request.serializedMessageBase64,
     undefined,
+    settlementRelay,
+  );
+}
+
+export function prepareFirstSyncTransaction(
+  request: PrepareFirstSyncTransactionRequest,
+): PreparedPlayerOwnedTransaction {
+  const characterCreationRelay = buildCharacterCreationRelayMetadata({
+    authority: request.authority,
+    feePayer: request.feePayer,
+    serializedMessageBase64: request.serializedMessageBase64,
+    serializedTransactionBase64: request.serializedTransactionBase64,
+    ...request.characterCreation,
+  });
+  const settlementRelay = buildSettlementRelayMetadata({
+    playerAuthority: request.authority,
+    feePayer: request.feePayer,
+    serializedMessageBase64: request.serializedMessageBase64,
+    serializedTransactionBase64: request.serializedTransactionBase64,
+    ...request.settlement,
+  });
+
+  return buildPreparedTransaction(
+    "player_owned_instruction",
+    request.authority,
+    request.feePayer,
+    request.serializedMessageBase64,
+    request.serializedTransactionBase64 ?? request.serializedMessageBase64,
+    characterCreationRelay,
     settlementRelay,
   );
 }

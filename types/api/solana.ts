@@ -111,6 +111,21 @@ export interface PrepareSettlementTransactionRequest {
   serializedTransactionBase64?: string;
 }
 
+export interface PrepareFirstSyncTransactionRequest {
+  authority: string;
+  feePayer: string;
+  serializedMessageBase64: string;
+  serializedTransactionBase64?: string;
+  characterCreation: Omit<
+    PrepareCharacterCreationTransactionRequest,
+    "authority" | "feePayer" | "serializedMessageBase64" | "serializedTransactionBase64"
+  >;
+  settlement: Omit<
+    PrepareSettlementTransactionRequest,
+    "playerAuthority" | "feePayer" | "serializedMessageBase64" | "serializedTransactionBase64"
+  >;
+}
+
 export interface SubmitSignedPlayerOwnedTransactionRequest {
   prepared: PreparedPlayerOwnedTransaction;
   signedMessageBase64: string;
@@ -151,3 +166,32 @@ export type PrepareSettlementRouteResponse =
 export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {
   settlementBatchId: string;
 }
+
+export interface PrepareFirstSyncRouteRequest {
+  characterId: string;
+  authority: string;
+  feePayer?: string;
+  playerAuthorizationSignatureBase64?: string;
+}
+
+export interface FirstSyncPreparationBase {
+  payload: SettlementBatchPayloadV2;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  playerAuthorizationMessageBase64: string;
+}
+
+export interface FirstSyncAuthorizationPhase extends FirstSyncPreparationBase {
+  phase: "authorize";
+}
+
+export interface FirstSyncPreparedPhase extends FirstSyncPreparationBase {
+  phase: "sign_transaction";
+  playerAuthorizationSignatureBase64: string;
+  serverAttestationMessageBase64: string;
+  preparedTransaction: PreparedPlayerOwnedTransaction;
+}
+
+export type PrepareFirstSyncRouteResponse =
+  | FirstSyncAuthorizationPhase
+  | FirstSyncPreparedPhase;
