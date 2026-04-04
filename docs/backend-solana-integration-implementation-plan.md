@@ -494,6 +494,8 @@ Backend/server:
   - backend can reconstruct the exact settlement account envelope before tx build
 
 ### Step 4 — Add admin/bootstrap seeding helpers
+- Status:
+  - complete
 - Objective:
   - operationalize required non-player setup
 - Files/modules affected:

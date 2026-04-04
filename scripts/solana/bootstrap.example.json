@@ -1,0 +1,35 @@
+{
+  "programConfig": {
+    "trustedServerSigner": "11111111111111111111111111111111",
+    "settlementPaused": false,
+    "maxBattlesPerBatch": 20,
+    "maxHistogramEntriesPerBatch": 20
+  },
+  "seasons": [
+    {
+      "seasonId": 1,
+      "seasonStartTs": 1710000000,
+      "seasonEndTs": 1712592000,
+      "commitGraceEndTs": 1712678400
+    }
+  ],
+  "zoneRegistries": [
+    {
+      "zoneId": 1,
+      "expMultiplierNum": 1,
+      "expMultiplierDen": 1
+    }
+  ],
+  "zoneEnemySets": [
+    {
+      "zoneId": 1,
+      "allowedEnemyArchetypeIds": [100]
+    }
+  ],
+  "enemyArchetypes": [
+    {
+      "enemyArchetypeId": 100,
+      "expRewardBase": 25
+    }
+  ]
+}

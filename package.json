@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "test": "jest --runInBand",
-    "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts"
+    "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts",
+    "solana:bootstrap": "npx tsx scripts/solana/seedBootstrap.ts",
+    "solana:bootstrap:dry-run": "npx tsx scripts/solana/seedBootstrap.ts --dry-run"
   },
   "dependencies": {
     "@prisma/client": "^7.4.2",

@@ -202,3 +202,10 @@ export function computeAnchorAccountDiscriminator(accountName: string): Buffer {
     .digest()
     .subarray(0, 8);
 }
+
+export function computeAnchorInstructionDiscriminator(instructionName: string): Buffer {
+  return createHash('sha256')
+    .update(`global:${instructionName}`)
+    .digest()
+    .subarray(0, 8);
+}
