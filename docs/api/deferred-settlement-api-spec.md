@@ -508,3 +508,23 @@ Recommended UI decisions:
 - show `On-chain ready` when:
   - `chain.chainCreationStatus = CONFIRMED`
 
+## Future Work
+
+### SSO Identity And Session-Bound Character Ownership
+
+The current implementation still pivots on caller-supplied `userId` for user-bound reads and writes such as
+`GET /api/character` and `POST /api/character/create`.
+
+Future work should replace that with a proper authenticated user model:
+
+- add SSO-backed identity creation and account linking
+- issue and verify backend sessions
+- derive the acting backend user from authenticated server context instead of request body or query string `userId`
+- bind character creation and character reads to that authenticated user
+- keep anonymous bootstrap only if it can later upgrade safely into a linked SSO account
+
+This should be treated as a distinct deliverable:
+
+- `SSO identity + session auth + user-bound character APIs`
+
+That work is separate from deferred settlement itself, but it is the right follow-up if the frontend is moving from prototype flows toward production account ownership.

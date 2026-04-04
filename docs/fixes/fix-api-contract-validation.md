@@ -2,7 +2,7 @@
 
 ## Status
 
-This document captures clarified decisions and the implementation plan for fixing **Entry 3** in `docs/review-findings.md`.
+This document captures clarified decisions and the implementation plan for fixing **Entry 3** in `docs/analysis/review-findings.md`.
 
 Scope for this pass is **documentation/plan only**. No production code changes are included in this pass.
 
@@ -44,7 +44,7 @@ Scope for this pass is **documentation/plan only**. No production code changes a
 | Migration communication | Include explicit old→new contract examples in docs |
 | Test implementation in this task | Test plan only (no test code changes) |
 | Verification bar (implementation pass) | Full test suite + full type-check |
-| Documentation updates in this task | Update `docs/review-findings.md` and `docs/SSOT.md` |
+| Documentation updates in this task | Update `docs/analysis/review-findings.md` and `docs/architecture/SSOT.md` |
 | Commit strategy | Single commit |
 
 ---
@@ -181,7 +181,7 @@ Implications for this Entry 3 plan:
 
 ## 4) Documentation and source-of-truth updates
 
-### `docs/review-findings.md`
+### `docs/analysis/review-findings.md`
 - Update Entry 3 with a status note that the decoupling direction is locked:
   - API DTO-first validation,
   - strict schema checks,
@@ -189,7 +189,7 @@ Implications for this Entry 3 plan:
   - server-generated seed,
   - legacy payload hard cut in implementation pass.
 
-### `docs/SSOT.md`
+### `docs/architecture/SSOT.md`
 - Extend Type Contract SSOT section to include:
   - API DTOs under `/types/api/*` as canonical for external API contracts,
   - engine input types as internal simulation contracts,
@@ -262,7 +262,7 @@ Include explicit examples in docs for clients:
 2. No API versioning rollout yet.
 3. No batch simulation contract.
 4. No immediate migration to character-ID-only request contract in this pass (tracked as future phase).
-5. No changes outside `docs/fix-api-contract-validation.md`, `docs/review-findings.md`, and `docs/SSOT.md` in this pass.
+5. No changes outside `docs/fixes/fix-api-contract-validation.md`, `docs/analysis/review-findings.md`, and `docs/architecture/SSOT.md` in this pass.
 
 ---
 

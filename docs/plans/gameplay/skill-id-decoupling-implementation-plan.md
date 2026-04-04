@@ -153,7 +153,7 @@ Test suite protects decoupled identity/name behavior.
 ## Workstream F — Documentation and SSOT updates
 
 ### Tasks
-1. Update `docs/SSOT.md` to explicitly define skill identity vs display naming.
+1. Update `docs/architecture/SSOT.md` to explicitly define skill identity vs display naming.
 2. Document numeric-string ID conventions and allocation policy.
 3. Add migration notes for downstream consumers (analytics, tools, replay readers).
 

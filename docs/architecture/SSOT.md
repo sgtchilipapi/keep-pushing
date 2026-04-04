@@ -86,7 +86,7 @@ Explicit non-goal for MVP:
 
 Canonical implementation details for this trust model are defined in:
 
-- `/docs/solana-battle-outcome-validation-mvp-unified-plan.md`
+- `/docs/architecture/solana/solana-battle-outcome-validation-mvp-unified-plan.md`
 
 ---
 

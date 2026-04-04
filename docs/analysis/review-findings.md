@@ -17,7 +17,7 @@ This document captures architecture and implementation findings across battle-re
 
 Entry 1 has been resolved by adopting a single shared canonical `CombatantSnapshot` strategy (Option A) and removing the duplicate engine-local ownership.
 
-Applied changes (per `docs/fix-combatant-snapshot-type-divergence.md`):
+Applied changes (per `docs/fixes/fix-combatant-snapshot-type-divergence.md`):
 - Canonical `CombatantSnapshot` ownership is in `types/combat.ts`.
 - `entityId` is unified as `string`.
 - `initiative` is treated as runtime-derived and no longer part of the canonical input snapshot.
@@ -96,7 +96,7 @@ Overall, this appears to be a legacy split between a “shared domain type layer
 
 Entry 2 has been resolved by unifying battle/combat contracts in the shared `/types` layer and hard-cutting away parallel schema interpretation.
 
-Applied changes (per `docs/fix-shared-type-layer.md`):
+Applied changes (per `docs/fixes/fix-shared-type-layer.md`):
 - `/types` is treated as canonical source of truth for shared battle/combat contracts.
 - Event payload keys are normalized to canonical names (for example: `actorId`, `targetId`, `sourceId`, `rollBP`) to eliminate dual key families.
 - Shared contracts use `string` entity IDs consistently.
@@ -146,7 +146,7 @@ This creates two conceptually valid but practically incompatible schema families
 
 **Fix Direction Locked**
 
-Entry 3 is now clarification-complete with a locked implementation direction documented in `docs/fix-api-contract-validation.md`.
+Entry 3 is now clarification-complete with a locked implementation direction documented in `docs/fixes/fix-api-contract-validation.md`.
 
 Locked direction:
 - Introduce canonical API DTO ownership under `/types/api/combat.ts` (separate from engine internal types).

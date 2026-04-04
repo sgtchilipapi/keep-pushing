@@ -9,7 +9,7 @@ This document updates the assessment of the TODO notes in `engine/battle/aiDecis
 - preserves deterministic behavior and replay safety,
 - and introduces lightweight foresight without overcommitting to full tree search.
 
-A delivery-grade implementation plan (tasks, milestones, tests, risks, rollout) is captured in `docs/ai-decision-implementation-plan.md`.
+A delivery-grade implementation plan (tasks, milestones, tests, risks, rollout) is captured in `docs/plans/ai/ai-decision-implementation-plan.md`.
 That implementation plan should keep the current documents as the **capability map**, while executing delivery as **vertical slices** that cut across those capabilities end-to-end.
 
 ## Current State Assessment (Codebase Reality)
@@ -267,8 +267,8 @@ So the Option B goal is:
 
 ## Related Documents
 
-- `docs/ai-decision-implementation-plan.md` (detailed execution plan)
-- `docs/planned-features.md` (portfolio-level tracking)
+- `docs/plans/ai/ai-decision-implementation-plan.md` (detailed execution plan)
+- `docs/analysis/planned-features.md` (portfolio-level tracking)
 
 ## Current delivery note
 

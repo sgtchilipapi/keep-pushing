@@ -4,8 +4,8 @@ This document locks the backend plan for replacing raw snapshot-driven battle ex
 
 Current-program-over-doc precedence:
 - If future-facing docs disagree with the implemented Anchor program, battle execution and persistence must follow the current `runana-program` settlement interface first and record the mismatch explicitly.
-- This document is a battle-execution-specific companion to [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/backend-solana-integration-implementation-plan.md), which remains the broader settlement integration reference.
-- This plan adopts only the subset of enemy architecture needed for static archetype-driven MVP battle generation. It does not adopt persistent enemy instances from [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/solana-enemy-data-architecture-plan.md).
+- This document is a battle-execution-specific companion to [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-solana-integration-implementation-plan.md), which remains the broader settlement integration reference.
+- This plan adopts only the subset of enemy architecture needed for static archetype-driven MVP battle generation. It does not adopt persistent enemy instances from [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-enemy-data-architecture-plan.md).
 
 ## Status
 
@@ -243,7 +243,7 @@ Status: Locked implementation plan for real character-driven combat, static enem
 
 9. Update bootstrap and operational helpers to consume the same enemy catalog definitions. The backend Solana bootstrap flow should read from the shared registry/zone table modules when seeding `EnemyArchetypeRegistryAccount` and `ZoneEnemySetAccount`, so settlement validation uses the exact same legality and EXP inputs as encounter generation.
 
-10. Finish by adding verification in the same order the feature was built. Add unit tests for character snapshot assembly and weighted encounter determinism, integration tests for atomic persistence and nonce allocation, route tests for the new API contract, and then extend the local manual flow in [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/local-solana-character-test-runbook.md) to cover real character creation, encounter execution, and successful settlement submission.
+10. Finish by adding verification in the same order the feature was built. Add unit tests for character snapshot assembly and weighted encounter determinism, integration tests for atomic persistence and nonce allocation, route tests for the new API contract, and then extend the local manual flow in [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/runbooks/local-solana-character-test-runbook.md) to cover real character creation, encounter execution, and successful settlement submission.
 
 ## Testing Plan
 
@@ -278,7 +278,7 @@ Status: Locked implementation plan for real character-driven combat, static enem
 
 ## Cross-References
 
-- [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/backend-solana-integration-implementation-plan.md)
-- [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/local-solana-character-test-runbook.md)
-- [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/solana-enemy-data-architecture-plan.md)
-- [solana-battle-outcome-validation-mvp-unified-plan.md](/home/paps/projects/keep-pushing/docs/solana-battle-outcome-validation-mvp-unified-plan.md)
+- [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-solana-integration-implementation-plan.md)
+- [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/runbooks/local-solana-character-test-runbook.md)
+- [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-enemy-data-architecture-plan.md)
+- [solana-battle-outcome-validation-mvp-unified-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-battle-outcome-validation-mvp-unified-plan.md)

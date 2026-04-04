@@ -2,7 +2,7 @@
 
 ## Status
 
-This document captures clarified decisions and the implementation plan for fixing **Entry 1** in `docs/review-findings.md`.
+This document captures clarified decisions and the implementation plan for fixing **Entry 1** in `docs/analysis/review-findings.md`.
 
 Scope is intentionally minimal and documentation-first for this pass.
 
@@ -27,7 +27,7 @@ Scope is intentionally minimal and documentation-first for this pass.
 14. **Breaking changes**: Allowed.
 15. **Deprecation/migration guidance**: Yes, include migration checklist.
 16. **Tests**: No test implementation now; provide test plan only (compile, unit, integration coverage plan).
-17. **Output location**: This document (`docs/fix-combatant-snapshot-type-divergence.md`).
+17. **Output location**: This document (`docs/fixes/fix-combatant-snapshot-type-divergence.md`).
 18. **Commit strategy**: Single commit.
 
 ---

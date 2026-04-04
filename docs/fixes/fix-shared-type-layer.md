@@ -2,7 +2,7 @@
 
 ## Status
 
-This document captures clarified decisions and the implementation plan for fixing **Entry 2** in `docs/review-findings.md`.
+This document captures clarified decisions and the implementation plan for fixing **Entry 2** in `docs/analysis/review-findings.md`.
 
 Scope for this pass is **documentation/plan only**. No production code changes are included in this pass.
 
@@ -25,7 +25,7 @@ Scope for this pass is **documentation/plan only**. No production code changes a
 | Preserve legacy useful fields/events/results | Preserve (after normalization) |
 | Internal-only engine fields | Exclude runtime/bookkeeping/debug internals from shared public contracts |
 | API DTOs | Leave untouched unless blocked |
-| Architecture docs | Update `docs/review-findings.md` + `docs/SSOT.md`; do not update `docs/ai-decision-design-trajectory.md` |
+| Architecture docs | Update `docs/analysis/review-findings.md` + `docs/architecture/SSOT.md`; do not update `docs/plans/ai/ai-decision-design-trajectory.md` |
 | Rollout model | One-shot migration |
 | Testing in this task | Test plan only (no implementation) |
 | Verification bar (when implementing) | Full test suite |
@@ -136,13 +136,13 @@ These are **not** to be exposed as shared public type contract fields unless exp
 
 ## 4) Documentation updates (required by decisions)
 
-### `docs/review-findings.md`
+### `docs/analysis/review-findings.md`
 - Add status note under Entry 2 indicating canonical shared type unification path and hard-cut migration intent.
 
-### `docs/SSOT.md`
+### `docs/architecture/SSOT.md`
 - Add/adjust section declaring `/types` as source of truth for battle/combat contracts, with pointer to normalized event schema.
 
-### `docs/ai-decision-design-trajectory.md`
+### `docs/plans/ai/ai-decision-design-trajectory.md`
 - No changes (explicitly out of scope).
 
 ---
@@ -168,8 +168,8 @@ During implementation pass:
 - [ ] Preserve useful event and battle-result semantics while standardizing key names.
 - [ ] Keep runtime/bookkeeping/debug internals out of shared public contracts.
 - [ ] Keep API DTO contract untouched unless migration is blocked by type-level constraints.
-- [ ] Update `docs/review-findings.md` with Entry 2 status.
-- [ ] Update `docs/SSOT.md` source-of-truth note.
+- [ ] Update `docs/analysis/review-findings.md` with Entry 2 status.
+- [ ] Update `docs/architecture/SSOT.md` source-of-truth note.
 - [ ] Run full test suite.
 - [ ] Add/verify negative coverage that legacy schema usage fails clearly.
 
@@ -203,7 +203,7 @@ During implementation pass:
 1. No production code modifications.
 2. No adapter/compatibility shim layer.
 3. No phased rollout; this plan targets a one-shot migration.
-4. No changes to `docs/ai-decision-design-trajectory.md`.
+4. No changes to `docs/plans/ai/ai-decision-design-trajectory.md`.
 
 ---
 

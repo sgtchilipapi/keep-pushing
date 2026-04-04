@@ -4,18 +4,18 @@ Status: Locked implementation plan for backend integration against the current `
 
 Current-program-over-doc precedence:
 - If future-facing docs disagree with the implemented Anchor program, backend integration follows the current program interface first and records the mismatch explicitly.
-- This document is the concrete execution plan derived from repo inspection. It does not replace [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/backend-spec-plan.md), which remains the original implementation brief.
+- This document is the concrete execution plan derived from repo inspection. It does not replace [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-spec-plan.md), which remains the original implementation brief.
 
 ## Phase 1 — Context Ingestion
 
 ### Files inspected
 
 Docs:
-- [SSOT.md](/home/paps/projects/keep-pushing/docs/SSOT.md)
-- [solana-battle-outcome-validation-mvp-unified-plan.md](/home/paps/projects/keep-pushing/docs/solana-battle-outcome-validation-mvp-unified-plan.md)
-- [solana-playable-character-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/solana-playable-character-data-architecture-plan.md)
-- [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/solana-enemy-data-architecture-plan.md)
-- [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/backend-spec-plan.md)
+- [SSOT.md](/home/paps/projects/keep-pushing/docs/architecture/SSOT.md)
+- [solana-battle-outcome-validation-mvp-unified-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-battle-outcome-validation-mvp-unified-plan.md)
+- [solana-playable-character-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-playable-character-data-architecture-plan.md)
+- [solana-enemy-data-architecture-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-enemy-data-architecture-plan.md)
+- [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-spec-plan.md)
 
 On-chain program and harness:
 - [lib.rs](/home/paps/projects/runana-program/programs/runana-program/src/lib.rs)
@@ -618,7 +618,7 @@ Backend/server:
 
 ## Assumptions And Locked Defaults
 
-- This doc is the concrete backend implementation plan. The original brief in [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/backend-spec-plan.md) remains unchanged.
+- This doc is the concrete backend implementation plan. The original brief in [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-spec-plan.md) remains unchanged.
 - Scope is locked to:
   - settlement integration
   - player-owned character creation integration

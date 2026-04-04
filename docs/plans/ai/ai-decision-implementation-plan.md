@@ -348,7 +348,7 @@ Each slice below contains the **actual implementation tasks** for a coding agent
   - trace schema + feature contribution assertions.
 - `tests/combatSimulation.scenarioMatrix.test.ts`
   - parity and behavior scenario coverage.
-- `docs/ai-decision-design-trajectory.md`
+- `docs/plans/ai/ai-decision-design-trajectory.md`
   - architecture and rationale summary.
 
 ## Future Add-On Backlog

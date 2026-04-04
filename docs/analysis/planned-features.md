@@ -32,7 +32,7 @@ Consider replacing the single combined hit-threshold check with two independent 
 ## Entry 2: AI Decision System Redesign Trajectory
 
 ### Description
-Summarize and execute a phased redesign of battle AI decision-making so scoring is feature-driven, intent-aware, and still deterministic/testable. For full rationale and detailed phase breakdown, see `docs/ai-decision-design-trajectory.md`.
+Summarize and execute a phased redesign of battle AI decision-making so scoring is feature-driven, intent-aware, and still deterministic/testable. For full rationale and detailed phase breakdown, see `docs/plans/ai/ai-decision-design-trajectory.md`.
 
 ### Current State
 - Slice 1 is complete on the current branch: AI now receives a deterministic `DecisionContext` containing actor, target, and battle snapshots, and emits `decision-trace.v2` logs with the richer context payload.

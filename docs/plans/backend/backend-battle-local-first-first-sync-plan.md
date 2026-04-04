@@ -4,7 +4,7 @@ This document defines the Model 2 plan for allowing a character to battle before
 
 Current-program-over-doc precedence:
 - If this document conflicts with the current `runana-program`, implementation must follow the program interface first and record the mismatch explicitly.
-- This document is a companion to [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/backend-solana-integration-implementation-plan.md) and [backend-battle-real-character-enemy-integration-plan.md](/home/paps/projects/keep-pushing/docs/backend-battle-real-character-enemy-integration-plan.md).
+- This document is a companion to [backend-solana-integration-implementation-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-solana-integration-implementation-plan.md) and [backend-battle-real-character-enemy-integration-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-battle-real-character-enemy-integration-plan.md).
 - This plan extends the existing settlement-backed combat direction instead of replacing the current confirmed-character flow.
 
 ## Status

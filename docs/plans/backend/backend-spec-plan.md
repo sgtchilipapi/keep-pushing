@@ -46,7 +46,7 @@ PHASE 1 — CONTEXT INGESTION
 First inspect and summarize the relevant source material before proposing changes.
 
 Read in this order:
-1. docs/SSOT.md
+1. docs/architecture/SSOT.md
 2. all docs directly related to:
    - Solana program integration
    - settlement pipeline
@@ -250,4 +250,4 @@ Output format rules:
 - Keep explanations tight and tied to the actual codebase
 - Prefer concrete file-level reasoning over generic advice
 
-Now begin by reading docs/SSOT.md, then the relevant Solana docs and server modules, and produce Phase 1.
+Now begin by reading docs/architecture/SSOT.md, then the relevant Solana docs and server modules, and produce Phase 1.

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document captures clarified decisions and the implementation plan for fixing **Entry 4** in `docs/review-findings.md`.
+This document captures clarified decisions and the implementation plan for fixing **Entry 4** in `docs/analysis/review-findings.md`.
 
 Scope for this pass is **documentation/plan only**. No production code changes are included in this pass.
 
@@ -41,7 +41,7 @@ Scope for this pass is **documentation/plan only**. No production code changes a
 | Multi-target deterministic order | `SPD` descending, then `entityId` ascending |
 | Testing scope | Both unit + engine integration tests |
 | Snapshot testing | Use snapshot-style event log tests |
-| Docs in implementation pass | Update `docs/review-findings.md` and `docs/SSOT.md` |
+| Docs in implementation pass | Update `docs/analysis/review-findings.md` and `docs/architecture/SSOT.md` |
 
 ---
 
@@ -70,7 +70,7 @@ This hard cut intentionally removes transitional ambiguity and enforces one cano
 
 ## SSOT alignment and required spec update
 
-`docs/SSOT.md` already enforces determinism, integer math, seeded RNG, and canonical contract ownership. Entry 4 implementation must align and clarify one missing area: **status timing semantics**.
+`docs/architecture/SSOT.md` already enforces determinism, integer math, seeded RNG, and canonical contract ownership. Entry 4 implementation must align and clarify one missing area: **status timing semantics**.
 
 ### Required SSOT addition (implementation pass)
 
@@ -189,8 +189,8 @@ Also document:
 
 ### Planned files
 - `types/battle.ts`
-- `docs/SSOT.md`
-- `docs/review-findings.md`
+- `docs/architecture/SSOT.md`
+- `docs/analysis/review-findings.md`
 
 ### Planned changes
 1. Verify lifecycle events use canonical key names.
@@ -250,8 +250,8 @@ Also document:
 | `engine/battle/phases/statusResolutionPhase.ts` | New (optional) | Keep round flow maintainable and testable |
 | `types/battle.ts` | Extend event union | Add `STATUS_EFFECT_RESOLVE` canonical event |
 | `types/api/combat.ts` | Update response DTO if needed | Keep API event contracts aligned |
-| `docs/SSOT.md` | Spec update | Codify status timing as SSOT |
-| `docs/review-findings.md` | Status update for Entry 4 | Mark direction locked, implementation pending/completed |
+| `docs/architecture/SSOT.md` | Spec update | Codify status timing as SSOT |
+| `docs/analysis/review-findings.md` | Status update for Entry 4 | Mark direction locked, implementation pending/completed |
 | `tests/*` | New/updated tests | Verify deterministic ordering and fail-fast guarantees |
 
 ---
