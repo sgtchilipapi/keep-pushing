@@ -69,14 +69,36 @@ describe("player-owned Solana transaction flow", () => {
       authority: "player-wallet-1",
       feePayer: "player-wallet-1",
       serializedMessageBase64: toBase64("character-create-message"),
+      serializedTransactionBase64: toBase64("unsigned-character-create-transaction"),
+      localCharacterId: "local-character-1",
+      chainCharacterIdHex: "00112233445566778899aabbccddeeff",
+      characterRootPubkey: "character-root-1",
+      characterCreationTs: 1_700_000_000,
+      seasonIdAtCreation: 4,
+      initialUnlockedZoneId: 1,
+      recentBlockhash: "recent-blockhash-1",
+      lastValidBlockHeight: 88,
     });
 
     expect(prepared.kind).toBe("character_create");
     expect(prepared.authority).toBe("player-wallet-1");
     expect(prepared.feePayer).toBe("player-wallet-1");
+    expect(prepared.serializedTransactionBase64).toBe(
+      toBase64("unsigned-character-create-transaction"),
+    );
     expect(prepared.requiresPlayerSignature).toBe(true);
     expect(prepared.serverBroadcast).toBe(true);
     expect(prepared.messageSha256Hex).toHaveLength(64);
+    expect(prepared.characterCreationRelay).toEqual({
+      localCharacterId: "local-character-1",
+      chainCharacterIdHex: "00112233445566778899aabbccddeeff",
+      characterRootPubkey: "character-root-1",
+      characterCreationTs: 1_700_000_000,
+      seasonIdAtCreation: 4,
+      initialUnlockedZoneId: 1,
+      recentBlockhash: "recent-blockhash-1",
+      lastValidBlockHeight: 88,
+    });
   });
 
   it("rejects sponsored character creation before broadcast", () => {
@@ -85,6 +107,15 @@ describe("player-owned Solana transaction flow", () => {
         authority: "player-wallet-1",
         feePayer: "server-wallet-1",
         serializedMessageBase64: toBase64("character-create-message"),
+        serializedTransactionBase64: toBase64("unsigned-character-create-transaction"),
+        localCharacterId: "local-character-1",
+        chainCharacterIdHex: "00112233445566778899aabbccddeeff",
+        characterRootPubkey: "character-root-1",
+        characterCreationTs: 1_700_000_000,
+        seasonIdAtCreation: 4,
+        initialUnlockedZoneId: 1,
+        recentBlockhash: "recent-blockhash-1",
+        lastValidBlockHeight: 88,
       }),
     ).toThrow(/ERR_PLAYER_MUST_PAY/);
   });

@@ -509,6 +509,8 @@ Backend/server:
   - localnet bootstrap can be performed from repository helpers without manual instruction crafting
 
 ### Step 5 — Add real player-owned character creation flow
+- Status:
+  - complete
 - Objective:
   - connect local character creation to on-chain character creation
 - Files/modules affected:
@@ -525,6 +527,8 @@ Backend/server:
   - backend can create a local character record plus prepare and relay the matching on-chain create-character transaction
 
 ### Step 6 — Add deterministic batch sealing and dry-run validation
+- Status:
+  - complete
 - Objective:
   - seal valid canonical batches before player signing
 - Files/modules affected:

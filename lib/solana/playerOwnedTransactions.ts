@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  CharacterCreationRelayMetadata,
   PrepareCharacterCreationTransactionRequest,
   PreparedPlayerOwnedTransaction,
   PrepareSettlementTransactionRequest,
@@ -149,6 +150,30 @@ function buildSettlementRelayMetadata(
   };
 }
 
+function buildCharacterCreationRelayMetadata(
+  request: PrepareCharacterCreationTransactionRequest,
+): CharacterCreationRelayMetadata {
+  assertNonEmptyString(request.localCharacterId, "localCharacterId");
+  assertNonEmptyString(request.chainCharacterIdHex, "chainCharacterIdHex");
+  assertNonEmptyString(request.characterRootPubkey, "characterRootPubkey");
+  assertNonEmptyString(request.recentBlockhash, "recentBlockhash");
+  assertInteger(request.characterCreationTs, "characterCreationTs", 0);
+  assertInteger(request.seasonIdAtCreation, "seasonIdAtCreation", 0);
+  assertInteger(request.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
+  assertInteger(request.lastValidBlockHeight, "lastValidBlockHeight", 0);
+
+  return {
+    localCharacterId: request.localCharacterId,
+    chainCharacterIdHex: request.chainCharacterIdHex,
+    characterRootPubkey: request.characterRootPubkey,
+    characterCreationTs: request.characterCreationTs,
+    seasonIdAtCreation: request.seasonIdAtCreation,
+    initialUnlockedZoneId: request.initialUnlockedZoneId,
+    recentBlockhash: request.recentBlockhash,
+    lastValidBlockHeight: request.lastValidBlockHeight,
+  };
+}
+
 function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): void {
   assertInteger(payload.batchId, "payload.batchId", 1);
   assertInteger(payload.startNonce, "payload.startNonce", 1);
@@ -178,11 +203,14 @@ function buildPreparedTransaction(
   authority: string,
   feePayer: string,
   serializedMessageBase64: string,
+  serializedTransactionBase64: string,
+  characterCreationRelay?: CharacterCreationRelayMetadata,
   settlementRelay?: SettlementRelayMetadata,
 ): PreparedPlayerOwnedTransaction {
   assertNonEmptyString(authority, "authority");
   assertNonEmptyString(feePayer, "feePayer");
   assertNonEmptyString(serializedMessageBase64, "serializedMessageBase64");
+  assertNonEmptyString(serializedTransactionBase64, "serializedTransactionBase64");
   assertPlayerPaysOwnTransaction(authority, feePayer, kind);
 
   return {
@@ -190,9 +218,11 @@ function buildPreparedTransaction(
     authority,
     feePayer,
     serializedMessageBase64,
+    serializedTransactionBase64,
     messageSha256Hex: sha256Hex(serializedMessageBase64),
     requiresPlayerSignature: true,
     serverBroadcast: true,
+    characterCreationRelay,
     settlementRelay,
   };
 }
@@ -200,11 +230,15 @@ function buildPreparedTransaction(
 export function prepareCharacterCreationTransaction(
   request: PrepareCharacterCreationTransactionRequest,
 ): PreparedPlayerOwnedTransaction {
+  const characterCreationRelay = buildCharacterCreationRelayMetadata(request);
+
   return buildPreparedTransaction(
     "character_create",
     request.authority,
     request.feePayer,
     request.serializedMessageBase64,
+    request.serializedTransactionBase64 ?? request.serializedMessageBase64,
+    characterCreationRelay,
   );
 }
 
@@ -218,6 +252,8 @@ export function prepareSettlementTransaction(
     request.playerAuthority,
     request.feePayer,
     request.serializedMessageBase64,
+    request.serializedTransactionBase64 ?? request.serializedMessageBase64,
+    undefined,
     settlementRelay,
   );
 }
@@ -242,6 +278,7 @@ export function acceptSignedPlayerOwnedTransaction(
     signedTransactionBase64: request.signedTransactionBase64,
     signedTransactionSha256Hex: sha256Hex(request.signedTransactionBase64),
     acceptedForBroadcast: true,
+    characterCreationRelay: request.prepared.characterCreationRelay,
     settlementRelay: request.prepared.settlementRelay,
   };
 }

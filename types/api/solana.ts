@@ -48,14 +48,27 @@ export interface SettlementRelayMetadata {
   reconciliationKey: string;
 }
 
+export interface CharacterCreationRelayMetadata {
+  localCharacterId: string;
+  chainCharacterIdHex: string;
+  characterRootPubkey: string;
+  characterCreationTs: number;
+  seasonIdAtCreation: number;
+  initialUnlockedZoneId: number;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+}
+
 export interface PreparedPlayerOwnedTransaction {
   kind: PlayerOwnedTransactionKind;
   authority: string;
   feePayer: string;
   serializedMessageBase64: string;
+  serializedTransactionBase64: string;
   messageSha256Hex: string;
   requiresPlayerSignature: true;
   serverBroadcast: true;
+  characterCreationRelay?: CharacterCreationRelayMetadata;
   settlementRelay?: SettlementRelayMetadata;
 }
 
@@ -67,6 +80,7 @@ export interface SubmittedPlayerOwnedTransaction {
   signedTransactionBase64: string;
   signedTransactionSha256Hex: string;
   acceptedForBroadcast: true;
+  characterCreationRelay?: CharacterCreationRelayMetadata;
   settlementRelay?: SettlementRelayMetadata;
 }
 
@@ -74,6 +88,15 @@ export interface PrepareCharacterCreationTransactionRequest {
   authority: string;
   feePayer: string;
   serializedMessageBase64: string;
+  serializedTransactionBase64?: string;
+  localCharacterId: string;
+  chainCharacterIdHex: string;
+  characterRootPubkey: string;
+  characterCreationTs: number;
+  seasonIdAtCreation: number;
+  initialUnlockedZoneId: number;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
 }
 
 export interface PrepareSettlementTransactionRequest {
@@ -85,6 +108,7 @@ export interface PrepareSettlementTransactionRequest {
   permitDomain: SettlementPermitDomain;
   relayRequestId?: string;
   serializedMessageBase64: string;
+  serializedTransactionBase64?: string;
 }
 
 export interface SubmitSignedPlayerOwnedTransactionRequest {

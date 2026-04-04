@@ -4,6 +4,11 @@ import {
   SettlementValidationContext,
   ZoneState,
 } from "../../types/settlement";
+import {
+  accountCharacterIdHex,
+  accountStateHashHex,
+} from "./runanaAccounts";
+import type { SettlementInstructionAccountEnvelope } from "./runanaSettlementEnvelope";
 
 const THROUGHPUT_CAP_PER_MINUTE = 20;
 
@@ -56,6 +61,102 @@ function deriveExpDelta(
   }
 
   return totalExp;
+}
+
+export interface BuildSettlementValidationContextArgs {
+  envelope: SettlementInstructionAccountEnvelope;
+  currentUnixTimestamp: number;
+  currentSlot: number;
+  serverSigner: string;
+}
+
+export function buildSettlementValidationContext(
+  args: BuildSettlementValidationContextArgs,
+): SettlementValidationContext {
+  const zoneStates = new Map<number, ZoneState>();
+  const pages = [args.envelope.primaryZoneProgressPage, ...args.envelope.additionalZoneProgressPages];
+
+  for (const page of pages) {
+    const pageBaseZoneId = page.pageIndex * 256;
+    page.zoneStates.forEach((state, offset) => {
+      if (state === 0 || state === 1 || state === 2) {
+        zoneStates.set(pageBaseZoneId + offset, state);
+      }
+    });
+  }
+
+  return {
+    currentUnixTimestamp: args.currentUnixTimestamp,
+    currentSlot: args.currentSlot,
+    playerAuthority: args.envelope.playerAuthority.toBase58(),
+    serverSigner: args.serverSigner,
+    characterRoot: {
+      characterId: accountCharacterIdHex(args.envelope.characterRoot.characterId),
+      authority: args.envelope.characterRoot.authority.toBase58(),
+      characterCreationTs: Number(args.envelope.characterRoot.characterCreationTs),
+    },
+    characterStats: {
+      level: args.envelope.characterStats.level,
+      totalExp: Number(args.envelope.characterStats.totalExp),
+    },
+    characterWorldProgress: {
+      highestUnlockedZoneId: args.envelope.characterWorldProgress.highestUnlockedZoneId,
+      highestClearedZoneId: args.envelope.characterWorldProgress.highestClearedZoneId,
+    },
+    zoneStates,
+    cursor: {
+      lastCommittedEndNonce: Number(args.envelope.characterBatchCursor.lastCommittedEndNonce),
+      lastCommittedStateHash: accountStateHashHex(args.envelope.characterBatchCursor.lastCommittedStateHash),
+      lastCommittedBatchId: Number(args.envelope.characterBatchCursor.lastCommittedBatchId),
+      lastCommittedBattleTs: Number(args.envelope.characterBatchCursor.lastCommittedBattleTs),
+      lastCommittedSeasonId: args.envelope.characterBatchCursor.lastCommittedSeasonId,
+      updatedAtSlot: Number(args.envelope.characterBatchCursor.updatedAtSlot),
+    },
+    programConfig: {
+      settlementPaused: args.envelope.programConfig.settlementPaused,
+      maxBattlesPerBatch: args.envelope.programConfig.maxBattlesPerBatch,
+      maxHistogramEntriesPerBatch: args.envelope.programConfig.maxHistogramEntriesPerBatch,
+      trustedServerSigner: args.envelope.programConfig.trustedServerSigner.toBase58(),
+    },
+    seasonPolicy: {
+      seasonId: args.envelope.seasonPolicy.seasonId,
+      seasonStartTs: Number(args.envelope.seasonPolicy.seasonStartTs),
+      seasonEndTs: Number(args.envelope.seasonPolicy.seasonEndTs),
+      commitGraceEndTs: Number(args.envelope.seasonPolicy.commitGraceEndTs),
+    },
+    zoneRegistry: new Map(
+      args.envelope.zoneRegistries.map((entry) => [
+        entry.zoneId,
+        {
+          zoneId: entry.zoneId,
+          expMultiplierNum: entry.expMultiplierNum,
+          expMultiplierDen: entry.expMultiplierDen,
+        },
+      ]),
+    ),
+    zoneEnemySet: new Map(
+      args.envelope.zoneEnemySets.map((entry) => [
+        entry.zoneId,
+        new Set(entry.allowedEnemyArchetypeIds),
+      ]),
+    ),
+    enemyArchetypes: new Map(
+      args.envelope.enemyArchetypeRegistries.map((entry) => [
+        entry.enemyArchetypeId,
+        {
+          enemyArchetypeId: entry.enemyArchetypeId,
+          expRewardBase: entry.expRewardBase,
+        },
+      ]),
+    ),
+  };
+}
+
+export function dryRunApplyBattleSettlementBatchV1(
+  payload: SettlementBatchPayloadV2,
+  args: BuildSettlementValidationContextArgs,
+): SettlementApplyResult {
+  return applyBattleSettlementBatchV1(payload, buildSettlementValidationContext(args));
 }
 
 export function applyBattleSettlementBatchV1(
