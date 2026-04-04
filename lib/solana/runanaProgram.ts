@@ -173,6 +173,18 @@ export function deriveRunanaCharacterAccounts(
   };
 }
 
+export function computeGenesisStateHashHex(
+  characterRoot: PublicKey,
+  characterIdHex: string,
+): string {
+  return createHash('sha256')
+    .update(characterRoot.toBuffer())
+    .update(encodeRunanaCharacterId(characterIdHex))
+    .update(Buffer.alloc(8))
+    .update(Buffer.alloc(8))
+    .digest('hex');
+}
+
 function sortedUnique(values: number[]): number[] {
   return [...new Set(values)].sort((left, right) => left - right);
 }

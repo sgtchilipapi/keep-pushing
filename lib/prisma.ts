@@ -326,6 +326,11 @@ export type UpdateSettlementSubmissionAttemptInput = {
   resolvedAt?: Date | null;
 };
 
+export type RebasedBattleNonceAssignment = {
+  id: string;
+  battleNonce: number;
+};
+
 type CharacterChainStateRow = {
   id: string;
   playerAuthorityPubkey: string | null;
@@ -1602,6 +1607,95 @@ export const prisma = {
       return result.rows[0]
         ? parseRequiredSafeInteger(result.rows[0].localSequence, 'localSequence')
         : null;
+    },
+    async rebaseAwaitingFirstSyncBattleNonces(
+      characterId: string,
+      assignments: RebasedBattleNonceAssignment[],
+    ) {
+      if (assignments.length === 0) {
+        return [] satisfies BattleOutcomeLedgerRecord[];
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const updated: BattleOutcomeLedgerRecord[] = [];
+
+        for (const assignment of assignments) {
+          const result = await client.query<BattleOutcomeLedgerRow>(
+            `UPDATE "BattleOutcomeLedger"
+            SET
+              "battleNonce" = $2,
+              "updatedAt" = $3
+            WHERE id = $1 AND "characterId" = $4 AND "settlementStatus" = 'AWAITING_FIRST_SYNC'
+            RETURNING
+              id,
+              "characterId",
+              "battleId",
+              "localSequence",
+              "battleNonce",
+              "battleTs",
+              "seasonId",
+              "zoneId",
+              "enemyArchetypeId",
+              "zoneProgressDeltaJson",
+              "settlementStatus",
+              "sealedBatchId",
+              "committedAt",
+              "createdAt",
+              "updatedAt"`,
+            [assignment.id, assignment.battleNonce, new Date(), characterId],
+          );
+
+          if (result.rows[0] === undefined) {
+            throw new Error(
+              `ERR_BATTLE_REBASE_NOT_FOUND: could not update awaiting-first-sync battle ${assignment.id}`,
+            );
+          }
+          updated.push(mapBattleOutcomeLedger(result.rows[0]));
+        }
+
+        await client.query('COMMIT');
+        return updated;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async markArchivedLocalOnly(ids: string[]) {
+      if (ids.length === 0) {
+        return [] satisfies BattleOutcomeLedgerRecord[];
+      }
+
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `UPDATE "BattleOutcomeLedger"
+        SET
+          "battleNonce" = NULL,
+          "settlementStatus" = 'LOCAL_ONLY_ARCHIVED',
+          "updatedAt" = $2
+        WHERE id = ANY($1::text[])
+        RETURNING
+          id,
+          "characterId",
+          "battleId",
+          "localSequence",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"`,
+        [ids, new Date()]
+      );
+
+      return result.rows.map(mapBattleOutcomeLedger);
     },
     async markCommittedForBatch(sealedBatchId: string, committedAt = new Date()) {
       const result = await pool.query<BattleOutcomeLedgerRow>(
