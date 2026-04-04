@@ -1,212 +1,555 @@
-You are my front-end implementation agent for this project.
+# Frontend Battle And Sync UX Spec
 
-Your job is to do spec-driven front-end development, not freestyle design.
+## Purpose
 
-Context:
-- This is a game/application front-end with a systems-first product philosophy.
-- The front-end must feel deliberate, structured, compact, and functional.
-- Do not produce decorative fluff, random layout choices, vague UX, or over-designed marketing-style UI.
-- Prioritize clarity, hierarchy, responsive structure, and implementation discipline.
-- Mobile-first is mandatory.
-- Treat the front-end like a system with rules, not like a dribbble shot.
+This document defines the frontend product shape for the current local-first battle flow.
+It is project-specific and aligned to the implemented backend contract in
+`docs/api/deferred-settlement-api-spec.md`.
 
-Tech constraints:
-- Use Next.js App Router
-- Use TypeScript
-- Use Tailwind CSS
-- Use shadcn/ui where appropriate
-- Reuse existing patterns/components if available
-- Do not introduce unnecessary dependencies
-- Do not invent new design systems unless explicitly instructed
-- Keep components modular and composable
-- Output code that is production-oriented, readable, and easy to extend
+The frontend must let a player:
 
-General implementation rules:
-- Do not jump straight into final code
-- Work in phases
-- Be explicit about assumptions
-- If something is unspecified, choose the most conservative, structurally clean option
-- Do not redesign the product concept
-- Do not add extra features not requested
-- Do not add animations unless explicitly justified
-- Do not use gradients, glassmorphism, excessive shadows, or visual gimmicks unless explicitly instructed
-- Do not produce bloated card stacks or poor mobile density
-- Keep the UI high-signal and low-noise
+1. bootstrap a backend user
+2. create a local-first character
+3. run battles immediately without requiring on-chain creation first
+4. understand whether battle results are only local, awaiting first sync, syncing, failed, or confirmed
+5. connect a wallet and complete first sync when ready
+6. continue normal post-sync settlement afterward
 
-You must follow this workflow exactly:
+This is a systems UI, not a marketing site. The interface should optimize for:
 
-PHASE 1 — PAGE CONTRACT
-Before coding, define the page contract with these headings:
+- fast scanning
+- clear state visibility
+- compact density
+- strong action hierarchy
+- mobile-first use
 
-1. Page Purpose
-- What this page is for
-- What user goal it serves
+## Product Model
 
-2. Primary Action
-- The single most important CTA
+The frontend is built around one main gameplay object: the current player character.
 
-3. Secondary Actions
-- Supporting actions only
+That character moves through these major product states:
 
-4. Required Data
-- What data the page needs
+| Stage | Meaning | Frontend Priority |
+| --- | --- | --- |
+| No user | No backend identity exists yet | create user silently or with one clear CTA |
+| No character | Backend user exists but has no character | create character |
+| Local-first ready | Character exists only in backend storage | battle immediately |
+| Local backlog | One or more battles exist with `AWAITING_FIRST_SYNC` or `SEALED` status | keep battling or sync to chain |
+| First sync pending | First-sync transaction is being authorized, signed, submitted, or retried | keep sync state highly visible |
+| Chain confirmed | Character exists on chain | continue battling and settle normally |
 
-5. Required UI States
+The frontend must not hide these transitions. Chain state is part of the core product, not an advanced detail.
+
+## Primary User Flow
+
+### 1. Bootstrap User
+
+API:
+
+- `POST /api/auth/anon`
+
+Outcome:
+
+- frontend stores `userId`
+
+### 2. Load Character Read Model
+
+API:
+
+- `GET /api/character?userId=<userId>`
+
+Outcome:
+
+- if `character = null`, show character creation
+- if `character` exists, render the gameplay dashboard using the read model
+
+### 3. Create Local Character
+
+API:
+
+- `POST /api/character/create`
+
+Outcome:
+
+- character enters local-first state
+- provisional zone progress exists
+- chain status starts at `NOT_STARTED`
+
+### 4. Simulate Battle
+
+API:
+
+- `POST /api/combat/encounter`
+
+Outcome:
+
+- battle replay is returned immediately
+- latest battle state updates
+- settlement status becomes:
+  - `AWAITING_FIRST_SYNC` before chain creation
+  - `PENDING` after chain confirmation
+
+### 5. First Sync To Chain
+
+APIs:
+
+- `POST /api/solana/character/first-sync/prepare`
+- `POST /api/solana/character/first-sync/submit`
+
+Outcome:
+
+- user signs authorization message
+- user signs atomic transaction
+- backend submits transaction
+- chain state becomes `CONFIRMED` on success
+
+### 6. Ongoing Settlement After First Sync
+
+APIs:
+
+- `POST /api/solana/settlement/prepare`
+- `POST /api/solana/settlement/submit`
+
+Outcome:
+
+- post-sync battles are settled through the normal pipeline
+
+## Route And Screen Map
+
+The frontend can stay small initially. It does not need many routes, but each screen must be state-rich.
+
+### `app/page.tsx`
+
+Role:
+
+- entry point and primary game shell
+
+Responsibilities:
+
+- bootstrap anonymous user if needed
+- fetch the current character read model
+- route the player into one of the top-level screen states
+
+Top-level render states:
+
+- no user bootstrap yet
+- user exists but no character
+- character dashboard
+- fatal load error
+
+### Character Creation Screen
+
+Purpose:
+
+- create the first playable character with minimal friction
+
+Primary CTA:
+
+- `Create Character`
+
+Required data:
+
+- `userId`
+
+Required states:
+
+- idle
+- submitting
+- validation error
+- request failure
+
+### Character Dashboard Screen
+
+Purpose:
+
+- home screen for the player’s current character
+- central place for progression, battle, and chain sync state
+
+Primary CTA:
+
+- changes by state:
+  - `Battle` when the character is local-first ready
+  - `Sync to Chain` when deferred backlog exists
+  - `Settle Pending Batch` when chain-confirmed settlement is pending
+
+Required regions:
+
+1. character header
+2. chain and sync status
+3. provisional or canonical progression summary
+4. latest battle summary
+5. primary action area
+6. secondary action area
+
+### Battle Result Surface
+
+Purpose:
+
+- show the latest encounter outcome without leaving the main gameplay loop
+
+It can be:
+
+- an inline section on the dashboard
+- a drawer
+- or a dedicated mobile-first subview
+
+It must show:
+
+- winner
+- enemy name/id
+- rounds played
+- settlement status
+- generated seed
+- replay-oriented summary data
+
+### First Sync Flow Surface
+
+Purpose:
+
+- guide the player through wallet-dependent first sync without ambiguity
+
+This may be:
+
+- a modal flow
+- or a dedicated panel/route
+
+It must separate these steps clearly:
+
+1. connect wallet
+2. authorize batch
+3. sign transaction
+4. submit
+5. confirm or fail
+
+### Post-Sync Settlement Surface
+
+Purpose:
+
+- handle later settlement batches after the character already exists on chain
+
+It should reuse the same visual language as first sync, but must be clearly labeled as
+`Settlement`, not `Character Creation`.
+
+## Screen Contracts
+
+### Character Creation Screen Contract
+
+| Item | Requirement |
+| --- | --- |
+| Page purpose | Create the player’s first backend character |
+| Primary action | `Create Character` |
+| Secondary actions | rename input, retry on failure |
+| Critical data | `userId` |
+| Above-the-fold mobile content | title, short explanation, name input, primary CTA |
+| Subordinate content | optional helper copy |
+
+### Character Dashboard Screen Contract
+
+| Item | Requirement |
+| --- | --- |
+| Page purpose | Operate the current character across local play and chain sync |
+| Primary action | State-driven: `Battle`, `Sync to Chain`, or `Settle Pending Batch` |
+| Secondary actions | change zone, reconnect wallet, retry failed sync, inspect latest battle |
+| Critical data | character read model from `GET /api/character` |
+| Above-the-fold mobile content | character summary, chain status, latest actionable CTA |
+| Subordinate content | verbose lore copy, low-priority metadata |
+
+### First Sync Flow Contract
+
+| Item | Requirement |
+| --- | --- |
+| Page purpose | Convert local backlog into the first on-chain character + settlement batch |
+| Primary action | progress to next signing/submission step |
+| Secondary actions | cancel, retry, reconnect wallet |
+| Critical data | read model plus first-sync prepare responses |
+| Above-the-fold mobile content | current step, required action, clear wallet instruction |
+| Subordinate content | raw hashes, expanded payload diagnostics |
+
+## Data Dependencies
+
+### Core Read Model
+
+Source:
+
+- `GET /api/character?userId=<userId>`
+
+Frontend uses:
+
+- `characterId`
+- `name`, `level`, `exp`, `stats`
+- `chain.chainCreationStatus`
+- `chain.chainCharacterIdHex`
+- `chain.characterRootPubkey`
+- `chain.cursor`
+- `provisionalProgress`
+- `latestBattle`
+- `nextSettlementBatch`
+
+This route should be treated as the page-level source of truth after any mutation completes.
+
+### Battle Mutation
+
+Source:
+
+- `POST /api/combat/encounter`
+
+Frontend uses:
+
+- `battleId`
+- `enemyArchetypeId`
+- `seed`
+- `battleNonce`
+- `battleTs`
+- `settlementStatus`
+- `battleResult`
+
+### First Sync Prepare
+
+Source:
+
+- `POST /api/solana/character/first-sync/prepare`
+
+Phase 1 fields used by the client:
+
+- `phase`
+- `payload`
+- `expectedCursor`
+- `permitDomain`
+- `playerAuthorizationMessageBase64`
+
+Phase 2 fields used by the client:
+
+- `serverAttestationMessageBase64`
+- `preparedTransaction`
+
+### First Sync Submit
+
+Source:
+
+- `POST /api/solana/character/first-sync/submit`
+
+Frontend uses:
+
+- `chainCreationStatus`
+- `transactionSignature`
+- `chainCharacterIdHex`
+- `characterRootPubkey`
+- `firstSettlementBatchId`
+- `remainingSettlementBatchIds`
+- `cursor`
+
+## Frontend State Model
+
+### App-Level States
+
+| State | Trigger | UI Meaning |
+| --- | --- | --- |
+| `bootstrapping_user` | no `userId` available yet | hold on a lightweight loading shell |
+| `loading_character` | fetching `GET /api/character` | show skeleton dashboard or creation skeleton |
+| `no_character` | `character = null` | show character creation |
+| `ready` | character exists | show dashboard |
+| `fatal_error` | bootstrap/read unrecoverable error | show retry-focused error state |
+
+### Character Sync States
+
+| `chain.chainCreationStatus` | Meaning | Primary CTA |
+| --- | --- | --- |
+| `NOT_STARTED` | local-only character | `Battle` or `Sync to Chain` if backlog exists |
+| `PENDING` | first-sync identity reserved/prepared | `Continue Sync` |
+| `SUBMITTED` | transaction broadcast, awaiting confirmation | disabled pending state |
+| `CONFIRMED` | chain-enabled character | `Battle` or `Settle Pending Batch` |
+| `FAILED` | first sync failed | `Retry Sync` |
+
+### Battle/Settlement Visibility States
+
+| Condition | What the UI should show |
+| --- | --- |
+| no latest battle | neutral empty battle panel |
+| `latestBattle.settlementStatus = AWAITING_FIRST_SYNC` | local battle stored, ready for first sync |
+| `latestBattle.settlementStatus = SEALED` | battle already assigned to a first-sync or settlement batch |
+| `latestBattle.settlementStatus = PENDING` | battle exists and awaits normal settlement |
+| `latestBattle.settlementStatus = COMMITTED` | battle is finalized on chain |
+| `nextSettlementBatch.status = FAILED` | retry-focused settlement warning |
+
+## Interaction Rules
+
+### General
+
+- never present more than one primary CTA at a time
+- if wallet input is required, the CTA label must say so
+- disable actions during in-flight mutation unless a safe parallel action exists
+- after any successful mutation, revalidate the character read model
+
+### Battle Action
+
+- requires a valid `characterId`
+- zone selection must not hide the action button on mobile
+- do not let the player edit or provide the battle seed
+- during battle submission, disable repeated clicks and show pending text
+
+### First Sync Action
+
+- show first sync only when local backlog exists or sync status is retryable
+- if wallet is disconnected, the primary CTA becomes `Connect Wallet`
+- after phase-1 prepare, the primary CTA becomes `Sign Authorization`
+- after phase-2 prepare, the primary CTA becomes `Sign And Submit`
+- after submit, the UI must switch to pending confirmation state instead of leaving stale buttons enabled
+
+### Error Handling
+
+- endpoint-specific failures should render near the affected action
+- do not collapse all failures into one generic banner
+- preserve the last known read model while showing mutation failure
+- failed sync must keep enough context visible for safe retry
+
+## Layout Rules
+
+### Mobile
+
+Fixed top-to-bottom order:
+
+1. app/header bar
+2. character identity summary
+3. chain and sync status strip
+4. progression summary
+5. latest battle summary
+6. primary action panel
+7. secondary details and diagnostics
+
+Critical above-the-fold rule:
+
+- the player must see current character identity, current chain status, and the primary CTA without awkward scrolling on a standard mobile viewport
+
+### Desktop
+
+Desktop can split into two columns:
+
+- main column:
+  - character summary
+  - primary action panel
+  - latest battle result
+- side column:
+  - chain status
+  - progression
+  - settlement metadata
+
+Desktop should improve scan efficiency, not introduce a different workflow.
+
+## Visual Rules
+
+- neutral, systems-first presentation
+- compact panels with restrained borders
+- avoid heavy shadows and decorative effects
+- use typography to create hierarchy before using color
+- reserve strong color for action state, error state, and confirmed state
+- secondary metadata should be visibly subordinate
+
+## Styling Scope
+
+For the current frontend implementation pass, styling is intentionally functional-first.
+
+In scope now:
+
+- readable layout structure
+- clear visual hierarchy
+- state distinction for loading, pending, error, and confirmed states
+- responsive spacing and density discipline
+- minimal component styling needed for usability
+
+Out of scope for now:
+
+- brand polish
+- custom visual identity system
+- motion design
+- decorative illustration
+- advanced theming
+- visual refinement beyond what is needed for a clear and testable product flow
+
+A later design pass can build on the functional shell once the battle, first-sync, and settlement UX is proven end to end.
+
+## Required UI States
+
+Each major surface must support:
+
 - loading
 - loaded
 - empty
 - error
 - stale/syncing
 - action pending
-- disabled states where relevant
+- disabled
 
-6. Layout Regions
-- Identify the major regions of the page in top-to-bottom order for mobile
-- Then explain how the layout changes on desktop
+Examples:
 
-7. Critical Visibility Rules
-- Which information and actions must remain above the fold on mobile
-- Which content must always be visually subordinate
+- dashboard loading skeleton
+- empty latest-battle panel
+- failed first-sync panel with retry CTA
+- submitted settlement panel with disabled action and pending indicator
 
-Do not write code yet during Phase 1.
+## Acceptance Criteria
 
-PHASE 2 — COMPONENT INVENTORY
-After the page contract, define the component plan.
+- no horizontal overflow at `320px` and above
+- primary CTA remains visible near the top of the mobile dashboard unless the current flow is a full-screen signing state
+- chain state is always visible without needing to drill into a secondary panel
+- local-first versus chain-confirmed behavior is obvious from the interface
+- long character names and long wallet addresses do not break layout
+- battle actions never ask the user for a random seed
+- wallet-required steps never look identical to backend-only steps
+- loading skeletons roughly match final geometry
+- no contradictory states are shown at once
+- if `chain.chainCreationStatus = FAILED`, the retry path is obvious
+- if `latestBattle.settlementStatus = AWAITING_FIRST_SYNC`, the UI makes clear that the battle is stored locally but not yet committed on chain
 
-For each component, provide:
-- Name
-- Responsibility
-- Props
-- Variants
-- States
-- Whether it should be server or client component
-- Reusability notes
-- Anti-patterns / what it must not be used for
+## Implementation Plan
 
-Components must be small enough to reason about clearly, but not fragmented into nonsense.
+### Phase 1
 
-Do not write final code yet during Phase 2.
+Build a page-level shell on `app/page.tsx` that:
 
-PHASE 3 — DESIGN / LAYOUT RULES
-Then define implementation rules for the page.
+- bootstraps the anonymous user
+- loads the character read model
+- switches between `no_character` and `dashboard`
 
-Include:
-A. Visual rules
-- overall tone
-- density
-- border/shadow usage
-- button hierarchy
-- typography behavior
-- spacing discipline
+### Phase 2
 
-B. Layout rules
-- fixed mobile section order
-- desktop adjustments
-- scroll priorities
-- width/container behavior
-- no-horizontal-overflow rule
+Implement the dashboard with mocked internal state first:
 
-C. Interaction rules
-- disabled states
-- pending states
-- error visibility
-- skeleton behavior
-- no ambiguous CTA state
+- character summary
+- chain status panel
+- progression panel
+- latest battle panel
+- primary action area
 
-D. Content stress rules
-- long names
-- long labels
-- empty values
-- zero-state data
-- partial data availability
+### Phase 3
 
-Do not write final code yet during Phase 3.
+Connect live data from:
 
-PHASE 4 — ACCEPTANCE CRITERIA
-Then define strict acceptance criteria.
+- `POST /api/auth/anon`
+- `GET /api/character`
+- `POST /api/character/create`
+- `POST /api/combat/encounter`
 
-These must be concrete and testable.
+### Phase 4
 
-Include at minimum:
-- no horizontal overflow at 320px and above
-- primary CTA visible without awkward scrolling on mobile unless impossible by page purpose
-- critical gameplay/system information remains visible and correctly prioritized
-- loading skeleton roughly matches final geometry
-- long text does not break layout
-- disabled and pending actions are visually distinct
-- no contradictory state display
-- no unnecessary visual dominance of secondary elements
-- component boundaries are clean and maintainable
+Implement first-sync interaction:
 
-PHASE 5 — STATIC SKELETON IMPLEMENTATION
-Only now create the first implementation.
+- wallet connect state
+- prepare phase 1
+- sign authorization
+- prepare phase 2
+- sign and submit
+- pending confirmation
+- failure and retry
 
-Requirements:
-- static skeleton only
-- mocked data only
-- no real API wiring yet
-- no business logic yet
-- no speculative features
-- focus on layout correctness and structure
-- keep code clean and file organization clear
+### Phase 5
 
-Output:
-1. Proposed file tree
-2. Brief explanation of responsibilities per file
-3. Full code
+Implement post-sync settlement flow using the same interaction model as first sync.
 
-PHASE 6 — STATE VARIANTS
-After static skeleton, implement all required states:
-- loading
-- empty
-- error
-- stale/syncing
-- action pending
-- disabled variants
+## Out Of Scope For This Spec
 
-Use realistic mocked examples.
-
-PHASE 7 — DATA / LOGIC INTEGRATION
-Only after structure and states are correct:
-- connect real data
-- add handlers
-- add mutations
-- add optimistic/pessimistic logic only if justified
-- preserve the original page contract
-
-Behavior standards:
-- If the page starts becoming cluttered, simplify
-- If there are multiple possible layouts, choose the one with better scanning and clearer action hierarchy
-- If a choice would bury the main action or critical state, reject it
-- If a component is visually loud without functional reason, tone it down
-- If an implementation is technically correct but structurally messy, reject it and rewrite cleanly
-
-Code quality standards:
-- Use strong typing
-- Keep component interfaces explicit
-- Avoid tangled prop chains
-- Avoid giant page files when decomposition is clearly needed
-- Avoid premature abstraction
-- Use comments sparingly and only where genuinely useful
-- Keep naming direct and boring
-- No fake cleverness
-
-Output standards for every run:
-- First give Phase 1 to Phase 4 before code
-- Then give implementation
-- Keep rationale tied to the spec
-- Do not waste output on generic front-end advice
-- Do not explain obvious React basics
-- Do not add unrelated improvement ideas unless they directly block correctness
-
-If I provide a specific screen, module, wireframe, or screenshot:
-- Use it as structural guidance
-- Preserve the product logic
-- Do not blindly clone styling unless explicitly told to
-
-If some requirement is ambiguous:
-- make the most conservative structurally sound assumption
-- state that assumption briefly
-- continue
-
-Now wait for my next instruction, which will specify the exact page or module to build.
+- final SSO-based account ownership
+- social/profile systems
+- cosmetic customization
+- marketing landing pages
+- advanced battle replay visualization beyond the current result payload
+- multi-character account management
