@@ -8,6 +8,30 @@ then walks through atomic first sync and the transition into normal post-sync se
 
 This spec reflects the current implementation.
 
+## Master API Table
+
+| Endpoint | Purpose | Request | Success Response | Key Errors | State Transition |
+| --- | --- | --- | --- | --- | --- |
+| `POST /api/auth/anon` | Create a backend-only user identity for prototype and local-first flows. | Empty JSON body: `{}` | `201` with `{ "userId": string }` | Standard HTTP validation/runtime errors only | No character yet; frontend stores `userId` for later character creation. |
+| `GET /api/character?userId=<userId>` | Load the current frontend read model for a backend user. | Query param `userId` | `200` with `{ "character": null }` or `{ "character": CharacterReadModel }` | `400` when `userId` is missing | Read only. Source of truth for chain status, provisional progress, latest battle, and next settlement batch. |
+| `POST /api/character/create` | Create the local-first backend character. | `{ "userId": string, "name"?: string }` | `201` with core gameplay character payload: ids, name, level, stats, skills | Validation errors, duplicate/ownership errors if applicable | Creates `Character` plus `CharacterProvisionalProgress`; chain status starts at `NOT_STARTED`. |
+| `POST /api/combat/encounter` | Simulate and persist a real encounter for a stored character. | `{ "characterId": string, "zoneId": number }` | `201` with `{ "battleId", "characterId", "zoneId", "enemyArchetypeId", "seed", "battleNonce", "seasonId", "battleTs", "settlementStatus", "battleResult" }` | `ERR_CHARACTER_NOT_FOUND`, `ERR_ZONE_LOCKED`, `ERR_SEASON_NOT_ACTIVE` | Persists `BattleRecord` plus `BattleOutcomeLedger`; status becomes `AWAITING_FIRST_SYNC` for local-first characters or `PENDING` for chain-confirmed characters. |
+| `POST /api/solana/character/first-sync/prepare` | Phase 1 of first sync: derive the first eligible batch and request player authorization. | `{ "characterId": string, "authority": base58, "feePayer"?: base58 }` without player signature | `200` with `{ "phase": "authorize", "payload", "expectedCursor", "permitDomain", "playerAuthorizationMessageBase64" }` | `ERR_NO_FIRST_SYNC_BACKLOG`, `ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES`, `ERR_CHARACTER_ALREADY_CONFIRMED`, `ERR_PLAYER_MUST_PAY` | Character may move into reserved/pending identity state; eligible backlog is selected and sealed for first sync. |
+| `POST /api/solana/character/first-sync/prepare` | Phase 2 of first sync: build the atomic player-signed transaction. | Same request plus `playerAuthorizationSignatureBase64` | `200` with `{ "phase": "sign_transaction", ...authorizeFields, "serverAttestationMessageBase64", "preparedTransaction" }` | Signature validation failures, relay mismatch/build errors | Produces the opaque transaction bundle for `create_character + settlement batch 1`; frontend must sign, not mutate. |
+| `POST /api/solana/character/first-sync/submit` | Broadcast the signed atomic first-sync transaction and reconcile local state. | `{ "prepared": PreparedTransaction, "signedMessageBase64": string, "signedTransactionBase64": string }` | `200` with `{ "characterId", "chainCreationStatus": "CONFIRMED", "transactionSignature", "chainCharacterIdHex", "characterRootPubkey", "firstSettlementBatchId", "remainingSettlementBatchIds", "chainCreatedAt", "cursor" }` | `ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH`, `ERR_SIGNED_*`, on-chain simulation/broadcast failures | Character becomes `SUBMITTED` then `CONFIRMED` on success; first batch becomes `CONFIRMED`; local-first ledger rows become `COMMITTED`. |
+| `POST /api/solana/settlement/prepare` | Prepare a later post-sync settlement batch for an already confirmed character. | `{ "characterId": string, "authority": base58, "feePayer"?: base58, "relayRequestId"?: string }`, optionally with `playerAuthorizationSignatureBase64` on phase 2 | `200` with either authorize-phase or sign-transaction-phase settlement payload | Normal settlement prepare errors, cursor mismatch errors, signature validation errors | Readies the next pending batch after first sync; only valid once the character is chain-enabled. |
+| `POST /api/solana/settlement/submit` | Broadcast a signed post-sync settlement transaction. | `{ "settlementBatchId": string, "prepared": PreparedTransaction, "signedMessageBase64": string, "signedTransactionBase64": string }` | `200` with settlement submission/reconciliation result | Signed payload mismatch, cursor mismatch, on-chain submission failures | Advances an existing `PENDING` or prepared batch to `SUBMITTED` and then `CONFIRMED` after reconciliation. |
+
+### Read Model Shape
+
+`CharacterReadModel` in the table above currently includes:
+
+- core gameplay fields: `characterId`, `userId`, `name`, `level`, `exp`, `stats`, `activeSkills`, `passiveSkills`, `unlockedSkillIds`, `inventory`
+- `chain`: authority, reserved/on-chain ids, chain creation status, tx signature, creation timestamps, and reconciled cursor
+- `provisionalProgress`: highest unlocked zone, highest cleared zone, and zone-state map
+- `latestBattle`: latest persisted ledger-facing battle summary
+- `nextSettlementBatch`: next unconfirmed batch summary or `null`
+
 ## Terminology
 
 | Term | Meaning |
