@@ -1,6 +1,6 @@
 # Local Solana Character Test Runbook
 
-Status: Reproducible local runbook for Dockerized `keep-pushing` plus host-run Solana validator and a one-shot real character creation test.
+Status: Reproducible local runbook for Dockerized `keep-pushing` plus host-run Solana validator, real character creation, real encounter execution, and settlement submission.
 
 This document captures the working manual test environment that was validated against:
 - real Postgres
@@ -8,6 +8,8 @@ This document captures the working manual test environment that was validated ag
 - real local Solana validator
 - real deployed `runana-program`
 - real on-chain character creation through backend prepare/sign/submit flow
+- real encounter execution through `POST /api/combat/encounter`
+- real settlement sealing, prepare, submit, confirm, and reconciliation
 
 ## Scope
 
@@ -16,10 +18,10 @@ This runbook covers:
 - host-run `solana-test-validator`
 - fresh `runana-program` deployment and bootstrap seeding
 - one-shot character creation via [createCharacter.ts](/home/paps/projects/keep-pushing/scripts/solana/createCharacter.ts)
+- one-shot encounter plus settlement submission via [runEncounterSettlement.ts](/home/paps/projects/keep-pushing/scripts/solana/runEncounterSettlement.ts)
 
 This runbook does not cover:
 - production deployment hardening
-- settlement manual testing
 - wallet UI/browser integration
 
 ## Repos
@@ -210,7 +212,77 @@ That successful row existed alongside an older failed row from a stale blockhash
 - failed chain submission attempts remain visible in Postgres
 - successful retries reconcile to a new `CONFIRMED` row
 
-## 7. Common Failure Modes
+## 7. Execute Real Encounter And Submit Settlement
+
+After you have a confirmed character id, run the one-shot encounter-plus-settlement helper:
+
+```bash
+cd /home/paps/projects/keep-pushing
+npm run solana:encounter:settle -- \
+  --player-keypair /home/paps/projects/keep-pushing/.tmp/manual-character-test/<timestamp>/keypairs/player.json \
+  --server-url http://127.0.0.1:3000 \
+  --character-id <character-id> \
+  --zone-id 1 \
+  --seed 77
+```
+
+This script lives at:
+- [runEncounterSettlement.ts](/home/paps/projects/keep-pushing/scripts/solana/runEncounterSettlement.ts)
+
+What it does:
+- calls `POST /api/combat/encounter`
+- calls `POST /api/solana/settlement/prepare` to fetch the player authorization message
+- signs that message with the player keypair
+- calls `POST /api/solana/settlement/prepare` again to fetch the prepared transaction
+- signs the prepared transaction with the same player keypair
+- calls `POST /api/solana/settlement/submit`
+- writes request/response artifacts under `.tmp/manual-encounter-settlement/<timestamp>`
+
+Expected successful output:
+
+```text
+artifacts=/home/paps/projects/keep-pushing/.tmp/manual-encounter-settlement/<timestamp>
+battleId=<uuid>
+battleNonce=<n>
+enemyArchetypeId=<id>
+settlementBatchId=<uuid>
+settlementState=CONFIRMED
+batchStatus=CONFIRMED
+tx=<signature>
+```
+
+## 8. Verify Battle And Settlement State
+
+Inspect recent battle records:
+
+```bash
+docker compose --env-file .env.docker exec -T postgres \
+  psql -U postgres -d keep_pushing \
+  -c 'SELECT id, "battleId", "characterId", "zoneId", "enemyArchetypeId", seed, "winnerEntityId", "roundsPlayed" FROM "BattleRecord" ORDER BY "createdAt" DESC LIMIT 10;'
+```
+
+Inspect recent battle outcome ledger rows:
+
+```bash
+docker compose --env-file .env.docker exec -T postgres \
+  psql -U postgres -d keep_pushing \
+  -c 'SELECT id, "battleId", "characterId", "battleNonce", "seasonId", "zoneId", "enemyArchetypeId", "settlementStatus", "sealedBatchId" FROM "BattleOutcomeLedger" ORDER BY "createdAt" DESC LIMIT 10;'
+```
+
+Inspect recent settlement batches:
+
+```bash
+docker compose --env-file .env.docker exec -T postgres \
+  psql -U postgres -d keep_pushing \
+  -c 'SELECT id, "characterId", "batchId", status, "startNonce", "endNonce", "latestTransactionSignature" FROM "SettlementBatch" ORDER BY "createdAt" DESC LIMIT 10;'
+```
+
+For a successful full run, the newest rows should show:
+- one `BattleRecord` row for the encounter
+- one matching `BattleOutcomeLedger` row
+- one `SettlementBatch` row with `status = CONFIRMED`
+
+## 9. Common Failure Modes
 
 ### Docker permission denied
 
@@ -257,7 +329,7 @@ Fix:
 - prefer the one-shot CLI script
 - if doing the flow manually, re-run `prepare`, sign immediately, then submit immediately
 
-## 8. Minimal Repro Sequence
+## 10. Minimal Repro Sequence
 
 If you want the shortest reliable path:
 
@@ -287,9 +359,21 @@ npm run solana:character:create -- \
   --name "CLI Manual"
 ```
 
-If that prints `status=CONFIRMED`, the local environment is functioning end-to-end.
+Then, after you have the printed `characterId`:
 
-## 9. What This Proves
+```bash
+cd /home/paps/projects/keep-pushing
+npm run solana:encounter:settle -- \
+  --player-keypair /home/paps/projects/keep-pushing/.tmp/manual-character-test/<timestamp>/keypairs/player.json \
+  --server-url http://127.0.0.1:3000 \
+  --character-id <character-id> \
+  --zone-id 1 \
+  --seed 77
+```
+
+If that prints `settlementState=CONFIRMED`, the local environment is functioning end-to-end for character creation, real encounters, and settlement submission.
+
+## 11. What This Proves
 
 This environment proves that the current backend can:
 - persist character intent in Postgres
@@ -297,5 +381,8 @@ This environment proves that the current backend can:
 - accept player-owned signatures
 - submit to the on-chain program
 - confirm and reconcile the resulting chain state back into Postgres
+- execute a real settlement-backed encounter against a confirmed character
+- persist replay and settlement ledger rows for that encounter
+- seal, prepare, sign, submit, confirm, and reconcile a real settlement batch back into Postgres
 
-In other words, the current stack has a real local end-to-end character creation path from backend to on-chain program.
+In other words, the current stack now has a real local end-to-end path from character creation through encounter execution and settlement confirmation.
