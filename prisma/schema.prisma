@@ -77,6 +77,7 @@ model Character {
   equippedSkills   EquippedSkill[]
   equippedPassives EquippedPassive[]
   inventoryItems   InventoryItem[]
+  battleRecords    BattleRecord[]
   battleOutcomes   BattleOutcomeLedger[]
   settlementBatches SettlementBatch[]
 
@@ -132,6 +133,26 @@ model InventoryItem {
 
   @@unique([characterId, itemId])
   @@index([characterId])
+}
+
+model BattleRecord {
+  id               String    @id @default(cuid())
+  battleId         String    @unique
+  characterId      String
+  zoneId           Int
+  enemyArchetypeId Int
+  seed             Int
+  playerInitialJson Json
+  enemyInitialJson  Json
+  winnerEntityId   String
+  roundsPlayed     Int
+  eventsJson       Json
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  character        Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, createdAt])
+  @@index([characterId, zoneId, enemyArchetypeId])
 }
 
 model BattleOutcomeLedger {

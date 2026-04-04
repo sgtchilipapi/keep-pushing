@@ -107,6 +107,35 @@ export type CreateBattleOutcomeLedgerInput = {
   zoneProgressDelta: unknown;
 };
 
+export type BattleRecordRecord = {
+  id: string;
+  battleId: string;
+  characterId: string;
+  zoneId: number;
+  enemyArchetypeId: number;
+  seed: number;
+  playerInitial: unknown;
+  enemyInitial: unknown;
+  winnerEntityId: string;
+  roundsPlayed: number;
+  events: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateBattleRecordInput = {
+  battleId: string;
+  characterId: string;
+  zoneId: number;
+  enemyArchetypeId: number;
+  seed: number;
+  playerInitial: unknown;
+  enemyInitial: unknown;
+  winnerEntityId: string;
+  roundsPlayed: number;
+  events: unknown;
+};
+
 export type SettlementBatchRecord = {
   id: string;
   characterId: string;
@@ -244,6 +273,22 @@ type BattleOutcomeLedgerRow = {
   updatedAt: Date;
 };
 
+type BattleRecordRow = {
+  id: string;
+  battleId: string;
+  characterId: string;
+  zoneId: number;
+  enemyArchetypeId: number;
+  seed: number;
+  playerInitialJson: unknown;
+  enemyInitialJson: unknown;
+  winnerEntityId: string;
+  roundsPlayed: number;
+  eventsJson: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type SettlementBatchRow = {
   id: string;
   characterId: string;
@@ -347,6 +392,24 @@ function mapBattleOutcomeLedger(row: BattleOutcomeLedgerRow): BattleOutcomeLedge
     settlementStatus: row.settlementStatus,
     sealedBatchId: row.sealedBatchId,
     committedAt: row.committedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapBattleRecord(row: BattleRecordRow): BattleRecordRecord {
+  return {
+    id: row.id,
+    battleId: row.battleId,
+    characterId: row.characterId,
+    zoneId: row.zoneId,
+    enemyArchetypeId: row.enemyArchetypeId,
+    seed: row.seed,
+    playerInitial: row.playerInitialJson,
+    enemyInitial: row.enemyInitialJson,
+    winnerEntityId: row.winnerEntityId,
+    roundsPlayed: row.roundsPlayed,
+    events: row.eventsJson,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -660,6 +723,82 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapCharacterChainState(result.rows[0]) : null;
+    }
+  },
+  battleRecord: {
+    async create(input: CreateBattleRecordInput) {
+      const result = await pool.query<BattleRecordRow>(
+        `INSERT INTO "BattleRecord"
+          (
+            id,
+            "battleId",
+            "characterId",
+            "zoneId",
+            "enemyArchetypeId",
+            seed,
+            "playerInitialJson",
+            "enemyInitialJson",
+            "winnerEntityId",
+            "roundsPlayed",
+            "eventsJson",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
+        RETURNING
+          id,
+          "battleId",
+          "characterId",
+          "zoneId",
+          "enemyArchetypeId",
+          seed,
+          "playerInitialJson",
+          "enemyInitialJson",
+          "winnerEntityId",
+          "roundsPlayed",
+          "eventsJson",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.battleId,
+          input.characterId,
+          input.zoneId,
+          input.enemyArchetypeId,
+          input.seed,
+          JSON.stringify(input.playerInitial),
+          JSON.stringify(input.enemyInitial),
+          input.winnerEntityId,
+          input.roundsPlayed,
+          JSON.stringify(input.events),
+          new Date()
+        ]
+      );
+
+      return mapBattleRecord(result.rows[0]);
+    },
+    async findByBattleId(battleId: string) {
+      const result = await pool.query<BattleRecordRow>(
+        `SELECT
+          id,
+          "battleId",
+          "characterId",
+          "zoneId",
+          "enemyArchetypeId",
+          seed,
+          "playerInitialJson",
+          "enemyInitialJson",
+          "winnerEntityId",
+          "roundsPlayed",
+          "eventsJson",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleRecord"
+        WHERE "battleId" = $1
+        LIMIT 1`,
+        [battleId]
+      );
+
+      return result.rows[0] ? mapBattleRecord(result.rows[0]) : null;
     }
   },
   battleOutcomeLedger: {
