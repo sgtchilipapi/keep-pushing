@@ -23,8 +23,6 @@ PROGRAM_ID="${RUNANA_PROGRAM_ID:-$(solana-keygen pubkey "$PROGRAM_KEYPAIR_PATH")
 
 ZONE_ID="${RUNANA_BOOTSTRAP_ZONE_ID:-1}"
 SEASON_ID="${RUNANA_BOOTSTRAP_SEASON_ID:-1}"
-ENEMY_ARCHETYPE_ID="${RUNANA_BOOTSTRAP_ENEMY_ARCHETYPE_ID:-100}"
-ENEMY_EXP_REWARD_BASE="${RUNANA_BOOTSTRAP_ENEMY_EXP_REWARD_BASE:-25}"
 MAX_BATTLES_PER_BATCH="${RUNANA_BOOTSTRAP_MAX_BATTLES_PER_BATCH:-20}"
 MAX_HISTOGRAM_ENTRIES_PER_BATCH="${RUNANA_BOOTSTRAP_MAX_HISTOGRAM_ENTRIES_PER_BATCH:-20}"
 
@@ -149,7 +147,7 @@ function deploy_program_if_needed() {
 function write_bootstrap_config() {
   local trusted_server_signer="$1"
 
-  node - "$BOOTSTRAP_CONFIG_PATH" "$trusted_server_signer" "$SEASON_ID" "$ZONE_ID" "$ENEMY_ARCHETYPE_ID" "$ENEMY_EXP_REWARD_BASE" "$MAX_BATTLES_PER_BATCH" "$MAX_HISTOGRAM_ENTRIES_PER_BATCH" <<'NODE'
+  node - "$BOOTSTRAP_CONFIG_PATH" "$trusted_server_signer" "$SEASON_ID" "$ZONE_ID" "$MAX_BATTLES_PER_BATCH" "$MAX_HISTOGRAM_ENTRIES_PER_BATCH" <<'NODE'
 const fs = require('node:fs');
 
 const [
@@ -157,8 +155,6 @@ const [
   trustedServerSigner,
   seasonId,
   zoneId,
-  enemyArchetypeId,
-  enemyExpRewardBase,
   maxBattlesPerBatch,
   maxHistogramEntriesPerBatch,
 ] = process.argv.slice(2);
@@ -184,18 +180,6 @@ const config = {
       zoneId: Number(zoneId),
       expMultiplierNum: 1,
       expMultiplierDen: 1,
-    },
-  ],
-  zoneEnemySets: [
-    {
-      zoneId: Number(zoneId),
-      allowedEnemyArchetypeIds: [Number(enemyArchetypeId)],
-    },
-  ],
-  enemyArchetypes: [
-    {
-      enemyArchetypeId: Number(enemyArchetypeId),
-      expRewardBase: Number(enemyExpRewardBase),
     },
   ],
 };

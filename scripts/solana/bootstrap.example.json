@@ -19,17 +19,5 @@
       "expMultiplierNum": 1,
       "expMultiplierDen": 1
     }
-  ],
-  "zoneEnemySets": [
-    {
-      "zoneId": 1,
-      "allowedEnemyArchetypeIds": [100]
-    }
-  ],
-  "enemyArchetypes": [
-    {
-      "enemyArchetypeId": 100,
-      "expRewardBase": 25
-    }
   ]
 }

@@ -36,6 +36,11 @@ import {
   deriveZoneEnemySetPda,
   deriveZoneRegistryPda,
 } from '../../lib/solana/runanaProgram';
+import {
+  listSharedBootstrapEnemyArchetypes,
+  listSharedBootstrapZoneEnemySets,
+  mergeZoneRegistryDefaults,
+} from '../../lib/combat/solanaBootstrapCatalog';
 
 interface BootstrapConfigFile {
   programConfig: {
@@ -256,7 +261,14 @@ function decodeBootstrapConfig(raw: unknown): BootstrapConfigFile {
 
 function loadBootstrapConfig(configPath: string): BootstrapConfigFile {
   const resolvedPath = resolve(process.cwd(), configPath);
-  return decodeBootstrapConfig(JSON.parse(readFileSync(resolvedPath, 'utf8')) as unknown);
+  const decoded = decodeBootstrapConfig(JSON.parse(readFileSync(resolvedPath, 'utf8')) as unknown);
+
+  return {
+    ...decoded,
+    zoneRegistries: mergeZoneRegistryDefaults(decoded.zoneRegistries ?? []),
+    zoneEnemySets: listSharedBootstrapZoneEnemySets(),
+    enemyArchetypes: listSharedBootstrapEnemyArchetypes(),
+  };
 }
 
 function assertUniqueIds<T>(values: T[], getId: (value: T) => number, field: string): void {
