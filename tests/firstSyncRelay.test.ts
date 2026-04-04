@@ -327,6 +327,148 @@ describe('firstSyncRelay', () => {
     expect(prepareFirstSyncCharacterAnchorMock).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses the persisted first-sync batch on submit retries when awaiting backlog is already sealed', async () => {
+    const authority = Keypair.generate();
+    const preparedRebase = buildPreparedRebase(authority.publicKey.toBase58(), 2);
+    const persistedBatch = {
+      ...buildPersistedBatch(preparedRebase, 0),
+      status: 'FAILED' as const,
+    };
+    const persistedBatchTwo = buildPersistedBatch(preparedRebase, 1);
+    const unsignedTransaction = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: authority.publicKey,
+        recentBlockhash: '11111111111111111111111111111111',
+        instructions: [],
+      }).compileToV0Message([]),
+    );
+    const prepared = prepareFirstSyncTransaction({
+      authority: authority.publicKey.toBase58(),
+      feePayer: authority.publicKey.toBase58(),
+      serializedMessageBase64: toBase64(unsignedTransaction.message.serialize()),
+      serializedTransactionBase64: toBase64(unsignedTransaction.serialize()),
+      characterCreation: {
+        localCharacterId: preparedRebase.anchor.characterId,
+        chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
+        characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        characterCreationTs: preparedRebase.anchor.characterCreationTs,
+        seasonIdAtCreation: preparedRebase.anchor.seasonIdAtCreation,
+        initialUnlockedZoneId: preparedRebase.anchor.initialUnlockedZoneId,
+        recentBlockhash: '11111111111111111111111111111111',
+        lastValidBlockHeight: 88,
+      },
+      settlement: {
+        characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        payload: preparedRebase.batchDrafts[0]!.payload,
+        expectedCursor: {
+          lastCommittedEndNonce: 0,
+          lastCommittedBatchId: 0,
+          lastCommittedStateHash: preparedRebase.genesisCursor.lastCommittedStateHash,
+          lastCommittedBattleTs: preparedRebase.genesisCursor.lastCommittedBattleTs,
+          lastCommittedSeasonId: preparedRebase.genesisCursor.lastCommittedSeasonId,
+        },
+        permitDomain: {
+          programId: RUNANA_PROGRAM_ID.toBase58(),
+          clusterId: 1,
+          playerAuthority: authority.publicKey.toBase58(),
+          characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+          batchHash: preparedRebase.batchDrafts[0]!.payload.batchHash,
+          batchId: preparedRebase.batchDrafts[0]!.payload.batchId,
+          signatureScheme: 0,
+        },
+      },
+    });
+
+    prepareFirstSyncRebaseMock.mockRejectedValue(
+      new Error('ERR_NO_FIRST_SYNC_BACKLOG: character has no awaiting-first-sync battles to settle'),
+    );
+    prismaMock.character.findChainState.mockResolvedValue({
+      id: 'character-1',
+      playerAuthorityPubkey: authority.publicKey.toBase58(),
+      chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
+      characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+      chainCreationStatus: 'PENDING',
+      chainCreationTxSignature: null,
+      chainCreatedAt: null,
+      chainCreationTs: preparedRebase.anchor.characterCreationTs,
+      chainCreationSeasonId: preparedRebase.anchor.seasonIdAtCreation,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      lastReconciledAt: null,
+    });
+    prismaMock.character.updateChainIdentity.mockResolvedValue({});
+    prismaMock.character.updateCursorSnapshot.mockResolvedValue({});
+    prismaMock.settlementBatch.findByCharacterAndBatchId.mockImplementation(
+      async (_characterId: string, batchId: number) => {
+        if (batchId === 1) {
+          return persistedBatch;
+        }
+        if (batchId === 2) {
+          return persistedBatchTwo;
+        }
+        return null;
+      },
+    );
+    prismaMock.settlementBatch.updateStatus.mockImplementation(
+      async (_id: string, patch: Record<string, unknown>) => ({
+        ...persistedBatch,
+        ...patch,
+      }),
+    );
+    prismaMock.battleOutcomeLedger.markCommittedForBatch.mockResolvedValue([]);
+    prismaMock.settlementSubmissionAttempt.listByBatch.mockResolvedValue([]);
+    prismaMock.settlementSubmissionAttempt.create.mockResolvedValue({
+      id: 'attempt-1',
+      attemptNumber: 1,
+      status: 'STARTED',
+    });
+    prismaMock.settlementSubmissionAttempt.update.mockImplementation(
+      async (_id: string, patch: Record<string, unknown>) => ({
+        id: 'attempt-1',
+        attemptNumber: 1,
+        ...patch,
+      }),
+    );
+    fetchCharacterRootAccountMock.mockResolvedValue({
+      characterId: Buffer.alloc(16),
+    } as Awaited<ReturnType<typeof fetchCharacterRootAccount>>);
+    accountCharacterIdHexMock.mockReturnValue(preparedRebase.reservedIdentity.chainCharacterIdHex);
+    fetchCharacterSettlementBatchCursorAccountMock.mockResolvedValue({
+      lastCommittedEndNonce: 2n,
+      lastCommittedBatchId: 1n,
+      lastCommittedStateHash: Buffer.from('33'.repeat(32), 'hex'),
+      lastCommittedBattleTs: 1_700_000_040n,
+      lastCommittedSeasonId: 4,
+    } as Awaited<ReturnType<typeof fetchCharacterSettlementBatchCursorAccount>>);
+
+    const result = await submitSolanaFirstSync(
+      {
+        prepared,
+        signedMessageBase64: prepared.serializedMessageBase64,
+        signedTransactionBase64: prepared.serializedTransactionBase64,
+      },
+      {
+        connection: {
+          getAccountInfo: jest.fn(),
+          sendRawTransaction: jest.fn().mockResolvedValue('tx-signature-1'),
+          confirmTransaction: jest.fn().mockResolvedValue({ value: { err: null } }),
+        },
+        now: () => new Date('2026-04-04T12:00:00.000Z'),
+        prismaClient: prismaMock as never,
+        prepareFirstSyncRebase: prepareFirstSyncRebaseMock,
+      },
+    );
+
+    expect(result.chainCreationStatus).toBe('CONFIRMED');
+    expect(result.firstSettlementBatchId).toBe('settlement-batch-1');
+    expect(result.remainingSettlementBatchIds).toEqual(['settlement-batch-2']);
+    expect(prepareFirstSyncRebaseMock).not.toHaveBeenCalled();
+    expect(prismaMock.settlementBatch.createSealed).not.toHaveBeenCalled();
+  });
+
   it('submits the atomic first sync, confirms batch 1, and queues later batches for normal settlement', async () => {
     const authority = Keypair.generate();
     const preparedRebase = buildPreparedRebase(authority.publicKey.toBase58(), 2);

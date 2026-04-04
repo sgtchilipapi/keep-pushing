@@ -136,7 +136,68 @@ Expected end state:
 - bootstrap seeding complete
 - artifact directory printed
 
-## 4. Use The One-Shot Character Creation Script
+## 4. Create A Local-Only Character
+
+If you want to exercise the new local-first flow, create a backend character first without sending any transaction on chain.
+
+Take the `userId` returned from `POST /api/auth/anon` in step 2 and create a character directly:
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/api/character/create \
+  -H 'content-type: application/json' \
+  -d '{
+    "userId":"<user-id>",
+    "name":"Local First Manual"
+  }'
+```
+
+Expected:
+- HTTP `201`
+- JSON body with `characterId`
+
+Example response shape:
+
+```json
+{
+  "characterId": "...",
+  "userId": "...",
+  "name": "Local First Manual",
+  "level": 1
+}
+```
+
+At this point the newest character row should still be local-only:
+- `chainCreationStatus = NOT_STARTED`
+- `chainCharacterIdHex = NULL`
+- `characterRootPubkey = NULL`
+
+## 5. Simulate A Local-First Battle
+
+With that backend-only `characterId`, execute a real battle simulation against a zone enemy:
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/api/combat/encounter \
+  -H 'content-type: application/json' \
+  -d '{
+    "characterId":"<character-id>",
+    "zoneId":1,
+    "seed":77
+  }'
+```
+
+Expected:
+- HTTP `201`
+- JSON body with `battleId`, `enemyArchetypeId`, and `settlementStatus`
+
+For a local-first character, the important expected field is:
+- `settlementStatus = AWAITING_FIRST_SYNC`
+
+That means:
+- the battle replay was persisted to `BattleRecord`
+- the settlement-facing row was persisted to `BattleOutcomeLedger`
+- the battle is stored as local backlog waiting for first sync
+
+## 6. Use The One-Shot Character Creation Script
 
 The easiest end-to-end test is now:
 
@@ -174,7 +235,7 @@ chainCharacterIdHex=<hex>
 characterRootPubkey=<pubkey>
 ```
 
-## 5. Verify Database State
+## 7. Verify Database State
 
 Inspect the latest users:
 
@@ -199,7 +260,7 @@ For a successful run, the newest character row should show:
 
 You may also see older `FAILED` character rows from stale-blockhash attempts. That is expected behavior for the current DB-first flow.
 
-## 6. Verify The Successful Character Example
+## 8. Verify The Successful Character Example
 
 In the validated manual run, a successful row looked like:
 - `Character.id = f7e0c689-e20c-4db1-8def-b1b18b0a5d93`
@@ -212,7 +273,7 @@ That successful row existed alongside an older failed row from a stale blockhash
 - failed chain submission attempts remain visible in Postgres
 - successful retries reconcile to a new `CONFIRMED` row
 
-## 7. Execute Real Encounter And Submit Settlement
+## 9. Execute Real Encounter And Submit Settlement
 
 After you have a confirmed character id, run the one-shot encounter-plus-settlement helper:
 
@@ -251,7 +312,7 @@ batchStatus=CONFIRMED
 tx=<signature>
 ```
 
-## 8. Verify Battle And Settlement State
+## 10. Verify Battle And Settlement State
 
 Inspect recent battle records:
 
@@ -282,7 +343,13 @@ For a successful full run, the newest rows should show:
 - one matching `BattleOutcomeLedger` row
 - one `SettlementBatch` row with `status = CONFIRMED`
 
-## 9. Common Failure Modes
+For the local-first path from steps 4-5, before any on-chain sync, the newest rows should instead show:
+- one `Character` row with `chainCreationStatus = NOT_STARTED`
+- one `BattleRecord` row for the encounter
+- one `BattleOutcomeLedger` row with `settlementStatus = AWAITING_FIRST_SYNC`
+- no `SettlementBatch` row yet for that local-only battle
+
+## 11. Common Failure Modes
 
 ### Docker permission denied
 
@@ -329,7 +396,7 @@ Fix:
 - prefer the one-shot CLI script
 - if doing the flow manually, re-run `prepare`, sign immediately, then submit immediately
 
-## 10. Minimal Repro Sequence
+## 12. Minimal Repro Sequence
 
 If you want the shortest reliable path:
 
@@ -373,10 +440,26 @@ npm run solana:encounter:settle -- \
 
 If that prints `settlementState=CONFIRMED`, the local environment is functioning end-to-end for character creation, real encounters, and settlement submission.
 
-## 11. What This Proves
+If you want the shortest local-first simulation path before on-chain sync:
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/api/auth/anon
+curl -s -X POST http://127.0.0.1:3000/api/character/create \
+  -H 'content-type: application/json' \
+  -d '{"userId":"<user-id>","name":"Local First Manual"}'
+curl -s -X POST http://127.0.0.1:3000/api/combat/encounter \
+  -H 'content-type: application/json' \
+  -d '{"characterId":"<character-id>","zoneId":1,"seed":77}'
+```
+
+If that final call returns `settlementStatus=AWAITING_FIRST_SYNC`, the local-first combat path is functioning and persisting battle backlog correctly.
+
+## 13. What This Proves
 
 This environment proves that the current backend can:
 - persist character intent in Postgres
+- create a backend-only character with no on-chain identity yet
+- execute a real local-first encounter and persist it as `AWAITING_FIRST_SYNC`
 - prepare a real Solana `create_character` transaction
 - accept player-owned signatures
 - submit to the on-chain program

@@ -223,6 +223,51 @@ function assertBatchMatchesDraft(
   }
 }
 
+function assertBatchMatchesRelay(
+  batch: SettlementBatchRecord,
+  relay: SubmitFirstSyncRouteRequest['prepared']['settlementRelay'],
+): void {
+  if (
+    relay === undefined ||
+    batch.batchId !== relay.batchId ||
+    batch.batchHash !== relay.batchHash ||
+    batch.startNonce !== relay.startNonce ||
+    batch.endNonce !== relay.endNonce ||
+    batch.startStateHash !== relay.startStateHash ||
+    batch.endStateHash !== relay.endStateHash ||
+    batch.firstBattleTs !== relay.firstBattleTs ||
+    batch.lastBattleTs !== relay.lastBattleTs ||
+    batch.seasonId !== relay.seasonId ||
+    batch.schemaVersion !== relay.schemaVersion ||
+    batch.signatureScheme !== relay.signatureScheme
+  ) {
+    throw new Error(
+      'ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH: prepared settlement relay did not match the persisted first-sync batch',
+    );
+  }
+}
+
+async function listSequentialBatchesFrom(args: {
+  prismaClient: FirstSyncPrismaLike;
+  characterId: string;
+  firstBatchId: number;
+}): Promise<SettlementBatchRecord[]> {
+  const batches: SettlementBatchRecord[] = [];
+
+  for (let batchId = args.firstBatchId; ; batchId += 1) {
+    const batch = await args.prismaClient.settlementBatch.findByCharacterAndBatchId(
+      args.characterId,
+      batchId,
+    );
+    if (batch === null) {
+      break;
+    }
+    batches.push(batch);
+  }
+
+  return batches;
+}
+
 async function ensureFirstSyncBatchRecords(args: {
   prismaClient: FirstSyncPrismaLike;
   characterId: string;
@@ -531,31 +576,41 @@ export async function submitSolanaFirstSync(
     throw new Error('ERR_CHARACTER_SUBMISSION_STATE: first sync submission requires PENDING or FAILED state');
   }
 
-  const rebased = await prepareRebase({
-    characterId: chainRelay.localCharacterId,
-    authority: accepted.authority,
-    feePayer: accepted.feePayer,
-  });
-  const persistedBatches = await ensureFirstSyncBatchRecords({
-    prismaClient,
-    characterId: chainRelay.localCharacterId,
-    batchDrafts: rebased.batchDrafts,
-  });
-  const firstBatch = persistedBatches[0];
-  const firstDraft = rebased.batchDrafts[0];
-  if (firstBatch === undefined || firstDraft === undefined) {
-    throw new Error('ERR_NO_FIRST_SYNC_BATCH: first-sync rebasing produced no settlement batches');
-  }
-  assertBatchMatchesDraft(firstBatch, firstDraft);
-  if (
-    settlementRelay.batchId !== firstBatch.batchId ||
-    settlementRelay.batchHash !== firstBatch.batchHash ||
-    settlementRelay.startNonce !== firstBatch.startNonce ||
-    settlementRelay.endNonce !== firstBatch.endNonce
-  ) {
-    throw new Error(
-      'ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH: prepared settlement relay did not match the persisted first-sync batch',
-    );
+  const existingFirstBatch = await prismaClient.settlementBatch.findByCharacterAndBatchId(
+    chainRelay.localCharacterId,
+    settlementRelay.batchId,
+  );
+
+  let persistedBatches: SettlementBatchRecord[];
+  let firstBatch: SettlementBatchRecord;
+
+  if (existingFirstBatch !== null) {
+    assertBatchMatchesRelay(existingFirstBatch, settlementRelay);
+    persistedBatches = await listSequentialBatchesFrom({
+      prismaClient,
+      characterId: chainRelay.localCharacterId,
+      firstBatchId: existingFirstBatch.batchId,
+    });
+    firstBatch = persistedBatches[0] ?? existingFirstBatch;
+  } else {
+    const rebased = await prepareRebase({
+      characterId: chainRelay.localCharacterId,
+      authority: accepted.authority,
+      feePayer: accepted.feePayer,
+    });
+    persistedBatches = await ensureFirstSyncBatchRecords({
+      prismaClient,
+      characterId: chainRelay.localCharacterId,
+      batchDrafts: rebased.batchDrafts,
+    });
+    const firstDraft = rebased.batchDrafts[0];
+    const firstPersistedBatch = persistedBatches[0];
+    if (firstPersistedBatch === undefined || firstDraft === undefined) {
+      throw new Error('ERR_NO_FIRST_SYNC_BATCH: first-sync rebasing produced no settlement batches');
+    }
+    firstBatch = firstPersistedBatch;
+    assertBatchMatchesDraft(firstBatch, firstDraft);
+    assertBatchMatchesRelay(firstBatch, settlementRelay);
   }
 
   const preparedAt = now();
