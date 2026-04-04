@@ -223,6 +223,28 @@ Status: Locked implementation plan for real character-driven combat, static enem
   - `SettlementBatchPayloadV2`
   - settlement sealing / relay lifecycle types
 
+## Step-by-Step Implementation Plan
+
+1. Start by freezing the shared combat SSOT modules for enemy data. Add a backend enemy registry module and a zone encounter table module that encode the locked `100..109` archetype IDs, per-zone allowed archetypes, and deterministic integer weights. Reuse these same definitions later for battle assembly and Solana bootstrap seeding so the backend and settlement validation cannot drift.
+
+2. Add the replay persistence schema before changing any route behavior. Extend [schema.prisma](/home/paps/projects/keep-pushing/prisma/schema.prisma) with `BattleRecord`, keep `BattleOutcomeLedger` unchanged as the settlement queue, add the `battleId` linkage, generate a Prisma migration, and make sure the relation hangs off `Character` cleanly.
+
+3. Extract server-side real battle assembly into dedicated backend helpers rather than putting it in the route. Add one helper that loads a confirmed character plus equipped skills and passives from Prisma and maps it into `CombatantSnapshot`, and a second helper that turns the selected enemy archetype definition into the enemy snapshot consumed by `simulateBattle(...)`.
+
+4. Implement deterministic encounter selection as a standalone service. Given `zoneId` and `seed`, it should validate that the zone exists in the curated table, derive a deterministic RNG stream, choose a weighted archetype, and return both the selected definition and the stable `enemyArchetypeId` that will later be written into `BattleOutcomeLedger`.
+
+5. Add a real encounter orchestration service that owns the execution flow end to end. This service should validate the request, enforce `chainCreationStatus = CONFIRMED`, resolve the active season, enforce zone legality, build both snapshots, execute `simulateBattle(...)`, allocate the next nonce under a per-character transaction lock, and persist `BattleRecord` plus `BattleOutcomeLedger` atomically.
+
+6. Keep nonce allocation isolated and explicit. Implement a small persistence helper that reads the highest local battle nonce first, falls back to `lastReconciledEndNonce + 1` when no local ledger rows exist, and runs inside the same DB transaction as the battle writes so concurrent encounter requests cannot allocate the same nonce.
+
+7. Add the new settlement-backed route after the services exist. Create `POST /api/combat/encounter`, validate `characterId`, `zoneId`, and `seed`, call the orchestration service, and return the persisted metadata plus `battleResult`. Leave [app/api/combat/route.ts](/home/paps/projects/keep-pushing/app/api/combat/route.ts) untouched as the raw snapshot sandbox route.
+
+8. Wire the new battle source into the existing settlement pipeline without redesigning settlement itself. Anywhere settlement sealing reads pending battle outcomes, it should continue to use `BattleOutcomeLedger` as-is; the only new requirement is that the real encounter flow now becomes the canonical producer of those rows and that `enemyArchetypeId`, `zoneId`, timestamps, and battle nonces stay canonical for sealing.
+
+9. Update bootstrap and operational helpers to consume the same enemy catalog definitions. The backend Solana bootstrap flow should read from the shared registry/zone table modules when seeding `EnemyArchetypeRegistryAccount` and `ZoneEnemySetAccount`, so settlement validation uses the exact same legality and EXP inputs as encounter generation.
+
+10. Finish by adding verification in the same order the feature was built. Add unit tests for character snapshot assembly and weighted encounter determinism, integration tests for atomic persistence and nonce allocation, route tests for the new API contract, and then extend the local manual flow in [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/local-solana-character-test-runbook.md) to cover real character creation, encounter execution, and successful settlement submission.
+
 ## Testing Plan
 
 - Enemy selection determinism:
