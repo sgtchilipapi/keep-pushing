@@ -13,15 +13,31 @@ import type {
   PrepareFirstSyncRouteResponse,
   SettlementCursorExpectation,
   SettlementPermitDomain,
+  SubmitFirstSyncRouteRequest,
+  SubmitFirstSyncRouteResponse,
 } from '../../types/api/solana';
-import { prepareFirstSyncTransaction } from './playerOwnedTransactions';
+import { prisma, type SettlementBatchRecord } from '../prisma';
+import {
+  acceptSignedPlayerOwnedTransaction,
+  prepareFirstSyncTransaction,
+} from './playerOwnedTransactions';
 import {
   type PrepareFirstSyncRebaseInput,
   prepareFirstSyncRebase,
 } from './firstSyncRebasing';
-import { buildPreparedVersionedTransaction } from './playerOwnedV0Transactions';
+import {
+  buildPreparedVersionedTransaction,
+  deserializeVersionedTransactionBase64,
+  serializeVersionedTransactionMessageBase64,
+} from './playerOwnedV0Transactions';
 import { buildCreateCharacterInstruction } from './runanaCharacterInstructions';
-import { fetchProgramConfigAccount } from './runanaAccounts';
+import {
+  accountCharacterIdHex,
+  accountStateHashHex,
+  fetchCharacterRootAccount,
+  fetchCharacterSettlementBatchCursorAccount,
+  fetchProgramConfigAccount,
+} from './runanaAccounts';
 import {
   buildCanonicalSettlementInstructionAccounts,
 } from './runanaSettlementEnvelope';
@@ -36,9 +52,17 @@ import {
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
-import { deriveProgramConfigPda, RUNANA_CLUSTER_ID_LOCALNET } from './runanaProgram';
+import {
+  deriveCharacterBatchCursorPda,
+  deriveProgramConfigPda,
+  RUNANA_CLUSTER_ID_LOCALNET,
+} from './runanaProgram';
 
 type FirstSyncRelayConnection = Pick<Connection, 'getAccountInfo' | 'getLatestBlockhash'>;
+type FirstSyncSubmissionConnection = Pick<
+  Connection,
+  'getAccountInfo' | 'sendRawTransaction' | 'confirmTransaction'
+>;
 
 export interface FirstSyncRelayDependencies {
   connection?: FirstSyncRelayConnection;
@@ -52,6 +76,34 @@ export interface FirstSyncRelayDependencies {
     deps?: Parameters<typeof prepareFirstSyncRebase>[1],
   ) => ReturnType<typeof prepareFirstSyncRebase>;
   buildPreparedTransaction?: typeof buildPreparedVersionedTransaction;
+}
+
+type FirstSyncPrismaLike = {
+  character: Pick<
+    typeof prisma.character,
+    'findChainState' | 'updateChainIdentity' | 'updateCursorSnapshot'
+  >;
+  battleOutcomeLedger: Pick<typeof prisma.battleOutcomeLedger, 'markCommittedForBatch'>;
+  settlementBatch: Pick<
+    typeof prisma.settlementBatch,
+    'findByCharacterAndBatchId' | 'createSealed' | 'updateStatus'
+  >;
+  settlementSubmissionAttempt: Pick<
+    typeof prisma.settlementSubmissionAttempt,
+    'create' | 'listByBatch' | 'update'
+  >;
+};
+
+export interface FirstSyncSubmissionDependencies {
+  connection?: FirstSyncSubmissionConnection;
+  commitment?: Commitment;
+  programId?: PublicKey;
+  now?: () => Date;
+  prismaClient?: FirstSyncPrismaLike;
+  prepareFirstSyncRebase?: (
+    input: PrepareFirstSyncRebaseInput,
+    deps?: Parameters<typeof prepareFirstSyncRebase>[1],
+  ) => ReturnType<typeof prepareFirstSyncRebase>;
 }
 
 function assertNonEmptyString(value: string, field: string): void {
@@ -83,6 +135,10 @@ function decodeEd25519SignatureBase64(signatureBase64: string): Uint8Array {
 
 function toBase64(value: Uint8Array): string {
   return Buffer.from(value).toString('base64');
+}
+
+function currentTimestamp(now: Date): number {
+  return Math.floor(now.getTime() / 1000);
 }
 
 function expectedCursorFromGenesis(args: {
@@ -119,6 +175,79 @@ function permitDomainFromDraft(args: {
     batchId: args.payload.batchId,
     signatureScheme: args.payload.signatureScheme,
   };
+}
+
+function batchDraftToCreateInput(args: {
+  characterId: string;
+  draft: Awaited<ReturnType<typeof prepareFirstSyncRebase>>['batchDrafts'][number];
+}) {
+  return {
+    characterId: args.characterId,
+    batchId: args.draft.payload.batchId,
+    startNonce: args.draft.payload.startNonce,
+    endNonce: args.draft.payload.endNonce,
+    battleCount: args.draft.payload.battleCount,
+    firstBattleTs: args.draft.payload.firstBattleTs,
+    lastBattleTs: args.draft.payload.lastBattleTs,
+    seasonId: args.draft.payload.seasonId,
+    startStateHash: args.draft.payload.startStateHash,
+    endStateHash: args.draft.payload.endStateHash,
+    zoneProgressDelta: args.draft.payload.zoneProgressDelta,
+    encounterHistogram: args.draft.payload.encounterHistogram,
+    optionalLoadoutRevision: args.draft.payload.optionalLoadoutRevision ?? null,
+    batchHash: args.draft.payload.batchHash,
+    schemaVersion: args.draft.payload.schemaVersion,
+    signatureScheme: args.draft.payload.signatureScheme,
+    sealedBattleIds: args.draft.sealedBattleIds,
+  };
+}
+
+function assertBatchMatchesDraft(
+  batch: SettlementBatchRecord,
+  draft: Awaited<ReturnType<typeof prepareFirstSyncRebase>>['batchDrafts'][number],
+): void {
+  if (
+    batch.batchHash !== draft.payload.batchHash ||
+    batch.startNonce !== draft.payload.startNonce ||
+    batch.endNonce !== draft.payload.endNonce ||
+    batch.startStateHash !== draft.payload.startStateHash ||
+    batch.endStateHash !== draft.payload.endStateHash
+  ) {
+    throw new Error(
+      'ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH: persisted first-sync settlement batch did not match the rebased draft',
+    );
+  }
+}
+
+async function ensureFirstSyncBatchRecords(args: {
+  prismaClient: FirstSyncPrismaLike;
+  characterId: string;
+  batchDrafts: Awaited<ReturnType<typeof prepareFirstSyncRebase>>['batchDrafts'];
+}): Promise<SettlementBatchRecord[]> {
+  const batches: SettlementBatchRecord[] = [];
+
+  for (const draft of args.batchDrafts) {
+    const existing = await args.prismaClient.settlementBatch.findByCharacterAndBatchId(
+      args.characterId,
+      draft.payload.batchId,
+    );
+    if (existing !== null) {
+      assertBatchMatchesDraft(existing, draft);
+      batches.push(existing);
+      continue;
+    }
+
+    batches.push(
+      await args.prismaClient.settlementBatch.createSealed(
+        batchDraftToCreateInput({
+          characterId: args.characterId,
+          draft,
+        }),
+      ),
+    );
+  }
+
+  return batches.sort((left, right) => left.batchId - right.batchId);
 }
 
 export async function prepareSolanaFirstSync(
@@ -287,4 +416,250 @@ export async function prepareSolanaFirstSync(
     serverAttestationMessageBase64: toBase64(canonicalMessages.serverAttestationMessage),
     preparedTransaction,
   };
+}
+
+export async function submitSolanaFirstSync(
+  input: SubmitFirstSyncRouteRequest,
+  deps: FirstSyncSubmissionDependencies = {},
+): Promise<SubmitFirstSyncRouteResponse> {
+  const accepted = acceptSignedPlayerOwnedTransaction(input);
+  if (
+    accepted.kind !== 'player_owned_instruction' ||
+    accepted.characterCreationRelay === undefined ||
+    accepted.settlementRelay === undefined
+  ) {
+    throw new Error('ERR_INVALID_FIRST_SYNC_SUBMISSION: signed submission was not a first-sync transaction');
+  }
+
+  const deserializedTransaction = deserializeVersionedTransactionBase64(accepted.signedTransactionBase64);
+  const signedMessageBase64 = serializeVersionedTransactionMessageBase64(deserializedTransaction);
+  if (signedMessageBase64 !== input.prepared.serializedMessageBase64) {
+    throw new Error(
+      'ERR_SIGNED_TRANSACTION_MESSAGE_MISMATCH: signed transaction bytes did not match the prepared first-sync message',
+    );
+  }
+
+  const prismaClient = deps.prismaClient ?? prisma;
+  const connection = (deps.connection ?? createRunanaConnection()) as Connection;
+  const commitment = deps.commitment ?? resolveRunanaCommitment();
+  const programId = deps.programId ?? resolveRunanaProgramId();
+  const now = deps.now ?? (() => new Date());
+  const prepareRebase = deps.prepareFirstSyncRebase ?? prepareFirstSyncRebase;
+  const chainRelay = accepted.characterCreationRelay;
+  const settlementRelay = accepted.settlementRelay;
+
+  const chainState = await prismaClient.character.findChainState(chainRelay.localCharacterId);
+  if (chainState === null) {
+    throw new Error('ERR_CHARACTER_NOT_FOUND: local character for first sync was not found');
+  }
+  if (chainState.playerAuthorityPubkey !== accepted.authority) {
+    throw new Error('ERR_CHARACTER_AUTHORITY_MISMATCH: prepared authority does not match persisted chain state');
+  }
+  if (chainState.chainCharacterIdHex !== chainRelay.chainCharacterIdHex) {
+    throw new Error('ERR_CHARACTER_CHAIN_ID_MISMATCH: prepared chain character id does not match persisted state');
+  }
+  if (chainState.characterRootPubkey !== chainRelay.characterRootPubkey) {
+    throw new Error('ERR_CHARACTER_ROOT_MISMATCH: prepared character root does not match persisted state');
+  }
+  if (chainState.chainCreationStatus === 'CONFIRMED') {
+    throw new Error('ERR_CHARACTER_ALREADY_CONFIRMED: character is already confirmed on chain');
+  }
+  if (chainState.chainCreationStatus !== 'PENDING' && chainState.chainCreationStatus !== 'FAILED') {
+    throw new Error('ERR_CHARACTER_SUBMISSION_STATE: first sync submission requires PENDING or FAILED state');
+  }
+
+  const rebased = await prepareRebase({
+    characterId: chainRelay.localCharacterId,
+    authority: accepted.authority,
+    feePayer: accepted.feePayer,
+  });
+  const persistedBatches = await ensureFirstSyncBatchRecords({
+    prismaClient,
+    characterId: chainRelay.localCharacterId,
+    batchDrafts: rebased.batchDrafts,
+  });
+  const firstBatch = persistedBatches[0];
+  const firstDraft = rebased.batchDrafts[0];
+  if (firstBatch === undefined || firstDraft === undefined) {
+    throw new Error('ERR_NO_FIRST_SYNC_BATCH: first-sync rebasing produced no settlement batches');
+  }
+  assertBatchMatchesDraft(firstBatch, firstDraft);
+  if (
+    settlementRelay.batchId !== firstBatch.batchId ||
+    settlementRelay.batchHash !== firstBatch.batchHash ||
+    settlementRelay.startNonce !== firstBatch.startNonce ||
+    settlementRelay.endNonce !== firstBatch.endNonce
+  ) {
+    throw new Error(
+      'ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH: prepared settlement relay did not match the persisted first-sync batch',
+    );
+  }
+
+  const preparedAt = now();
+  const preparedBatch =
+    (await prismaClient.settlementBatch.updateStatus(firstBatch.id, {
+      status: 'PREPARED',
+      latestMessageSha256Hex: accepted.messageSha256Hex,
+      failureCategory: null,
+      failureCode: null,
+      preparedAt,
+    })) ?? firstBatch;
+  const priorAttempts = await prismaClient.settlementSubmissionAttempt.listByBatch(firstBatch.id);
+  let attempt = await prismaClient.settlementSubmissionAttempt.create({
+    settlementBatchId: firstBatch.id,
+    attemptNumber: (priorAttempts.at(-1)?.attemptNumber ?? 0) + 1,
+    status: 'STARTED',
+    messageSha256Hex: accepted.messageSha256Hex,
+  });
+
+  const rawTransaction = Buffer.from(accepted.signedTransactionBase64, 'base64');
+  let transactionSignature: string | null = null;
+
+  try {
+    transactionSignature = await connection.sendRawTransaction(rawTransaction, {
+      preflightCommitment: commitment,
+      skipPreflight: false,
+      maxRetries: 3,
+    });
+
+    const submittedAt = now();
+    await prismaClient.character.updateChainIdentity(chainRelay.localCharacterId, {
+      playerAuthorityPubkey: accepted.authority,
+      chainCharacterIdHex: chainRelay.chainCharacterIdHex,
+      characterRootPubkey: chainRelay.characterRootPubkey,
+      chainCreationStatus: 'SUBMITTED',
+      chainCreationTxSignature: transactionSignature,
+      chainCreatedAt: null,
+      chainCreationTs: chainRelay.characterCreationTs,
+      chainCreationSeasonId: chainRelay.seasonIdAtCreation,
+    });
+    attempt =
+      (await prismaClient.settlementSubmissionAttempt.update(attempt.id, {
+        status: 'BROADCAST',
+        messageSha256Hex: accepted.messageSha256Hex,
+        signedTransactionSha256Hex: accepted.signedTransactionSha256Hex,
+        transactionSignature,
+        submittedAt,
+      })) ?? attempt;
+    await prismaClient.settlementBatch.updateStatus(preparedBatch.id, {
+      status: 'SUBMITTED',
+      latestMessageSha256Hex: accepted.messageSha256Hex,
+      latestSignedTxSha256Hex: accepted.signedTransactionSha256Hex,
+      latestTransactionSignature: transactionSignature,
+      failureCategory: null,
+      failureCode: null,
+      preparedAt: preparedBatch.preparedAt ?? preparedAt,
+      submittedAt,
+    });
+
+    const confirmation = await connection.confirmTransaction(
+      {
+        signature: transactionSignature,
+        blockhash: chainRelay.recentBlockhash,
+        lastValidBlockHeight: chainRelay.lastValidBlockHeight,
+      },
+      commitment,
+    );
+    if (confirmation.value.err !== null) {
+      throw new Error(`ERR_FIRST_SYNC_CONFIRMATION_FAILED: ${JSON.stringify(confirmation.value.err)}`);
+    }
+
+    const confirmedAt = now();
+    const characterRootPubkey = new PublicKey(chainRelay.characterRootPubkey);
+    const characterRoot = await fetchCharacterRootAccount(connection, characterRootPubkey, commitment);
+    if (accountCharacterIdHex(characterRoot.characterId) !== chainRelay.chainCharacterIdHex.toLowerCase()) {
+      throw new Error('ERR_CHARACTER_CHAIN_ID_MISMATCH: confirmed character root did not match persisted chain id');
+    }
+    const liveCursor = await fetchCharacterSettlementBatchCursorAccount(
+      connection,
+      deriveCharacterBatchCursorPda(characterRootPubkey, programId),
+      commitment,
+    );
+
+    const cursor = {
+      lastCommittedEndNonce: Number(liveCursor.lastCommittedEndNonce),
+      lastCommittedBatchId: Number(liveCursor.lastCommittedBatchId),
+      lastCommittedStateHash: accountStateHashHex(liveCursor.lastCommittedStateHash),
+      lastCommittedBattleTs: Number(liveCursor.lastCommittedBattleTs),
+      lastCommittedSeasonId: liveCursor.lastCommittedSeasonId,
+    };
+
+    await prismaClient.character.updateChainIdentity(chainRelay.localCharacterId, {
+      playerAuthorityPubkey: accepted.authority,
+      chainCharacterIdHex: chainRelay.chainCharacterIdHex,
+      characterRootPubkey: chainRelay.characterRootPubkey,
+      chainCreationStatus: 'CONFIRMED',
+      chainCreationTxSignature: transactionSignature,
+      chainCreatedAt: confirmedAt,
+      chainCreationTs: chainRelay.characterCreationTs,
+      chainCreationSeasonId: chainRelay.seasonIdAtCreation,
+    });
+    await prismaClient.character.updateCursorSnapshot(chainRelay.localCharacterId, {
+      lastReconciledEndNonce: cursor.lastCommittedEndNonce,
+      lastReconciledStateHash: cursor.lastCommittedStateHash,
+      lastReconciledBatchId: cursor.lastCommittedBatchId,
+      lastReconciledBattleTs: cursor.lastCommittedBattleTs,
+      lastReconciledSeasonId: cursor.lastCommittedSeasonId,
+      lastReconciledAt: confirmedAt,
+    });
+    await prismaClient.battleOutcomeLedger.markCommittedForBatch(firstBatch.id, confirmedAt);
+    await prismaClient.settlementBatch.updateStatus(firstBatch.id, {
+      status: 'CONFIRMED',
+      latestMessageSha256Hex: accepted.messageSha256Hex,
+      latestSignedTxSha256Hex: accepted.signedTransactionSha256Hex,
+      latestTransactionSignature: transactionSignature,
+      failureCategory: null,
+      failureCode: null,
+      confirmedAt,
+    });
+    await prismaClient.settlementSubmissionAttempt.update(attempt.id, {
+      status: 'CONFIRMED',
+      messageSha256Hex: accepted.messageSha256Hex,
+      signedTransactionSha256Hex: accepted.signedTransactionSha256Hex,
+      transactionSignature,
+      resolvedAt: confirmedAt,
+    });
+
+    return {
+      characterId: chainRelay.localCharacterId,
+      chainCreationStatus: 'CONFIRMED',
+      transactionSignature,
+      chainCharacterIdHex: chainRelay.chainCharacterIdHex,
+      characterRootPubkey: chainRelay.characterRootPubkey,
+      firstSettlementBatchId: firstBatch.id,
+      remainingSettlementBatchIds: persistedBatches.slice(1).map((batch) => batch.id),
+      chainCreatedAt: confirmedAt.toISOString(),
+      cursor,
+    };
+  } catch (error) {
+    const failedAt = now();
+    await prismaClient.character.updateChainIdentity(chainRelay.localCharacterId, {
+      playerAuthorityPubkey: accepted.authority,
+      chainCharacterIdHex: chainRelay.chainCharacterIdHex,
+      characterRootPubkey: chainRelay.characterRootPubkey,
+      chainCreationStatus: 'FAILED',
+      chainCreationTxSignature: transactionSignature,
+      chainCreatedAt: null,
+      chainCreationTs: chainRelay.characterCreationTs,
+      chainCreationSeasonId: chainRelay.seasonIdAtCreation,
+    });
+    await prismaClient.settlementBatch.updateStatus(firstBatch.id, {
+      status: 'FAILED',
+      latestMessageSha256Hex: accepted.messageSha256Hex,
+      latestSignedTxSha256Hex: accepted.signedTransactionSha256Hex,
+      latestTransactionSignature: transactionSignature,
+      failureCategory: 'REBUILD_AND_RETRY',
+      failureCode: error instanceof Error ? error.message : 'ERR_FIRST_SYNC_SUBMISSION_FAILED',
+      failedAt,
+    });
+    await prismaClient.settlementSubmissionAttempt.update(attempt.id, {
+      status: 'FAILED',
+      messageSha256Hex: accepted.messageSha256Hex,
+      signedTransactionSha256Hex: accepted.signedTransactionSha256Hex,
+      transactionSignature,
+      rpcError: error instanceof Error ? error.message : String(error),
+      resolvedAt: failedAt,
+    });
+    throw error;
+  }
 }

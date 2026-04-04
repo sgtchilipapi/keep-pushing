@@ -195,3 +195,17 @@ export interface FirstSyncPreparedPhase extends FirstSyncPreparationBase {
 export type PrepareFirstSyncRouteResponse =
   | FirstSyncAuthorizationPhase
   | FirstSyncPreparedPhase;
+
+export interface SubmitFirstSyncRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {}
+
+export interface SubmitFirstSyncRouteResponse {
+  characterId: string;
+  chainCreationStatus: "CONFIRMED";
+  transactionSignature: string;
+  chainCharacterIdHex: string;
+  characterRootPubkey: string;
+  firstSettlementBatchId: string;
+  remainingSettlementBatchIds: string[];
+  chainCreatedAt: string;
+  cursor: SettlementCursorExpectation;
+}

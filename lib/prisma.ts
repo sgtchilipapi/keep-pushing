@@ -1873,6 +1873,46 @@ export const prisma = {
 
       return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
     },
+    async findByCharacterAndBatchId(characterId: string, batchId: number) {
+      const result = await pool.query<SettlementBatchRow>(
+        `SELECT
+          id,
+          "characterId",
+          "batchId",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementBatch"
+        WHERE "characterId" = $1 AND "batchId" = $2
+        LIMIT 1`,
+        [characterId, batchId]
+      );
+
+      return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
+    },
     async findNextUnconfirmedForCharacter(characterId: string) {
       const result = await pool.query<SettlementBatchRow>(
         `SELECT

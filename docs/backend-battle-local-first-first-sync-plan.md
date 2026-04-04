@@ -9,7 +9,7 @@ Current-program-over-doc precedence:
 
 ## Status
 
-Status: In progress. Steps 1-6 are implemented and committed. Steps 7-9 remain.
+Status: In progress. Steps 1-7 are implemented and committed. Steps 8-9 remain.
 
 ## Summary
 
@@ -262,7 +262,7 @@ This matters because the current program validates against the `character_creati
 
 6. Completed. Add first-batch transaction assembly only after rebasing exists. Build a new atomic first-sync prepare route that returns one player-owned transaction containing `create_character`, the two required ed25519 verification instructions, and the first `apply_battle_settlement_batch_v1` instruction in the required order.
 
-7. Reuse the existing settlement lifecycle after the first sync instead of inventing a parallel pipeline. Once batch 1 confirms, reconcile the on-chain cursor back into the local character row, mark the character chain-confirmed, and transition any remaining rebased backlog batches into the normal sealing and relay flow.
+7. Completed. Reuse the existing settlement lifecycle after the first sync instead of inventing a parallel pipeline. Once batch 1 confirms, reconcile the on-chain cursor back into the local character row, mark the character chain-confirmed, and transition any remaining rebased backlog batches into the normal sealing and relay flow.
 
 8. Tighten retry and idempotency behavior before calling the feature done. Repeated first-sync prepare calls must reuse the same reserved identity and rebased batch metadata where appropriate, failed submissions must not duplicate nonce assignment or batch creation, and archived stale backlog must remain excluded consistently.
 

@@ -1,20 +1,75 @@
-import { Ed25519Program, Keypair, PublicKey } from '@solana/web3.js';
+import {
+  Ed25519Program,
+  Keypair,
+  PublicKey,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js';
 
 jest.mock('../lib/solana/firstSyncRebasing', () => ({
   prepareFirstSyncRebase: jest.fn(),
 }));
 
-jest.mock('../lib/solana/runanaAccounts', () => ({
-  fetchProgramConfigAccount: jest.fn(),
+const prismaMock = {
+  character: {
+    findChainState: jest.fn(),
+    updateChainIdentity: jest.fn(),
+    updateCursorSnapshot: jest.fn(),
+  },
+  settlementBatch: {
+    findByCharacterAndBatchId: jest.fn(),
+    createSealed: jest.fn(),
+    updateStatus: jest.fn(),
+  },
+  battleOutcomeLedger: {
+    markCommittedForBatch: jest.fn(),
+  },
+  settlementSubmissionAttempt: {
+    create: jest.fn(),
+    listByBatch: jest.fn(),
+    update: jest.fn(),
+  },
+};
+
+jest.mock('../lib/prisma', () => ({
+  prisma: prismaMock,
 }));
 
-import { prepareSolanaFirstSync } from '../lib/solana/firstSyncRelay';
+jest.mock('../lib/solana/runanaAccounts', () => ({
+  fetchProgramConfigAccount: jest.fn(),
+  fetchCharacterRootAccount: jest.fn(),
+  fetchCharacterSettlementBatchCursorAccount: jest.fn(),
+  accountCharacterIdHex: jest.fn(),
+  accountStateHashHex: jest.fn(),
+}));
+
+import {
+  prepareSolanaFirstSync,
+  submitSolanaFirstSync,
+} from '../lib/solana/firstSyncRelay';
 import { prepareFirstSyncRebase } from '../lib/solana/firstSyncRebasing';
-import { fetchProgramConfigAccount } from '../lib/solana/runanaAccounts';
+import {
+  accountCharacterIdHex,
+  accountStateHashHex,
+  fetchCharacterRootAccount,
+  fetchCharacterSettlementBatchCursorAccount,
+  fetchProgramConfigAccount,
+} from '../lib/solana/runanaAccounts';
+import { prepareFirstSyncTransaction } from '../lib/solana/playerOwnedTransactions';
 import { RUNANA_PROGRAM_ID, computeAnchorInstructionDiscriminator } from '../lib/solana/runanaProgram';
 
 const prepareFirstSyncRebaseMock = jest.mocked(prepareFirstSyncRebase);
 const fetchProgramConfigAccountMock = jest.mocked(fetchProgramConfigAccount);
+const fetchCharacterRootAccountMock = jest.mocked(fetchCharacterRootAccount);
+const fetchCharacterSettlementBatchCursorAccountMock = jest.mocked(
+  fetchCharacterSettlementBatchCursorAccount,
+);
+const accountCharacterIdHexMock = jest.mocked(accountCharacterIdHex);
+const accountStateHashHexMock = jest.mocked(accountStateHashHex);
+
+function toBase64(value: Uint8Array): string {
+  return Buffer.from(value).toString('base64');
+}
 
 function buildPreparedRebase(authority: string) {
   const chainCharacterIdHex = '11'.repeat(16);
@@ -70,9 +125,44 @@ function buildPreparedRebase(authority: string) {
   };
 }
 
+function buildPersistedBatch(rebased: ReturnType<typeof buildPreparedRebase>) {
+  return {
+    id: 'settlement-batch-1',
+    characterId: rebased.anchor.characterId,
+    batchId: rebased.batchDrafts[0]!.payload.batchId,
+    startNonce: rebased.batchDrafts[0]!.payload.startNonce,
+    endNonce: rebased.batchDrafts[0]!.payload.endNonce,
+    battleCount: rebased.batchDrafts[0]!.payload.battleCount,
+    firstBattleTs: rebased.batchDrafts[0]!.payload.firstBattleTs,
+    lastBattleTs: rebased.batchDrafts[0]!.payload.lastBattleTs,
+    seasonId: rebased.batchDrafts[0]!.payload.seasonId,
+    startStateHash: rebased.batchDrafts[0]!.payload.startStateHash,
+    endStateHash: rebased.batchDrafts[0]!.payload.endStateHash,
+    zoneProgressDelta: rebased.batchDrafts[0]!.payload.zoneProgressDelta,
+    encounterHistogram: rebased.batchDrafts[0]!.payload.encounterHistogram,
+    optionalLoadoutRevision: null,
+    batchHash: rebased.batchDrafts[0]!.payload.batchHash,
+    schemaVersion: 2 as const,
+    signatureScheme: 0 as const,
+    status: 'SEALED' as const,
+    failureCategory: null,
+    failureCode: null,
+    latestMessageSha256Hex: null,
+    latestSignedTxSha256Hex: null,
+    latestTransactionSignature: null,
+    preparedAt: null,
+    submittedAt: null,
+    confirmedAt: null,
+    failedAt: null,
+    createdAt: new Date('2026-04-04T00:00:00.000Z'),
+    updatedAt: new Date('2026-04-04T00:00:00.000Z'),
+  };
+}
+
 describe('firstSyncRelay', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    accountStateHashHexMock.mockImplementation((value) => Buffer.from(value).toString('hex'));
   });
 
   it('returns the player authorization message before transaction assembly', async () => {
@@ -168,5 +258,136 @@ describe('firstSyncRelay', () => {
     expect(result.preparedTransaction.kind).toBe('player_owned_instruction');
     expect(result.preparedTransaction.characterCreationRelay?.localCharacterId).toBe('character-1');
     expect(result.preparedTransaction.settlementRelay?.batchId).toBe(1);
+  });
+
+  it('submits the atomic first sync, confirms batch 1, and queues later batches for normal settlement', async () => {
+    const authority = Keypair.generate();
+    const preparedRebase = buildPreparedRebase(authority.publicKey.toBase58());
+    const persistedBatch = buildPersistedBatch(preparedRebase);
+    const unsignedTransaction = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: authority.publicKey,
+        recentBlockhash: '11111111111111111111111111111111',
+        instructions: [],
+      }).compileToV0Message([]),
+    );
+    const prepared = prepareFirstSyncTransaction({
+      authority: authority.publicKey.toBase58(),
+      feePayer: authority.publicKey.toBase58(),
+      serializedMessageBase64: toBase64(unsignedTransaction.message.serialize()),
+      serializedTransactionBase64: toBase64(unsignedTransaction.serialize()),
+      characterCreation: {
+        localCharacterId: preparedRebase.anchor.characterId,
+        chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
+        characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        characterCreationTs: preparedRebase.anchor.characterCreationTs,
+        seasonIdAtCreation: preparedRebase.anchor.seasonIdAtCreation,
+        initialUnlockedZoneId: preparedRebase.anchor.initialUnlockedZoneId,
+        recentBlockhash: '11111111111111111111111111111111',
+        lastValidBlockHeight: 88,
+      },
+      settlement: {
+        characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        payload: preparedRebase.batchDrafts[0]!.payload,
+        expectedCursor: {
+          lastCommittedEndNonce: 0,
+          lastCommittedBatchId: 0,
+          lastCommittedStateHash: preparedRebase.genesisCursor.lastCommittedStateHash,
+          lastCommittedBattleTs: preparedRebase.genesisCursor.lastCommittedBattleTs,
+          lastCommittedSeasonId: preparedRebase.genesisCursor.lastCommittedSeasonId,
+        },
+        permitDomain: {
+          programId: RUNANA_PROGRAM_ID.toBase58(),
+          clusterId: 1,
+          playerAuthority: authority.publicKey.toBase58(),
+          characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+          batchHash: preparedRebase.batchDrafts[0]!.payload.batchHash,
+          batchId: preparedRebase.batchDrafts[0]!.payload.batchId,
+          signatureScheme: 0,
+        },
+      },
+    });
+
+    prepareFirstSyncRebaseMock.mockResolvedValue(preparedRebase);
+    prismaMock.character.findChainState.mockResolvedValue({
+      id: 'character-1',
+      playerAuthorityPubkey: authority.publicKey.toBase58(),
+      chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
+      characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+      chainCreationStatus: 'PENDING',
+      chainCreationTxSignature: null,
+      chainCreatedAt: null,
+      chainCreationTs: preparedRebase.anchor.characterCreationTs,
+      chainCreationSeasonId: preparedRebase.anchor.seasonIdAtCreation,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      lastReconciledAt: null,
+    });
+    prismaMock.character.updateChainIdentity.mockResolvedValue({});
+    prismaMock.character.updateCursorSnapshot.mockResolvedValue({});
+    prismaMock.settlementBatch.findByCharacterAndBatchId.mockResolvedValue(null);
+    prismaMock.settlementBatch.createSealed.mockResolvedValue(persistedBatch);
+    prismaMock.settlementBatch.updateStatus.mockImplementation(
+      async (_id: string, patch: Record<string, unknown>) => ({
+        ...persistedBatch,
+        ...patch,
+      }),
+    );
+    prismaMock.battleOutcomeLedger.markCommittedForBatch.mockResolvedValue([]);
+    prismaMock.settlementSubmissionAttempt.listByBatch.mockResolvedValue([]);
+    prismaMock.settlementSubmissionAttempt.create.mockResolvedValue({
+      id: 'attempt-1',
+      attemptNumber: 1,
+      status: 'STARTED',
+    });
+    prismaMock.settlementSubmissionAttempt.update.mockImplementation(
+      async (_id: string, patch: Record<string, unknown>) => ({
+        id: 'attempt-1',
+        attemptNumber: 1,
+        ...patch,
+      }),
+    );
+    fetchCharacterRootAccountMock.mockResolvedValue({
+      characterId: Buffer.alloc(16),
+    } as Awaited<ReturnType<typeof fetchCharacterRootAccount>>);
+    accountCharacterIdHexMock.mockReturnValue(preparedRebase.reservedIdentity.chainCharacterIdHex);
+    fetchCharacterSettlementBatchCursorAccountMock.mockResolvedValue({
+      lastCommittedEndNonce: 2n,
+      lastCommittedBatchId: 1n,
+      lastCommittedStateHash: Buffer.from('33'.repeat(32), 'hex'),
+      lastCommittedBattleTs: 1_700_000_040n,
+      lastCommittedSeasonId: 4,
+    } as Awaited<ReturnType<typeof fetchCharacterSettlementBatchCursorAccount>>);
+
+    const result = await submitSolanaFirstSync(
+      {
+        prepared,
+        signedMessageBase64: prepared.serializedMessageBase64,
+        signedTransactionBase64: prepared.serializedTransactionBase64,
+      },
+      {
+        connection: {
+          getAccountInfo: jest.fn(),
+          sendRawTransaction: jest.fn().mockResolvedValue('tx-signature-1'),
+          confirmTransaction: jest.fn().mockResolvedValue({ value: { err: null } }),
+        },
+        now: () => new Date('2026-04-04T12:00:00.000Z'),
+        prismaClient: prismaMock as never,
+        prepareFirstSyncRebase: prepareFirstSyncRebaseMock,
+      },
+    );
+
+    expect(result.chainCreationStatus).toBe('CONFIRMED');
+    expect(result.firstSettlementBatchId).toBe('settlement-batch-1');
+    expect(result.cursor.lastCommittedEndNonce).toBe(2);
+    expect(prismaMock.settlementBatch.createSealed).toHaveBeenCalledTimes(1);
+    expect(prismaMock.character.updateCursorSnapshot).toHaveBeenCalledTimes(1);
+    expect(prismaMock.battleOutcomeLedger.markCommittedForBatch).toHaveBeenCalledWith(
+      'settlement-batch-1',
+      new Date('2026-04-04T12:00:00.000Z'),
+    );
   });
 });
