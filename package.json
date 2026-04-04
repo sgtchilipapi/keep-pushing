@@ -10,6 +10,7 @@
     "test:solana:localnet": "RUNANA_ENABLE_LOCALNET_TESTS=1 jest --runInBand tests/runanaLocalnet.integration.test.ts",
     "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts",
     "solana:manual:character:setup": "bash scripts/solana/setupManualCharacterTest.sh",
+    "solana:character:create": "npx tsx scripts/solana/createCharacter.ts",
     "solana:bootstrap": "npx tsx scripts/solana/seedBootstrap.ts",
     "solana:bootstrap:dry-run": "npx tsx scripts/solana/seedBootstrap.ts --dry-run"
   },
