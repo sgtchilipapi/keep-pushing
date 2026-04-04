@@ -161,6 +161,28 @@ export type CreateBattleRecordInput = {
   events: unknown;
 };
 
+export type CreatePersistedEncounterInput = {
+  battleId: string;
+  characterId: string;
+  zoneId: number;
+  enemyArchetypeId: number;
+  seed: number;
+  playerInitial: unknown;
+  enemyInitial: unknown;
+  winnerEntityId: string;
+  roundsPlayed: number;
+  events: unknown;
+  battleNonce: number;
+  battleTs: number;
+  seasonId: number;
+  zoneProgressDelta: unknown;
+};
+
+export type PersistedEncounterRecord = {
+  battleRecord: BattleRecordRecord;
+  ledger: BattleOutcomeLedgerRecord;
+};
+
 export type SettlementBatchRecord = {
   id: string;
   characterId: string;
@@ -923,6 +945,115 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapBattleRecord(result.rows[0]) : null;
+    },
+    async createWithSettlementLedger(input: CreatePersistedEncounterInput): Promise<PersistedEncounterRecord> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const battleRecordResult = await client.query<BattleRecordRow>(
+          `INSERT INTO "BattleRecord"
+            (
+              id,
+              "battleId",
+              "characterId",
+              "zoneId",
+              "enemyArchetypeId",
+              seed,
+              "playerInitialJson",
+              "enemyInitialJson",
+              "winnerEntityId",
+              "roundsPlayed",
+              "eventsJson",
+              "updatedAt"
+            )
+          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
+          RETURNING
+            id,
+            "battleId",
+            "characterId",
+            "zoneId",
+            "enemyArchetypeId",
+            seed,
+            "playerInitialJson",
+            "enemyInitialJson",
+            "winnerEntityId",
+            "roundsPlayed",
+            "eventsJson",
+            "createdAt",
+            "updatedAt"`,
+          [
+            createRowId(),
+            input.battleId,
+            input.characterId,
+            input.zoneId,
+            input.enemyArchetypeId,
+            input.seed,
+            JSON.stringify(input.playerInitial),
+            JSON.stringify(input.enemyInitial),
+            input.winnerEntityId,
+            input.roundsPlayed,
+            JSON.stringify(input.events),
+            new Date()
+          ]
+        );
+
+        const ledgerResult = await client.query<BattleOutcomeLedgerRow>(
+          `INSERT INTO "BattleOutcomeLedger"
+            (
+              id,
+              "characterId",
+              "battleId",
+              "battleNonce",
+              "battleTs",
+              "seasonId",
+              "zoneId",
+              "enemyArchetypeId",
+              "zoneProgressDeltaJson",
+              "updatedAt"
+            )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+          RETURNING
+            id,
+            "characterId",
+            "battleId",
+            "battleNonce",
+            "battleTs",
+            "seasonId",
+            "zoneId",
+            "enemyArchetypeId",
+            "zoneProgressDeltaJson",
+            "settlementStatus",
+            "sealedBatchId",
+            "committedAt",
+            "createdAt",
+            "updatedAt"`,
+          [
+            createRowId(),
+            input.characterId,
+            input.battleId,
+            input.battleNonce,
+            input.battleTs,
+            input.seasonId,
+            input.zoneId,
+            input.enemyArchetypeId,
+            JSON.stringify(input.zoneProgressDelta),
+            new Date()
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+          battleRecord: mapBattleRecord(battleRecordResult.rows[0]),
+          ledger: mapBattleOutcomeLedger(ledgerResult.rows[0])
+        };
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
     }
   },
   battleOutcomeLedger: {
@@ -998,6 +1129,32 @@ export const prisma = {
       );
 
       return result.rows.map(mapBattleOutcomeLedger);
+    },
+    async findLatestForCharacter(characterId: string) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `SELECT
+          id,
+          "characterId",
+          "battleId",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleOutcomeLedger"
+        WHERE "characterId" = $1
+        ORDER BY "battleNonce" DESC
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapBattleOutcomeLedger(result.rows[0]) : null;
     },
     async markCommittedForBatch(sealedBatchId: string, committedAt = new Date()) {
       const result = await pool.query<BattleOutcomeLedgerRow>(
