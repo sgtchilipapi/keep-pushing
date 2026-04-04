@@ -193,6 +193,16 @@ export type CreateSettlementSubmissionAttemptInput = {
   resolvedAt?: Date | null;
 };
 
+export type UpdateSettlementSubmissionAttemptInput = {
+  status: SettlementSubmissionAttemptStatus;
+  messageSha256Hex?: string | null;
+  signedTransactionSha256Hex?: string | null;
+  transactionSignature?: string | null;
+  rpcError?: string | null;
+  submittedAt?: Date | null;
+  resolvedAt?: Date | null;
+};
+
 type CharacterChainStateRow = {
   id: string;
   playerAuthorityPubkey: string | null;
@@ -911,6 +921,47 @@ export const prisma = {
 
       return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
     },
+    async listUnconfirmed(limit?: number) {
+      const result = await pool.query<SettlementBatchRow>(
+        `SELECT
+          id,
+          "characterId",
+          "batchId",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementBatch"
+        WHERE "status" <> 'CONFIRMED'
+        ORDER BY "characterId" ASC, "batchId" ASC
+        ${limit === undefined ? '' : 'LIMIT $1'}`,
+        limit === undefined ? [] : [limit]
+      );
+
+      return result.rows.map(mapSettlementBatch);
+    },
     async updateStatus(id: string, input: UpdateSettlementBatchStatusInput) {
       const result = await pool.query<SettlementBatchRow>(
         `UPDATE "SettlementBatch"
@@ -1040,6 +1091,45 @@ export const prisma = {
       );
 
       return result.rows.map(mapSettlementSubmissionAttempt);
+    },
+    async update(id: string, input: UpdateSettlementSubmissionAttemptInput) {
+      const result = await pool.query<SettlementSubmissionAttemptRow>(
+        `UPDATE "SettlementSubmissionAttempt"
+        SET
+          "status" = $2,
+          "messageSha256Hex" = $3,
+          "signedTransactionSha256Hex" = $4,
+          "transactionSignature" = $5,
+          "rpcError" = $6,
+          "submittedAt" = $7,
+          "resolvedAt" = $8
+        WHERE id = $1
+        RETURNING
+          id,
+          "settlementBatchId",
+          "attemptNumber",
+          "status",
+          "messageSha256Hex",
+          "signedTransactionSha256Hex",
+          "transactionSignature",
+          "rpcError",
+          "createdAt",
+          "updatedAt",
+          "submittedAt",
+          "resolvedAt"`,
+        [
+          id,
+          input.status,
+          input.messageSha256Hex ?? null,
+          input.signedTransactionSha256Hex ?? null,
+          input.transactionSignature ?? null,
+          input.rpcError ?? null,
+          input.submittedAt ?? null,
+          input.resolvedAt ?? null,
+        ]
+      );
+
+      return result.rows[0] ? mapSettlementSubmissionAttempt(result.rows[0]) : null;
     }
   }
 };

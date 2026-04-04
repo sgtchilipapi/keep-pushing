@@ -565,6 +565,8 @@ Backend/server:
   - backend prepares settlement transaction bytes that match the current program contract and harness behavior
 
 ### Step 8 — Add submission lifecycle, reconciliation, and recovery
+- Status:
+  - complete
 - Objective:
   - make settlement robust to retries and restarts
 - Files/modules affected:
