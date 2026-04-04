@@ -47,6 +47,15 @@ function assertCondition(condition: boolean, code: string, message: string): ass
   }
 }
 
+function requireBattleNonce(battle: BattleOutcomeLedgerRecord): number {
+  assertCondition(
+    battle.battleNonce !== null,
+    'ERR_PENDING_NONCE_MISSING',
+    `battle ${battle.id} is missing a finalized battle nonce`,
+  );
+  return battle.battleNonce;
+}
+
 function compareEncounterEntries(left: EncounterCountEntry, right: EncounterCountEntry): number {
   return left.zoneId - right.zoneId || left.enemyArchetypeId - right.enemyArchetypeId;
 }
@@ -119,7 +128,7 @@ function contiguousBattlePrefix(
 
   const first = battles[0];
   assertCondition(
-    first.battleNonce === expectedStartNonce,
+    requireBattleNonce(first) === expectedStartNonce,
     'ERR_PENDING_NONCE_GAP',
     'oldest pending battle nonce did not match the expected next cursor nonce',
   );
@@ -130,7 +139,7 @@ function contiguousBattlePrefix(
   let expectedNonce = expectedStartNonce;
 
   for (const battle of battles) {
-    if (battle.battleNonce !== expectedNonce) {
+    if (requireBattleNonce(battle) !== expectedNonce) {
       break;
     }
     if (battle.seasonId !== seasonId) {
@@ -212,7 +221,9 @@ export function sealSettlementBatchDraft(args: SealSettlementBatchArgs): SealedS
   };
 
   const battles = contiguousBattlePrefix(
-    [...args.pendingBattles].sort((left, right) => left.battleNonce - right.battleNonce),
+    [...args.pendingBattles].sort(
+      (left, right) => requireBattleNonce(left) - requireBattleNonce(right),
+    ),
     cursor.lastCommittedEndNonce + 1,
     args.maxBattlesPerBatch,
     args.maxHistogramEntriesPerBatch,
@@ -227,8 +238,8 @@ export function sealSettlementBatchDraft(args: SealSettlementBatchArgs): SealedS
   const payloadBase = {
     characterId: characterIdHex,
     batchId: cursor.lastCommittedBatchId + 1,
-    startNonce: first.battleNonce,
-    endNonce: last.battleNonce,
+    startNonce: requireBattleNonce(first),
+    endNonce: requireBattleNonce(last),
     battleCount: battles.length,
     startStateHash: cursor.lastCommittedStateHash,
     zoneProgressDelta,

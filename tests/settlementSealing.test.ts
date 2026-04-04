@@ -11,10 +11,13 @@ import {
 import type { BattleOutcomeLedgerRecord, SettlementBatchRecord } from '../lib/prisma';
 
 function battle(overrides: Partial<BattleOutcomeLedgerRecord>): BattleOutcomeLedgerRecord {
+  const sequence = overrides.localSequence ?? overrides.battleNonce ?? 1;
+
   return {
-    id: `battle-${overrides.battleNonce ?? 1}`,
+    id: `battle-${sequence}`,
     characterId: 'local-character-1',
-    battleId: `battle-id-${overrides.battleNonce ?? 1}`,
+    battleId: `battle-id-${sequence}`,
+    localSequence: sequence,
     battleNonce: 1,
     battleTs: 1_700_000_100,
     seasonId: 4,

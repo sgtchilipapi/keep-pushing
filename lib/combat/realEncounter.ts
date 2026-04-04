@@ -191,6 +191,9 @@ export async function executeRealEncounter(
       battleResult,
     }),
   );
+  if (persisted.ledger.battleNonce === null) {
+    throw new Error('ERR_BATTLE_NONCE_UNAVAILABLE: confirmed-character encounter did not persist a battle nonce');
+  }
 
   return {
     battleId: persisted.ledger.battleId,

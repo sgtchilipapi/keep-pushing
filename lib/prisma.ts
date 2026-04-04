@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 
 import { allocateNextBattleNonce } from './combat/battleNonce';
+import type { ZoneState } from '../types/settlement';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -17,6 +18,8 @@ const pool = new Pool(
 function createRowId(): string {
   return randomUUID();
 }
+
+const DEFAULT_STARTER_UNLOCKED_ZONE_ID = 1;
 
 type CharacterCreateInput = {
   userId: string;
@@ -39,9 +42,38 @@ export type CharacterChainCreationStatus =
   | 'CONFIRMED'
   | 'FAILED';
 
-export type BattleOutcomeLedgerStatus = 'PENDING' | 'SEALED' | 'COMMITTED';
+export type BattleOutcomeLedgerStatus =
+  | 'AWAITING_FIRST_SYNC'
+  | 'LOCAL_ONLY_ARCHIVED'
+  | 'PENDING'
+  | 'SEALED'
+  | 'COMMITTED';
 export type SettlementBatchStatus = 'SEALED' | 'PREPARED' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 export type SettlementSubmissionAttemptStatus = 'STARTED' | 'BROADCAST' | 'CONFIRMED' | 'FAILED' | 'TIMEOUT';
+export type CharacterProvisionalZoneState = ZoneState;
+
+export type CharacterProvisionalProgressRecord = {
+  id: string;
+  characterId: string;
+  highestUnlockedZoneId: number;
+  highestClearedZoneId: number;
+  zoneStates: Record<string, CharacterProvisionalZoneState>;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateCharacterProvisionalProgressInput = {
+  characterId: string;
+  highestUnlockedZoneId: number;
+  highestClearedZoneId?: number;
+  zoneStates: Record<string, CharacterProvisionalZoneState>;
+};
+
+export type UpdateCharacterProvisionalProgressInput = {
+  highestUnlockedZoneId: number;
+  highestClearedZoneId: number;
+  zoneStates: Record<string, CharacterProvisionalZoneState>;
+};
 
 export type CharacterChainState = {
   id: string;
@@ -65,6 +97,7 @@ export type CharacterBattleReadyRecord = {
   id: string;
   userId: string;
   name: string;
+  createdAt: Date;
   hp: number;
   hpMax: number;
   atk: number;
@@ -110,7 +143,8 @@ export type BattleOutcomeLedgerRecord = {
   id: string;
   characterId: string;
   battleId: string;
-  battleNonce: number;
+  localSequence: number;
+  battleNonce: number | null;
   battleTs: number;
   seasonId: number;
   zoneId: number;
@@ -126,12 +160,14 @@ export type BattleOutcomeLedgerRecord = {
 export type CreateBattleOutcomeLedgerInput = {
   characterId: string;
   battleId: string;
-  battleNonce: number;
+  localSequence: number;
+  battleNonce?: number | null;
   battleTs: number;
   seasonId: number;
   zoneId: number;
   enemyArchetypeId: number;
   zoneProgressDelta: unknown;
+  settlementStatus?: BattleOutcomeLedgerStatus;
 };
 
 export type BattleRecordRecord = {
@@ -304,11 +340,22 @@ type CharacterChainStateRow = {
   lastReconciledAt: Date | null;
 };
 
+type CharacterProvisionalProgressRow = {
+  id: string;
+  characterId: string;
+  highestUnlockedZoneId: number;
+  highestClearedZoneId: number;
+  zoneStatesJson: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type BattleOutcomeLedgerRow = {
   id: string;
   characterId: string;
   battleId: string;
-  battleNonce: string | number;
+  localSequence: string | number;
+  battleNonce: string | number | null;
   battleTs: string | number;
   seasonId: number;
   zoneId: number;
@@ -426,12 +473,46 @@ function mapCharacterChainState(row: CharacterChainStateRow): CharacterChainStat
   };
 }
 
+function parseCharacterZoneStates(value: unknown): Record<string, CharacterProvisionalZoneState> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('ERR_INVALID_ZONE_STATES: zoneStatesJson must be a plain object');
+  }
+
+  const out: Record<string, CharacterProvisionalZoneState> = {};
+  for (const [zoneId, zoneState] of Object.entries(value)) {
+    if (!/^\d+$/.test(zoneId)) {
+      throw new Error('ERR_INVALID_ZONE_STATES: zone state keys must be numeric strings');
+    }
+    if (zoneState !== 0 && zoneState !== 1 && zoneState !== 2) {
+      throw new Error(`ERR_INVALID_ZONE_STATES: zone ${zoneId} must be 0, 1, or 2`);
+    }
+    out[zoneId] = zoneState;
+  }
+
+  return out;
+}
+
+function mapCharacterProvisionalProgress(
+  row: CharacterProvisionalProgressRow
+): CharacterProvisionalProgressRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    highestUnlockedZoneId: row.highestUnlockedZoneId,
+    highestClearedZoneId: row.highestClearedZoneId,
+    zoneStates: parseCharacterZoneStates(row.zoneStatesJson),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
 function mapBattleOutcomeLedger(row: BattleOutcomeLedgerRow): BattleOutcomeLedgerRecord {
   return {
     id: row.id,
     characterId: row.characterId,
     battleId: row.battleId,
-    battleNonce: parseRequiredSafeInteger(row.battleNonce, 'battleNonce'),
+    localSequence: parseRequiredSafeInteger(row.localSequence, 'localSequence'),
+    battleNonce: parseNullableSafeInteger(row.battleNonce, 'battleNonce'),
     battleTs: parseRequiredSafeInteger(row.battleTs, 'battleTs'),
     seasonId: row.seasonId,
     zoneId: row.zoneId,
@@ -465,7 +546,7 @@ function mapBattleRecord(row: BattleRecordRow): BattleRecordRecord {
 
 async function insertPersistedEncounter(
   client: PoolClient,
-  input: CreatePersistedEncounterInput & { battleNonce: number }
+  input: CreatePersistedEncounterInput & { localSequence: number; battleNonce: number }
 ): Promise<PersistedEncounterRecord> {
   const battleRecordResult = await client.query<BattleRecordRow>(
     `INSERT INTO "BattleRecord"
@@ -520,6 +601,7 @@ async function insertPersistedEncounter(
         id,
         "characterId",
         "battleId",
+        "localSequence",
         "battleNonce",
         "battleTs",
         "seasonId",
@@ -528,11 +610,12 @@ async function insertPersistedEncounter(
         "zoneProgressDeltaJson",
         "updatedAt"
       )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
     RETURNING
       id,
       "characterId",
       "battleId",
+      "localSequence",
       "battleNonce",
       "battleTs",
       "seasonId",
@@ -548,6 +631,7 @@ async function insertPersistedEncounter(
       createRowId(),
       input.characterId,
       input.battleId,
+      input.localSequence,
       input.battleNonce,
       input.battleTs,
       input.seasonId,
@@ -649,11 +733,12 @@ export const prisma = {
           spd: number;
           accuracyBP: number;
           evadeBP: number;
+          createdAt: Date;
         }>(
           `INSERT INTO "Character"
             (id, "userId", "name", "hp", "hpMax", "atk", "def", "spd", "accuracyBP", "evadeBP", "updatedAt")
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-          RETURNING id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP"`,
+          RETURNING id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP", "createdAt"`,
           [
             characterId,
             input.userId,
@@ -669,6 +754,28 @@ export const prisma = {
           ]
         );
         const character = characterResult.rows[0];
+        await client.query(
+          `INSERT INTO "CharacterProvisionalProgress"
+            (
+              id,
+              "characterId",
+              "highestUnlockedZoneId",
+              "highestClearedZoneId",
+              "zoneStatesJson",
+              "updatedAt"
+            )
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)`,
+          [
+            createRowId(),
+            character.id,
+            DEFAULT_STARTER_UNLOCKED_ZONE_ID,
+            0,
+            JSON.stringify({
+              [String(DEFAULT_STARTER_UNLOCKED_ZONE_ID)]: 1
+            }),
+            updatedAt
+          ]
+        );
 
         for (let index = 0; index < input.activeSkills.length; index += 1) {
           const skillId = input.activeSkills[index];
@@ -740,6 +847,7 @@ export const prisma = {
         id: string;
         userId: string;
         name: string;
+        createdAt: Date;
         hp: number;
         hpMax: number;
         atk: number;
@@ -762,6 +870,7 @@ export const prisma = {
           id,
           "userId",
           name,
+          "createdAt",
           hp,
           "hpMax",
           atk,
@@ -804,6 +913,7 @@ export const prisma = {
         id: character.id,
         userId: character.userId,
         name: character.name,
+        createdAt: character.createdAt,
         hp: character.hp,
         hpMax: character.hpMax,
         atk: character.atk,
@@ -973,6 +1083,86 @@ export const prisma = {
       return result.rows[0] ? mapCharacterChainState(result.rows[0]) : null;
     }
   },
+  characterProvisionalProgress: {
+    async create(input: CreateCharacterProvisionalProgressInput) {
+      const result = await pool.query<CharacterProvisionalProgressRow>(
+        `INSERT INTO "CharacterProvisionalProgress"
+          (
+            id,
+            "characterId",
+            "highestUnlockedZoneId",
+            "highestClearedZoneId",
+            "zoneStatesJson",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        RETURNING
+          id,
+          "characterId",
+          "highestUnlockedZoneId",
+          "highestClearedZoneId",
+          "zoneStatesJson",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.characterId,
+          input.highestUnlockedZoneId,
+          input.highestClearedZoneId ?? 0,
+          JSON.stringify(input.zoneStates),
+          new Date()
+        ]
+      );
+
+      return mapCharacterProvisionalProgress(result.rows[0]);
+    },
+    async findByCharacterId(characterId: string) {
+      const result = await pool.query<CharacterProvisionalProgressRow>(
+        `SELECT
+          id,
+          "characterId",
+          "highestUnlockedZoneId",
+          "highestClearedZoneId",
+          "zoneStatesJson",
+          "createdAt",
+          "updatedAt"
+        FROM "CharacterProvisionalProgress"
+        WHERE "characterId" = $1
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapCharacterProvisionalProgress(result.rows[0]) : null;
+    },
+    async updateByCharacterId(characterId: string, input: UpdateCharacterProvisionalProgressInput) {
+      const result = await pool.query<CharacterProvisionalProgressRow>(
+        `UPDATE "CharacterProvisionalProgress"
+        SET
+          "highestUnlockedZoneId" = $2,
+          "highestClearedZoneId" = $3,
+          "zoneStatesJson" = $4::jsonb,
+          "updatedAt" = $5
+        WHERE "characterId" = $1
+        RETURNING
+          id,
+          "characterId",
+          "highestUnlockedZoneId",
+          "highestClearedZoneId",
+          "zoneStatesJson",
+          "createdAt",
+          "updatedAt"`,
+        [
+          characterId,
+          input.highestUnlockedZoneId,
+          input.highestClearedZoneId,
+          JSON.stringify(input.zoneStates),
+          new Date()
+        ]
+      );
+
+      return result.rows[0] ? mapCharacterProvisionalProgress(result.rows[0]) : null;
+    }
+  },
   battleRecord: {
     async create(input: CreateBattleRecordInput) {
       const result = await pool.query<BattleRecordRow>(
@@ -1072,8 +1262,8 @@ export const prisma = {
         const latestLocalBattleResult = await client.query<{ battleNonce: string | number }>(
           `SELECT "battleNonce"
           FROM "BattleOutcomeLedger"
-          WHERE "characterId" = $1
-          ORDER BY "battleNonce" DESC
+          WHERE "characterId" = $1 AND "battleNonce" IS NOT NULL
+          ORDER BY "battleNonce" DESC NULLS LAST
           LIMIT 1`,
           [input.characterId]
         );
@@ -1092,6 +1282,7 @@ export const prisma = {
 
         const persisted = await insertPersistedEncounter(client, {
           ...input,
+          localSequence: battleNonce,
           battleNonce
         });
 
@@ -1112,7 +1303,10 @@ export const prisma = {
       try {
         await client.query('BEGIN');
 
-        const persisted = await insertPersistedEncounter(client, input);
+        const persisted = await insertPersistedEncounter(client, {
+          ...input,
+          localSequence: input.battleNonce
+        });
 
         await client.query('COMMIT');
 
@@ -1133,19 +1327,22 @@ export const prisma = {
             id,
             "characterId",
             "battleId",
+            "localSequence",
             "battleNonce",
             "battleTs",
             "seasonId",
             "zoneId",
             "enemyArchetypeId",
+            "settlementStatus",
             "zoneProgressDeltaJson",
             "updatedAt"
           )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
         RETURNING
           id,
           "characterId",
           "battleId",
+          "localSequence",
           "battleNonce",
           "battleTs",
           "seasonId",
@@ -1161,11 +1358,13 @@ export const prisma = {
           createRowId(),
           input.characterId,
           input.battleId,
-          input.battleNonce,
+          input.localSequence,
+          input.battleNonce ?? null,
           input.battleTs,
           input.seasonId,
           input.zoneId,
           input.enemyArchetypeId,
+          input.settlementStatus ?? 'PENDING',
           JSON.stringify(input.zoneProgressDelta),
           new Date()
         ]
@@ -1179,6 +1378,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "localSequence",
           "battleNonce",
           "battleTs",
           "seasonId",
@@ -1205,6 +1405,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "localSequence",
           "battleNonce",
           "battleTs",
           "seasonId",
@@ -1218,12 +1419,53 @@ export const prisma = {
           "updatedAt"
         FROM "BattleOutcomeLedger"
         WHERE "characterId" = $1
-        ORDER BY "battleNonce" DESC
+        ORDER BY "localSequence" DESC
         LIMIT 1`,
         [characterId]
       );
 
       return result.rows[0] ? mapBattleOutcomeLedger(result.rows[0]) : null;
+    },
+    async listAwaitingFirstSyncForCharacter(characterId: string, limit: number) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `SELECT
+          id,
+          "characterId",
+          "battleId",
+          "localSequence",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleOutcomeLedger"
+        WHERE "characterId" = $1 AND "settlementStatus" = 'AWAITING_FIRST_SYNC'
+        ORDER BY "localSequence" ASC
+        LIMIT $2`,
+        [characterId, limit]
+      );
+
+      return result.rows.map(mapBattleOutcomeLedger);
+    },
+    async findLatestLocalSequenceForCharacter(characterId: string) {
+      const result = await pool.query<{ localSequence: string | number }>(
+        `SELECT "localSequence"
+        FROM "BattleOutcomeLedger"
+        WHERE "characterId" = $1
+        ORDER BY "localSequence" DESC
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0]
+        ? parseRequiredSafeInteger(result.rows[0].localSequence, 'localSequence')
+        : null;
     },
     async markCommittedForBatch(sealedBatchId: string, committedAt = new Date()) {
       const result = await pool.query<BattleOutcomeLedgerRow>(
@@ -1236,6 +1478,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "localSequence",
           "battleNonce",
           "battleTs",
           "seasonId",
