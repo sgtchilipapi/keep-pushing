@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import { applyRoundInitiative, hasReadyActor, nextActorIndex, timeoutWinner } from './initiative';
 import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
@@ -26,6 +28,20 @@ export type BattleInput = {
 };
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
+
+export function generateBattleSeed(entropy: Uint8Array = randomBytes(4)): number {
+  if (entropy.length < 4) {
+    throw new Error('ERR_INVALID_BATTLE_SEED_ENTROPY: entropy must contain at least 4 bytes');
+  }
+
+  const baseSeed =
+    ((entropy[0] ?? 0) |
+      ((entropy[1] ?? 0) << 8) |
+      ((entropy[2] ?? 0) << 16) |
+      ((entropy[3] ?? 0) << 24)) >>> 0;
+
+  return new XorShift32(baseSeed).nextU32();
+}
 
 export function adjustDamageForStatuses(baseDamage: number, activeStatusIds: readonly StatusId[]): number {
   const incomingDamageMultiplierBP = activeStatusIds.reduce((acc, statusId) => {

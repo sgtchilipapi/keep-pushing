@@ -9,6 +9,7 @@ jest.mock('../lib/combat/encounterSelection', () => ({
 }));
 
 jest.mock('../engine/battle/battleEngine', () => ({
+  generateBattleSeed: jest.fn(),
   simulateBattle: jest.fn(),
 }));
 
@@ -47,7 +48,7 @@ import {
   buildPlayerCombatSnapshot,
   loadCharacterBattleReadyRecord,
 } from '../lib/combat/combatSnapshotAssembly';
-import { simulateBattle } from '../engine/battle/battleEngine';
+import { generateBattleSeed, simulateBattle } from '../engine/battle/battleEngine';
 import { selectEncounterForZone } from '../lib/combat/encounterSelection';
 import {
   fetchCharacterWorldProgressAccount,
@@ -101,6 +102,7 @@ describe('executeRealEncounter', () => {
       enemyArchetypeId: 100,
       enemyArchetype: { enemyArchetypeId: 100, displayName: 'Scrap Drone', snapshot: {} },
     });
+    (generateBattleSeed as jest.Mock).mockReturnValue(77);
     (buildPlayerCombatSnapshot as jest.Mock).mockReturnValue({
       entityId: 'character-1',
       activeSkillIds: ['1001', '1002'],
@@ -158,7 +160,6 @@ describe('executeRealEncounter', () => {
       {
         characterId: 'character-1',
         zoneId: 2,
-        seed: 77,
       },
       {
         now: () => new Date('2023-11-14T22:15:00.000Z'),
@@ -166,6 +167,7 @@ describe('executeRealEncounter', () => {
       },
     );
 
+    expect(generateBattleSeed).toHaveBeenCalledTimes(1);
     expect(selectEncounterForZone).toHaveBeenCalledWith(2, 77);
     expect(prismaMock.battleRecord.allocateNonceAndCreateWithSettlementLedger).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -180,6 +182,7 @@ describe('executeRealEncounter', () => {
       characterId: 'character-1',
       zoneId: 2,
       enemyArchetypeId: 100,
+      seed: 77,
       battleNonce: 5,
       seasonId: 1,
       settlementStatus: 'PENDING',
@@ -192,7 +195,6 @@ describe('executeRealEncounter', () => {
       {
         characterId: 'character-1',
         zoneId: 2,
-        seed: 77,
       },
       {
         now: () => new Date('2023-11-14T22:15:00.000Z'),
@@ -238,7 +240,6 @@ describe('executeRealEncounter', () => {
       {
         characterId: 'character-1',
         zoneId: 2,
-        seed: 77,
       },
       {
         now: () => new Date('2023-11-14T22:15:00.000Z'),
@@ -254,6 +255,8 @@ describe('executeRealEncounter', () => {
       expect.objectContaining({
         characterId: 'character-1',
         zoneId: 2,
+        enemyArchetypeId: 100,
+        seed: 77,
         zoneProgressDelta: [
           { zoneId: 2, newState: 2 },
           { zoneId: 3, newState: 1 },
@@ -265,6 +268,7 @@ describe('executeRealEncounter', () => {
       }),
     );
     expect(result).toMatchObject({
+      seed: 77,
       battleNonce: 5,
       settlementStatus: 'AWAITING_FIRST_SYNC',
     });
@@ -280,7 +284,6 @@ describe('executeRealEncounter', () => {
         {
           characterId: 'character-1',
           zoneId: 2,
-          seed: 77,
         },
         {
           now: () => new Date('2023-11-14T22:15:00.000Z'),
@@ -323,7 +326,6 @@ describe('executeRealEncounter', () => {
         {
           characterId: 'character-1',
           zoneId: 2,
-          seed: 77,
         },
         {
           now: () => new Date('2023-11-14T22:15:00.000Z'),

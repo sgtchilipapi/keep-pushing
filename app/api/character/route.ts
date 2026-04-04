@@ -16,6 +16,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ character: null });
   }
 
+  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch] = await Promise.all([
+    prisma.character.findChainState(character.id),
+    prisma.characterProvisionalProgress.findByCharacterId(character.id),
+    prisma.battleOutcomeLedger.findLatestForCharacter(character.id),
+    prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
+  ]);
+
   return NextResponse.json({
     character: {
       characterId: character.id,
@@ -35,7 +42,71 @@ export async function GET(request: Request) {
       activeSkills: character.activeSkills,
       passiveSkills: character.passiveSkills,
       unlockedSkillIds: character.unlockedSkillIds,
-      inventory: character.inventory
+      inventory: character.inventory,
+      chain: chainState === null
+        ? null
+        : {
+            playerAuthorityPubkey: chainState.playerAuthorityPubkey,
+            chainCharacterIdHex: chainState.chainCharacterIdHex,
+            characterRootPubkey: chainState.characterRootPubkey,
+            chainCreationStatus: chainState.chainCreationStatus,
+            chainCreationTxSignature: chainState.chainCreationTxSignature,
+            chainCreatedAt: chainState.chainCreatedAt,
+            chainCreationTs: chainState.chainCreationTs,
+            chainCreationSeasonId: chainState.chainCreationSeasonId,
+            cursor:
+              chainState.lastReconciledEndNonce === null ||
+              chainState.lastReconciledStateHash === null ||
+              chainState.lastReconciledBatchId === null ||
+              chainState.lastReconciledBattleTs === null ||
+              chainState.lastReconciledSeasonId === null
+                ? null
+                : {
+                    lastReconciledEndNonce: chainState.lastReconciledEndNonce,
+                    lastReconciledStateHash: chainState.lastReconciledStateHash,
+                    lastReconciledBatchId: chainState.lastReconciledBatchId,
+                    lastReconciledBattleTs: chainState.lastReconciledBattleTs,
+                    lastReconciledSeasonId: chainState.lastReconciledSeasonId,
+                    lastReconciledAt: chainState.lastReconciledAt,
+                  }
+          },
+      provisionalProgress: provisionalProgress === null
+        ? null
+        : {
+            highestUnlockedZoneId: provisionalProgress.highestUnlockedZoneId,
+            highestClearedZoneId: provisionalProgress.highestClearedZoneId,
+            zoneStates: provisionalProgress.zoneStates,
+          },
+      latestBattle: latestBattle === null
+        ? null
+        : {
+            battleId: latestBattle.battleId,
+            localSequence: latestBattle.localSequence,
+            battleNonce: latestBattle.battleNonce,
+            battleTs: latestBattle.battleTs,
+            seasonId: latestBattle.seasonId,
+            zoneId: latestBattle.zoneId,
+            enemyArchetypeId: latestBattle.enemyArchetypeId,
+            settlementStatus: latestBattle.settlementStatus,
+            sealedBatchId: latestBattle.sealedBatchId,
+            committedAt: latestBattle.committedAt,
+          },
+      nextSettlementBatch: nextSettlementBatch === null
+        ? null
+        : {
+            settlementBatchId: nextSettlementBatch.id,
+            batchId: nextSettlementBatch.batchId,
+            startNonce: nextSettlementBatch.startNonce,
+            endNonce: nextSettlementBatch.endNonce,
+            battleCount: nextSettlementBatch.battleCount,
+            firstBattleTs: nextSettlementBatch.firstBattleTs,
+            lastBattleTs: nextSettlementBatch.lastBattleTs,
+            seasonId: nextSettlementBatch.seasonId,
+            status: nextSettlementBatch.status,
+            latestTransactionSignature: nextSettlementBatch.latestTransactionSignature,
+            failureCategory: nextSettlementBatch.failureCategory,
+            failureCode: nextSettlementBatch.failureCode,
+          }
     }
   });
 }

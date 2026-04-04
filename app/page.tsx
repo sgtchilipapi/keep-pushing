@@ -1,1 +1,1 @@
-export { default } from './battle/page';
+export { default } from './battle (old pof)/page';

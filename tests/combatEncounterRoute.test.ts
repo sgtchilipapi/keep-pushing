@@ -26,6 +26,7 @@ describe('POST /api/combat/encounter', () => {
       characterId: 'character-1',
       zoneId: 2,
       enemyArchetypeId: 100,
+      seed: 77,
       battleNonce: 5,
       seasonId: 1,
       battleTs: 1_700_000_100,
@@ -44,7 +45,6 @@ describe('POST /api/combat/encounter', () => {
     const response = await postEncounter({
       characterId: 'character-1',
       zoneId: 2,
-      seed: 77,
     });
     const json = await response.json();
 
@@ -52,9 +52,9 @@ describe('POST /api/combat/encounter', () => {
     expect(executeRealEncounter).toHaveBeenCalledWith({
       characterId: 'character-1',
       zoneId: 2,
-      seed: 77,
     });
     expect(json.characterId).toBe('character-1');
+    expect(json.seed).toBe(77);
     expect(json.settlementStatus).toBe('PENDING');
   });
 
@@ -62,7 +62,6 @@ describe('POST /api/combat/encounter', () => {
     const response = await postEncounter({
       characterId: '',
       zoneId: '2',
-      seed: 77,
     });
 
     expect(response.status).toBe(400);
@@ -77,7 +76,6 @@ describe('POST /api/combat/encounter', () => {
     const response = await postEncounter({
       characterId: 'character-1',
       zoneId: 2,
-      seed: 77,
     });
     const json = await response.json();
 

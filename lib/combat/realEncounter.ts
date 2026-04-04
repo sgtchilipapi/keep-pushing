@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { PublicKey, type Commitment, type Connection } from '@solana/web3.js';
 
-import { simulateBattle } from '../../engine/battle/battleEngine';
+import { generateBattleSeed, simulateBattle } from '../../engine/battle/battleEngine';
 import type { BattleResult } from '../../types/battle';
 import { prisma, type PersistedEncounterRecord } from '../prisma';
 import {
@@ -33,7 +33,6 @@ import {
 export interface ExecuteRealEncounterInput {
   characterId: string;
   zoneId: number;
-  seed: number;
 }
 
 export interface ExecuteRealEncounterResult {
@@ -41,6 +40,7 @@ export interface ExecuteRealEncounterResult {
   characterId: string;
   zoneId: number;
   enemyArchetypeId: number;
+  seed: number;
   battleNonce: number;
   seasonId: number;
   battleTs: number;
@@ -156,8 +156,6 @@ export async function executeRealEncounter(
   deps: RealEncounterServiceDependencies = {},
 ): Promise<ExecuteRealEncounterResult> {
   assertInteger(input.zoneId, 'zoneId', 0);
-  assertInteger(input.seed, 'seed');
-
   const now = (deps.now ?? (() => new Date()))();
   const battleTs = currentUnixTimestamp(now);
   const env = deps.env ?? process.env;
@@ -181,13 +179,14 @@ export async function executeRealEncounter(
 
   assertSeasonActive(battleTs, seasonPolicy);
 
-  const selectedEncounter = selectEncounterForZone(input.zoneId, input.seed);
+  const seed = generateBattleSeed();
+  const selectedEncounter = selectEncounterForZone(input.zoneId, seed);
   const playerInitial = buildPlayerCombatSnapshot(character);
   const enemyInitial = buildEnemyCombatSnapshot(selectedEncounter.enemyArchetype);
   const battleId = randomUUID();
   const battleResult = simulateBattle({
     battleId,
-    seed: input.seed,
+    seed,
     playerInitial,
     enemyInitial,
   });
@@ -211,7 +210,7 @@ export async function executeRealEncounter(
         characterId: character.id,
         zoneId: input.zoneId,
         enemyArchetypeId: selectedEncounter.enemyArchetypeId,
-        seed: input.seed,
+        seed,
         battleTs,
         seasonId: seasonPolicy.seasonId,
         playerInitial,
@@ -247,7 +246,7 @@ export async function executeRealEncounter(
         characterId: character.id,
         zoneId: input.zoneId,
         enemyArchetypeId: selectedEncounter.enemyArchetypeId,
-        seed: input.seed,
+        seed,
         battleTs,
         seasonId: seasonPolicy.seasonId,
         playerInitial,
@@ -274,6 +273,7 @@ export async function executeRealEncounter(
     characterId: persisted.ledger.characterId,
     zoneId: persisted.ledger.zoneId,
     enemyArchetypeId: persisted.ledger.enemyArchetypeId,
+    seed,
     battleNonce: persisted.ledger.localSequence,
     seasonId: persisted.ledger.seasonId,
     battleTs: persisted.ledger.battleTs,

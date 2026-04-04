@@ -40,11 +40,10 @@ export async function POST(request: Request) {
   if (
     typeof body.characterId !== 'string' ||
     body.characterId.length === 0 ||
-    typeof body.zoneId !== 'number' ||
-    typeof body.seed !== 'number'
+    typeof body.zoneId !== 'number'
   ) {
     return NextResponse.json(
-      { error: 'Invalid payload: expected characterId, zoneId, and seed.' },
+      { error: 'Invalid payload: expected characterId and zoneId.' },
       { status: 400 },
     );
   }
@@ -53,7 +52,6 @@ export async function POST(request: Request) {
     const result = await executeRealEncounter({
       characterId: body.characterId,
       zoneId: body.zoneId,
-      seed: body.seed,
     });
 
     return NextResponse.json(result, { status: 201 });
