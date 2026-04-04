@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Pool } from 'pg';
 
 const connectionString = process.env.DATABASE_URL;
@@ -9,6 +11,10 @@ const pool = new Pool(
       }
     : undefined
 );
+
+function createRowId(): string {
+  return randomUUID();
+}
 
 type CharacterCreateInput = {
   userId: string;
@@ -400,7 +406,10 @@ function mapSettlementSubmissionAttempt(row: SettlementSubmissionAttemptRow): Se
 export const prisma = {
   user: {
     async create() {
-      const result = await pool.query<{ id: string }>('INSERT INTO "User" DEFAULT VALUES RETURNING id');
+      const result = await pool.query<{ id: string }>(
+        'INSERT INTO "User" (id, "updatedAt") VALUES ($1, $2) RETURNING id',
+        [createRowId(), new Date()],
+      );
       return result.rows[0];
     },
     async findUnique(id: string) {
@@ -413,6 +422,8 @@ export const prisma = {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        const characterId = createRowId();
+        const updatedAt = new Date();
         const characterResult = await client.query<{
           id: string;
           userId: string;
@@ -428,29 +439,41 @@ export const prisma = {
           evadeBP: number;
         }>(
           `INSERT INTO "Character"
-            ("userId", "name", "hp", "hpMax", "atk", "def", "spd", "accuracyBP", "evadeBP")
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            (id, "userId", "name", "hp", "hpMax", "atk", "def", "spd", "accuracyBP", "evadeBP", "updatedAt")
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
           RETURNING id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP"`,
-          [input.userId, input.name, input.hp, input.hpMax, input.atk, input.def, input.spd, input.accuracyBP, input.evadeBP]
+          [
+            characterId,
+            input.userId,
+            input.name,
+            input.hp,
+            input.hpMax,
+            input.atk,
+            input.def,
+            input.spd,
+            input.accuracyBP,
+            input.evadeBP,
+            updatedAt
+          ]
         );
         const character = characterResult.rows[0];
 
         for (let index = 0; index < input.activeSkills.length; index += 1) {
           const skillId = input.activeSkills[index];
-          await client.query('INSERT INTO "SkillUnlock" ("characterId", "skillId") VALUES ($1, $2)', [
-            character.id,
-            skillId
-          ]);
           await client.query(
-            'INSERT INTO "EquippedSkill" ("characterId", slot, "skillId") VALUES ($1, $2, $3)',
-            [character.id, index, skillId]
+            'INSERT INTO "SkillUnlock" (id, "characterId", "skillId") VALUES ($1, $2, $3)',
+            [createRowId(), character.id, skillId]
+          );
+          await client.query(
+            'INSERT INTO "EquippedSkill" (id, "characterId", slot, "skillId", "updatedAt") VALUES ($1, $2, $3, $4, $5)',
+            [createRowId(), character.id, index, skillId, updatedAt]
           );
         }
 
         for (let index = 0; index < input.passiveSkills.length; index += 1) {
           await client.query(
-            'INSERT INTO "EquippedPassive" ("characterId", slot, "passiveId") VALUES ($1, $2, $3)',
-            [character.id, index, input.passiveSkills[index]]
+            'INSERT INTO "EquippedPassive" (id, "characterId", slot, "passiveId", "updatedAt") VALUES ($1, $2, $3, $4, $5)',
+            [createRowId(), character.id, index, input.passiveSkills[index], updatedAt]
           );
         }
 
@@ -509,14 +532,14 @@ export const prisma = {
 
         for (let index = 0; index < activeSkills.length; index += 1) {
           await client.query(
-            'INSERT INTO "EquippedSkill" ("characterId", slot, "skillId") VALUES ($1, $2, $3)',
-            [characterId, index, activeSkills[index]]
+            'INSERT INTO "EquippedSkill" (id, "characterId", slot, "skillId", "updatedAt") VALUES ($1, $2, $3, $4, $5)',
+            [createRowId(), characterId, index, activeSkills[index], new Date()]
           );
         }
         for (let index = 0; index < passiveSkills.length; index += 1) {
           await client.query(
-            'INSERT INTO "EquippedPassive" ("characterId", slot, "passiveId") VALUES ($1, $2, $3)',
-            [characterId, index, passiveSkills[index]]
+            'INSERT INTO "EquippedPassive" (id, "characterId", slot, "passiveId", "updatedAt") VALUES ($1, $2, $3, $4, $5)',
+            [createRowId(), characterId, index, passiveSkills[index], new Date()]
           );
         }
 
@@ -644,6 +667,7 @@ export const prisma = {
       const result = await pool.query<BattleOutcomeLedgerRow>(
         `INSERT INTO "BattleOutcomeLedger"
           (
+            id,
             "characterId",
             "battleId",
             "battleNonce",
@@ -651,9 +675,10 @@ export const prisma = {
             "seasonId",
             "zoneId",
             "enemyArchetypeId",
-            "zoneProgressDeltaJson"
+            "zoneProgressDeltaJson",
+            "updatedAt"
           )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
         RETURNING
           id,
           "characterId",
@@ -670,6 +695,7 @@ export const prisma = {
           "createdAt",
           "updatedAt"`,
         [
+          createRowId(),
           input.characterId,
           input.battleId,
           input.battleNonce,
@@ -677,7 +703,8 @@ export const prisma = {
           input.seasonId,
           input.zoneId,
           input.enemyArchetypeId,
-          JSON.stringify(input.zoneProgressDelta)
+          JSON.stringify(input.zoneProgressDelta),
+          new Date()
         ]
       );
 
@@ -746,6 +773,7 @@ export const prisma = {
         const batchResult = await client.query<SettlementBatchRow>(
           `INSERT INTO "SettlementBatch"
             (
+              id,
               "characterId",
               "batchId",
               "startNonce",
@@ -761,9 +789,10 @@ export const prisma = {
               "optionalLoadoutRevision",
               "batchHash",
               "schemaVersion",
-              "signatureScheme"
+              "signatureScheme",
+              "updatedAt"
             )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17,$18)
           RETURNING
             id,
             "characterId",
@@ -795,6 +824,7 @@ export const prisma = {
             "createdAt",
             "updatedAt"`,
           [
+            createRowId(),
             input.characterId,
             input.batchId,
             input.startNonce,
@@ -810,7 +840,8 @@ export const prisma = {
             input.optionalLoadoutRevision ?? null,
             input.batchHash,
             input.schemaVersion,
-            input.signatureScheme
+            input.signatureScheme,
+            new Date()
           ]
         );
 
@@ -1030,6 +1061,7 @@ export const prisma = {
       const result = await pool.query<SettlementSubmissionAttemptRow>(
         `INSERT INTO "SettlementSubmissionAttempt"
           (
+            id,
             "settlementBatchId",
             "attemptNumber",
             "status",
@@ -1038,9 +1070,10 @@ export const prisma = {
             "transactionSignature",
             "rpcError",
             "submittedAt",
-            "resolvedAt"
+            "resolvedAt",
+            "updatedAt"
           )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         RETURNING
           id,
           "settlementBatchId",
@@ -1055,6 +1088,7 @@ export const prisma = {
           "submittedAt",
           "resolvedAt"`,
         [
+          createRowId(),
           input.settlementBatchId,
           input.attemptNumber,
           input.status ?? 'STARTED',
@@ -1063,7 +1097,8 @@ export const prisma = {
           input.transactionSignature ?? null,
           input.rpcError ?? null,
           input.submittedAt ?? null,
-          input.resolvedAt ?? null
+          input.resolvedAt ?? null,
+          new Date()
         ]
       );
 

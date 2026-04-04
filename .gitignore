@@ -3,3 +3,6 @@ node_modules
 coverage
 npm-debug.log*
 test-ledger/
+.env.docker
+.docker/secrets/
+.tmp/

@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-keep_pushing}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - keep-pushing-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-keep_pushing}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-keep_pushing}
+      RUNANA_SOLANA_RPC_URL: ${RUNANA_SOLANA_RPC_URL:-http://host.docker.internal:8899}
+      RUNANA_SOLANA_COMMITMENT: ${RUNANA_SOLANA_COMMITMENT:-confirmed}
+      RUNANA_PROGRAM_ID: ${RUNANA_PROGRAM_ID:-CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm}
+      RUNANA_SERVER_SIGNER_KEYPAIR_PATH: ${RUNANA_SERVER_SIGNER_KEYPAIR_PATH:-/runana-secrets/server.json}
+      PORT: 3000
+    volumes:
+      - ${RUNANA_SERVER_SIGNER_HOST_PATH:-./.docker/secrets}:/runana-secrets:ro
+    command:
+      - sh
+      - -lc
+      - npx prisma migrate deploy && npm run start -- --hostname 0.0.0.0 --port 3000
+
+volumes:
+  keep-pushing-postgres-data:
