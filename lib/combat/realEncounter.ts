@@ -176,13 +176,7 @@ export async function executeRealEncounter(
     enemyInitial,
   });
 
-  const latestLocalBattle = await prisma.battleOutcomeLedger.findLatestForCharacter(character.id);
-  const battleNonce =
-    latestLocalBattle?.battleNonce !== undefined
-      ? latestLocalBattle.battleNonce + 1
-      : character.lastReconciledEndNonce! + 1;
-
-  const persisted = await prisma.battleRecord.createWithSettlementLedger({
+  const persisted = await prisma.battleRecord.allocateNonceAndCreateWithSettlementLedger({
     battleId,
     characterId: character.id,
     zoneId: input.zoneId,
@@ -193,7 +187,6 @@ export async function executeRealEncounter(
     winnerEntityId: battleResult.winnerEntityId,
     roundsPlayed: battleResult.roundsPlayed,
     events: battleResult.events,
-    battleNonce,
     battleTs,
     seasonId: seasonPolicy.seasonId,
     zoneProgressDelta: [],

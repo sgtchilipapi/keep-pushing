@@ -13,11 +13,8 @@ jest.mock('../engine/battle/battleEngine', () => ({
 }));
 
 const prismaMock = {
-  battleOutcomeLedger: {
-    findLatestForCharacter: jest.fn(),
-  },
   battleRecord: {
-    createWithSettlementLedger: jest.fn(),
+    allocateNonceAndCreateWithSettlementLedger: jest.fn(),
   },
 };
 
@@ -116,8 +113,7 @@ describe('executeRealEncounter', () => {
       winnerEntityId: 'character-1',
       roundsPlayed: 3,
     });
-    prismaMock.battleOutcomeLedger.findLatestForCharacter.mockResolvedValue(null);
-    prismaMock.battleRecord.createWithSettlementLedger.mockResolvedValue({
+    prismaMock.battleRecord.allocateNonceAndCreateWithSettlementLedger.mockResolvedValue({
       ledger: {
         battleId: 'battle-1',
         characterId: 'character-1',
@@ -144,12 +140,11 @@ describe('executeRealEncounter', () => {
     );
 
     expect(selectEncounterForZone).toHaveBeenCalledWith(2, 77);
-    expect(prismaMock.battleRecord.createWithSettlementLedger).toHaveBeenCalledWith(
+    expect(prismaMock.battleRecord.allocateNonceAndCreateWithSettlementLedger).toHaveBeenCalledWith(
       expect.objectContaining({
         characterId: 'character-1',
         zoneId: 2,
         enemyArchetypeId: 100,
-        battleNonce: 5,
         seasonId: 1,
         zoneProgressDelta: [],
       }),
@@ -164,11 +159,7 @@ describe('executeRealEncounter', () => {
     });
   });
 
-  it('increments from the latest local battle nonce when pending rows already exist', async () => {
-    prismaMock.battleOutcomeLedger.findLatestForCharacter.mockResolvedValue({
-      battleNonce: 9,
-    });
-
+  it('delegates nonce allocation to the transactional persistence helper', async () => {
     await executeRealEncounter(
       {
         characterId: 'character-1',
@@ -181,9 +172,9 @@ describe('executeRealEncounter', () => {
       },
     );
 
-    expect(prismaMock.battleRecord.createWithSettlementLedger).toHaveBeenCalledWith(
-      expect.objectContaining({
-        battleNonce: 10,
+    expect(prismaMock.battleRecord.allocateNonceAndCreateWithSettlementLedger).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        battleNonce: expect.anything(),
       }),
     );
   });

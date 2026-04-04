@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
+
+import { allocateNextBattleNonce } from './combat/battleNonce';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -172,7 +174,6 @@ export type CreatePersistedEncounterInput = {
   winnerEntityId: string;
   roundsPlayed: number;
   events: unknown;
-  battleNonce: number;
   battleTs: number;
   seasonId: number;
   zoneProgressDelta: unknown;
@@ -459,6 +460,107 @@ function mapBattleRecord(row: BattleRecordRow): BattleRecordRecord {
     events: row.eventsJson,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+async function insertPersistedEncounter(
+  client: PoolClient,
+  input: CreatePersistedEncounterInput & { battleNonce: number }
+): Promise<PersistedEncounterRecord> {
+  const battleRecordResult = await client.query<BattleRecordRow>(
+    `INSERT INTO "BattleRecord"
+      (
+        id,
+        "battleId",
+        "characterId",
+        "zoneId",
+        "enemyArchetypeId",
+        seed,
+        "playerInitialJson",
+        "enemyInitialJson",
+        "winnerEntityId",
+        "roundsPlayed",
+        "eventsJson",
+        "updatedAt"
+      )
+    VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
+    RETURNING
+      id,
+      "battleId",
+      "characterId",
+      "zoneId",
+      "enemyArchetypeId",
+      seed,
+      "playerInitialJson",
+      "enemyInitialJson",
+      "winnerEntityId",
+      "roundsPlayed",
+      "eventsJson",
+      "createdAt",
+      "updatedAt"`,
+    [
+      createRowId(),
+      input.battleId,
+      input.characterId,
+      input.zoneId,
+      input.enemyArchetypeId,
+      input.seed,
+      JSON.stringify(input.playerInitial),
+      JSON.stringify(input.enemyInitial),
+      input.winnerEntityId,
+      input.roundsPlayed,
+      JSON.stringify(input.events),
+      new Date()
+    ]
+  );
+
+  const ledgerResult = await client.query<BattleOutcomeLedgerRow>(
+    `INSERT INTO "BattleOutcomeLedger"
+      (
+        id,
+        "characterId",
+        "battleId",
+        "battleNonce",
+        "battleTs",
+        "seasonId",
+        "zoneId",
+        "enemyArchetypeId",
+        "zoneProgressDeltaJson",
+        "updatedAt"
+      )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+    RETURNING
+      id,
+      "characterId",
+      "battleId",
+      "battleNonce",
+      "battleTs",
+      "seasonId",
+      "zoneId",
+      "enemyArchetypeId",
+      "zoneProgressDeltaJson",
+      "settlementStatus",
+      "sealedBatchId",
+      "committedAt",
+      "createdAt",
+      "updatedAt"`,
+    [
+      createRowId(),
+      input.characterId,
+      input.battleId,
+      input.battleNonce,
+      input.battleTs,
+      input.seasonId,
+      input.zoneId,
+      input.enemyArchetypeId,
+      JSON.stringify(input.zoneProgressDelta),
+      new Date()
+    ]
+  );
+
+  return {
+    battleRecord: mapBattleRecord(battleRecordResult.rows[0]),
+    ledger: mapBattleOutcomeLedger(ledgerResult.rows[0])
   };
 }
 
@@ -946,108 +1048,75 @@ export const prisma = {
 
       return result.rows[0] ? mapBattleRecord(result.rows[0]) : null;
     },
-    async createWithSettlementLedger(input: CreatePersistedEncounterInput): Promise<PersistedEncounterRecord> {
+    async allocateNonceAndCreateWithSettlementLedger(
+      input: CreatePersistedEncounterInput
+    ): Promise<PersistedEncounterRecord> {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
 
-        const battleRecordResult = await client.query<BattleRecordRow>(
-          `INSERT INTO "BattleRecord"
-            (
-              id,
-              "battleId",
-              "characterId",
-              "zoneId",
-              "enemyArchetypeId",
-              seed,
-              "playerInitialJson",
-              "enemyInitialJson",
-              "winnerEntityId",
-              "roundsPlayed",
-              "eventsJson",
-              "updatedAt"
-            )
-          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
-          RETURNING
-            id,
-            "battleId",
-            "characterId",
-            "zoneId",
-            "enemyArchetypeId",
-            seed,
-            "playerInitialJson",
-            "enemyInitialJson",
-            "winnerEntityId",
-            "roundsPlayed",
-            "eventsJson",
-            "createdAt",
-            "updatedAt"`,
-          [
-            createRowId(),
-            input.battleId,
-            input.characterId,
-            input.zoneId,
-            input.enemyArchetypeId,
-            input.seed,
-            JSON.stringify(input.playerInitial),
-            JSON.stringify(input.enemyInitial),
-            input.winnerEntityId,
-            input.roundsPlayed,
-            JSON.stringify(input.events),
-            new Date()
-          ]
+        const lockedCharacterResult = await client.query<{
+          lastReconciledEndNonce: string | number | null;
+        }>(
+          `SELECT "lastReconciledEndNonce"
+          FROM "Character"
+          WHERE id = $1
+          FOR UPDATE`,
+          [input.characterId]
         );
+        const lockedCharacter = lockedCharacterResult.rows[0];
+        if (lockedCharacter === undefined) {
+          throw new Error(`ERR_CHARACTER_NOT_FOUND: character ${input.characterId} was not found`);
+        }
 
-        const ledgerResult = await client.query<BattleOutcomeLedgerRow>(
-          `INSERT INTO "BattleOutcomeLedger"
-            (
-              id,
-              "characterId",
-              "battleId",
-              "battleNonce",
-              "battleTs",
-              "seasonId",
-              "zoneId",
-              "enemyArchetypeId",
-              "zoneProgressDeltaJson",
-              "updatedAt"
-            )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
-          RETURNING
-            id,
-            "characterId",
-            "battleId",
-            "battleNonce",
-            "battleTs",
-            "seasonId",
-            "zoneId",
-            "enemyArchetypeId",
-            "zoneProgressDeltaJson",
-            "settlementStatus",
-            "sealedBatchId",
-            "committedAt",
-            "createdAt",
-            "updatedAt"`,
-          [
-            createRowId(),
-            input.characterId,
-            input.battleId,
-            input.battleNonce,
-            input.battleTs,
-            input.seasonId,
-            input.zoneId,
-            input.enemyArchetypeId,
-            JSON.stringify(input.zoneProgressDelta),
-            new Date()
-          ]
+        const latestLocalBattleResult = await client.query<{ battleNonce: string | number }>(
+          `SELECT "battleNonce"
+          FROM "BattleOutcomeLedger"
+          WHERE "characterId" = $1
+          ORDER BY "battleNonce" DESC
+          LIMIT 1`,
+          [input.characterId]
         );
+        const latestLocalBattle = latestLocalBattleResult.rows[0];
+        if (lockedCharacter.lastReconciledEndNonce === null) {
+          throw new Error(
+            `ERR_CHARACTER_CURSOR_UNAVAILABLE: character ${input.characterId} is missing lastReconciledEndNonce`
+          );
+        }
+        const battleNonce = allocateNextBattleNonce({
+          latestLocalBattleNonce: latestLocalBattle
+            ? parseRequiredSafeInteger(latestLocalBattle.battleNonce, 'battleNonce')
+            : null,
+          lastReconciledEndNonce: parseRequiredSafeInteger(lockedCharacter.lastReconciledEndNonce, 'lastReconciledEndNonce')
+        });
+
+        const persisted = await insertPersistedEncounter(client, {
+          ...input,
+          battleNonce
+        });
 
         await client.query('COMMIT');
 
-        return {
-          battleRecord: mapBattleRecord(battleRecordResult.rows[0]),
-          ledger: mapBattleOutcomeLedger(ledgerResult.rows[0])
-        };
+        return persisted;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async createWithSettlementLedger(
+      input: CreatePersistedEncounterInput & { battleNonce: number }
+    ): Promise<PersistedEncounterRecord> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const persisted = await insertPersistedEncounter(client, input);
+
+        await client.query('COMMIT');
+
+        return persisted;
       } catch (error) {
         await client.query('ROLLBACK');
         throw error;
