@@ -9,7 +9,7 @@ Current-program-over-doc precedence:
 
 ## Status
 
-Status: In progress. Steps 1-8 are implemented and committed. Step 9 remains.
+Status: Implemented. Steps 1-9 are complete and committed.
 
 ## Summary
 
@@ -266,7 +266,7 @@ This matters because the current program validates against the `character_creati
 
 8. Completed. Tighten retry and idempotency behavior before calling the feature done. Repeated first-sync prepare calls must reuse the same reserved identity and rebased batch metadata where appropriate, failed submissions must not duplicate nonce assignment or batch creation, and archived stale backlog must remain excluded consistently.
 
-9. Finish with end-to-end verification in the same order the feature is meant to operate. Cover local-first encounter execution, provisional progression updates, first-sync preparation, atomic create-plus-settle submission, cursor reconciliation, and continued settlement of later rebased backlog through the existing pipeline.
+9. Completed. Finish with end-to-end verification in the same order the feature is meant to operate. Cover local-first encounter execution, provisional progression updates, first-sync preparation, atomic create-plus-settle submission, cursor reconciliation, and continued settlement of later rebased backlog through the existing pipeline.
 
 ## Testing Plan
 

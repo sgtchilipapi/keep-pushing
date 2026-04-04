@@ -78,7 +78,7 @@ function toBase64(value: Uint8Array): string {
   return Buffer.from(value).toString('base64');
 }
 
-function buildPreparedRebase(authority: string) {
+function buildPreparedRebase(authority: string, batchCount = 1) {
   const chainCharacterIdHex = '11'.repeat(16);
   const characterRootPubkey = Keypair.generate().publicKey.toBase58();
 
@@ -106,49 +106,58 @@ function buildPreparedRebase(authority: string) {
     },
     archivedBattleIds: [],
     rebasedBattles: [],
-    batchDrafts: [
-      {
+    batchDrafts: Array.from({ length: batchCount }, (_, index) => {
+      const batchId = index + 1;
+      const startNonce = index * 2 + 1;
+      const endNonce = startNonce + 1;
+
+      return {
         payload: {
           characterId: chainCharacterIdHex,
-          batchId: 1,
-          startNonce: 1,
-          endNonce: 2,
+          batchId,
+          startNonce,
+          endNonce,
           battleCount: 2,
-          startStateHash: '22'.repeat(32),
-          endStateHash: '33'.repeat(32),
-          zoneProgressDelta: [{ zoneId: 1, newState: 2 as const }],
-          encounterHistogram: [{ zoneId: 1, enemyArchetypeId: 101, count: 2 }],
+          startStateHash: index === 0 ? '22'.repeat(32) : '33'.repeat(32),
+          endStateHash: index === 0 ? '33'.repeat(32) : '55'.repeat(32),
+          zoneProgressDelta: [{ zoneId: 1 + index, newState: 2 as const }],
+          encounterHistogram: [{ zoneId: 1 + index, enemyArchetypeId: 101 + index, count: 2 }],
           optionalLoadoutRevision: undefined,
-          batchHash: '44'.repeat(32),
-          firstBattleTs: 1_700_000_010,
-          lastBattleTs: 1_700_000_040,
+          batchHash: index === 0 ? '44'.repeat(32) : '66'.repeat(32),
+          firstBattleTs: 1_700_000_010 + index * 40,
+          lastBattleTs: 1_700_000_040 + index * 40,
           seasonId: 4,
           schemaVersion: 2 as const,
           signatureScheme: 0 as const,
         },
-        sealedBattleIds: ['battle-1', 'battle-2'],
-      },
-    ],
+        sealedBattleIds: [`battle-${startNonce}`, `battle-${endNonce}`],
+      };
+    }),
   };
 }
 
-function buildPersistedBatch(rebased: ReturnType<typeof buildPreparedRebase>) {
+function buildPersistedBatch(
+  rebased: ReturnType<typeof buildPreparedRebase>,
+  batchIndex = 0,
+) {
+  const draft = rebased.batchDrafts[batchIndex]!;
+
   return {
-    id: 'settlement-batch-1',
+    id: `settlement-batch-${batchIndex + 1}`,
     characterId: rebased.anchor.characterId,
-    batchId: rebased.batchDrafts[0]!.payload.batchId,
-    startNonce: rebased.batchDrafts[0]!.payload.startNonce,
-    endNonce: rebased.batchDrafts[0]!.payload.endNonce,
-    battleCount: rebased.batchDrafts[0]!.payload.battleCount,
-    firstBattleTs: rebased.batchDrafts[0]!.payload.firstBattleTs,
-    lastBattleTs: rebased.batchDrafts[0]!.payload.lastBattleTs,
-    seasonId: rebased.batchDrafts[0]!.payload.seasonId,
-    startStateHash: rebased.batchDrafts[0]!.payload.startStateHash,
-    endStateHash: rebased.batchDrafts[0]!.payload.endStateHash,
-    zoneProgressDelta: rebased.batchDrafts[0]!.payload.zoneProgressDelta,
-    encounterHistogram: rebased.batchDrafts[0]!.payload.encounterHistogram,
+    batchId: draft.payload.batchId,
+    startNonce: draft.payload.startNonce,
+    endNonce: draft.payload.endNonce,
+    battleCount: draft.payload.battleCount,
+    firstBattleTs: draft.payload.firstBattleTs,
+    lastBattleTs: draft.payload.lastBattleTs,
+    seasonId: draft.payload.seasonId,
+    startStateHash: draft.payload.startStateHash,
+    endStateHash: draft.payload.endStateHash,
+    zoneProgressDelta: draft.payload.zoneProgressDelta,
+    encounterHistogram: draft.payload.encounterHistogram,
     optionalLoadoutRevision: null,
-    batchHash: rebased.batchDrafts[0]!.payload.batchHash,
+    batchHash: draft.payload.batchHash,
     schemaVersion: 2 as const,
     signatureScheme: 0 as const,
     status: 'SEALED' as const,
@@ -320,8 +329,9 @@ describe('firstSyncRelay', () => {
 
   it('submits the atomic first sync, confirms batch 1, and queues later batches for normal settlement', async () => {
     const authority = Keypair.generate();
-    const preparedRebase = buildPreparedRebase(authority.publicKey.toBase58());
-    const persistedBatch = buildPersistedBatch(preparedRebase);
+    const preparedRebase = buildPreparedRebase(authority.publicKey.toBase58(), 2);
+    const persistedBatch = buildPersistedBatch(preparedRebase, 0);
+    const persistedBatchTwo = buildPersistedBatch(preparedRebase, 1);
     const unsignedTransaction = new VersionedTransaction(
       new TransactionMessage({
         payerKey: authority.publicKey,
@@ -387,7 +397,9 @@ describe('firstSyncRelay', () => {
     prismaMock.character.updateChainIdentity.mockResolvedValue({});
     prismaMock.character.updateCursorSnapshot.mockResolvedValue({});
     prismaMock.settlementBatch.findByCharacterAndBatchId.mockResolvedValue(null);
-    prismaMock.settlementBatch.createSealed.mockResolvedValue(persistedBatch);
+    prismaMock.settlementBatch.createSealed
+      .mockResolvedValueOnce(persistedBatch)
+      .mockResolvedValueOnce(persistedBatchTwo);
     prismaMock.settlementBatch.updateStatus.mockImplementation(
       async (_id: string, patch: Record<string, unknown>) => ({
         ...persistedBatch,
@@ -440,8 +452,9 @@ describe('firstSyncRelay', () => {
 
     expect(result.chainCreationStatus).toBe('CONFIRMED');
     expect(result.firstSettlementBatchId).toBe('settlement-batch-1');
+    expect(result.remainingSettlementBatchIds).toEqual(['settlement-batch-2']);
     expect(result.cursor.lastCommittedEndNonce).toBe(2);
-    expect(prismaMock.settlementBatch.createSealed).toHaveBeenCalledTimes(1);
+    expect(prismaMock.settlementBatch.createSealed).toHaveBeenCalledTimes(2);
     expect(prismaMock.character.updateCursorSnapshot).toHaveBeenCalledTimes(1);
     expect(prismaMock.battleOutcomeLedger.markCommittedForBatch).toHaveBeenCalledWith(
       'settlement-batch-1',
