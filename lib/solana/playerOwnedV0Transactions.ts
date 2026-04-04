@@ -1,4 +1,5 @@
 import {
+  AddressLookupTableAccount,
   TransactionMessage,
   VersionedTransaction,
   type Commitment,
@@ -22,6 +23,7 @@ export async function buildPreparedVersionedTransaction(args: {
   connection: Connection;
   feePayer: PublicKey;
   instructions: TransactionInstruction[];
+  addressLookupTableAccounts?: AddressLookupTableAccount[];
   commitment?: Commitment;
 }): Promise<PreparedVersionedTransaction> {
   const latestBlockhash = await args.connection.getLatestBlockhash(args.commitment);
@@ -29,7 +31,7 @@ export async function buildPreparedVersionedTransaction(args: {
     payerKey: args.feePayer,
     recentBlockhash: latestBlockhash.blockhash,
     instructions: args.instructions,
-  }).compileToV0Message();
+  }).compileToV0Message(args.addressLookupTableAccounts);
   const transaction = new VersionedTransaction(message);
 
   return {

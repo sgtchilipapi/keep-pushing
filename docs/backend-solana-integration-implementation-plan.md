@@ -546,6 +546,8 @@ Backend/server:
   - backend can reject invalid batches before building transactions
 
 ### Step 7 — Add real settlement transaction assembly
+- Status:
+  - complete
 - Objective:
   - build actual settlement transactions compatible with the current program
 - Files/modules affected:
