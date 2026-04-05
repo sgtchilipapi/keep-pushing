@@ -40,7 +40,10 @@ export function generateBattleSeed(entropy: Uint8Array = randomBytes(4)): number
       ((entropy[2] ?? 0) << 16) |
       ((entropy[3] ?? 0) << 24)) >>> 0;
 
-  return new XorShift32(baseSeed).nextU32();
+  // BattleRecord.seed is stored in PostgreSQL as signed INT, so keep the
+  // generated seed within the 31-bit positive range.
+  const seed = new XorShift32(baseSeed).nextU32() & 0x7fffffff;
+  return seed === 0 ? 1 : seed;
 }
 
 export function adjustDamageForStatuses(baseDamage: number, activeStatusIds: readonly StatusId[]): number {

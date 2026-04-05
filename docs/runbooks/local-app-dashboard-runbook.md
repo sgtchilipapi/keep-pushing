@@ -302,3 +302,72 @@ docker compose --env-file .env.docker up -d --build app
 Use the longer companion runbook:
 
 - [local-solana-character-test-runbook.md](/home/paps/projects/keep-pushing/docs/runbooks/local-solana-character-test-runbook.md)
+
+ONE-SHOTTER:
+
+Assumption: you already have a local PostgreSQL server running on `127.0.0.1:5432` and a `postgres` superuser with password `postgres`. If your local Postgres uses different credentials, edit the vars at the top first.
+
+```bash
+set -euo pipefail
+
+cd /home/paps/projects/keep-pushing
+
+export PGHOST=127.0.0.1
+export PGPORT=5432
+export PGUSER=postgres
+export PGPASSWORD=postgres
+export APP_DB=keep_pushing
+
+export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${APP_DB}"
+export RUNANA_ACTIVE_SEASON_ID=1
+
+echo "==> Installing deps if needed"
+npm install
+
+echo "==> Ensuring database exists"
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${APP_DB}'" | grep -q 1 || \
+createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$APP_DB"
+
+echo "==> Applying Prisma migrations"
+npx prisma migrate deploy
+
+echo "==> Stopping old local app / validator if present"
+pkill -f "next dev --hostname 127.0.0.1 --port 3000" || true
+pkill -f "next dev" || true
+pkill -f solana-test-validator || true
+
+echo "==> Starting Next app on http://127.0.0.1:3000"
+nohup env \
+  DATABASE_URL="$DATABASE_URL" \
+  RUNANA_ACTIVE_SEASON_ID="$RUNANA_ACTIVE_SEASON_ID" \
+  npm run dev -- --hostname 127.0.0.1 --port 3000 \
+  > .tmp/local-app-dashboard.log 2>&1 &
+APP_PID=$!
+
+echo "==> Waiting for app to respond"
+for i in $(seq 1 60); do
+  code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)"
+  if [ "$code" = "200" ]; then
+    break
+  fi
+  sleep 1
+done
+
+echo "==> Starting validator, deploying program, bootstrapping chain state"
+RUNANA_SKIP_SERVER_START=1 npm run solana:manual:character:setup
+
+echo
+echo "App URL: http://127.0.0.1:3000/"
+echo "Old proof page: http://127.0.0.1:3000/battle%20(old%20pof)"
+echo "App log: /home/paps/projects/keep-pushing/.tmp/local-app-dashboard.log"
+echo "Next dev PID: $APP_PID"
+```
+
+To stop it later:
+
+```bash
+pkill -f "next dev"
+pkill -f solana-test-validator
+```
+
+If you want, I can also give you a second pasteable block for the case where your local Postgres username/password are different.
