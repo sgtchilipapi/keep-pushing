@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import type { FirstSyncPreparedPhase, FirstSyncPreparationBase, PreparedPlayerOwnedTransaction, SettlementPreparedPhase, SettlementPreparationBase } from '../../types/api/solana';
+import type {
+  FirstSyncPreparedPhase,
+  FirstSyncPreparationBase,
+  SettlementPreparedPhase,
+  SettlementPreparationBase,
+} from '../../types/api/solana';
 import type {
   AnonymousUserResponse,
   ChainCreationStatus,
@@ -16,8 +21,21 @@ import type {
 import BattleReplay from '../BattleReplay';
 import StatusBadge from './StatusBadge';
 import styles from './game-shell.module.css';
+import {
+  connectPhantom,
+  disconnectPhantom,
+  getPhantomProvider,
+  getWalletAvailability,
+  normalizeWalletError,
+  signAuthorizationMessageBase64,
+  signPreparedPlayerOwnedTransaction,
+  type WalletActionStatus,
+  type WalletAvailability,
+  type WalletConnectionStatus,
+} from '../../lib/solana/phantomBrowser';
 
 const USER_STORAGE_KEY = 'keep-pushing:user-id';
+const PHANTOM_INSTALL_URL = 'https://phantom.app/download';
 
 type AppPhase = 'bootstrapping_user' | 'loading_character' | 'ready' | 'fatal_error';
 
@@ -116,8 +134,41 @@ function settlementTone(status: string | null | undefined): 'neutral' | 'warning
   }
 }
 
-function jsonPreview(value: unknown): string {
-  return JSON.stringify(value, null, 2);
+function walletAvailabilityTone(status: WalletAvailability): 'neutral' | 'warning' | 'success' {
+  switch (status) {
+    case 'installed':
+      return 'success';
+    case 'not_installed':
+      return 'warning';
+    case 'unknown':
+    default:
+      return 'neutral';
+  }
+}
+
+function walletConnectionTone(status: WalletConnectionStatus): 'neutral' | 'warning' | 'success' | 'info' {
+  switch (status) {
+    case 'connected':
+      return 'success';
+    case 'connecting':
+    case 'checking_trusted':
+      return 'info';
+    case 'disconnected':
+    default:
+      return 'neutral';
+  }
+}
+
+function walletActionLabel(status: WalletActionStatus): string | null {
+  switch (status) {
+    case 'signing_message':
+      return 'Signing message';
+    case 'signing_transaction':
+      return 'Signing transaction';
+    case 'idle':
+    default:
+      return null;
+  }
 }
 
 function primaryActionLabel(character: CharacterReadModel): string {
@@ -145,6 +196,19 @@ function primaryActionLabel(character: CharacterReadModel): string {
 
 function maxUnlockedZone(character: CharacterReadModel | null): number {
   return Math.max(1, character?.provisionalProgress?.highestUnlockedZoneId ?? 1);
+}
+
+function authorityMismatchMessage(character: CharacterReadModel, walletPublicKey: string | null): string | null {
+  const expectedAuthority = character.chain?.playerAuthorityPubkey;
+  if (!expectedAuthority || !walletPublicKey) {
+    return null;
+  }
+
+  if (expectedAuthority === walletPublicKey) {
+    return null;
+  }
+
+  return `Connected Phantom wallet ${truncateMiddle(walletPublicKey)} does not match the character authority ${truncateMiddle(expectedAuthority)}. Reconnect the correct wallet before signing.`;
 }
 
 type CreateCharacterPanelProps = {
@@ -198,17 +262,66 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
   );
 }
 
+type WalletToolbarProps = {
+  availability: WalletAvailability;
+  connectionStatus: WalletConnectionStatus;
+  actionStatus: WalletActionStatus;
+  publicKey: string | null;
+  error: string | null;
+  pending: boolean;
+  onConnect: () => Promise<void>;
+  onDisconnect: () => Promise<void>;
+};
+
+function WalletToolbar(props: WalletToolbarProps) {
+  const actionLabel = walletActionLabel(props.actionStatus);
+
+  return (
+    <>
+      <StatusBadge
+        label={props.availability === 'installed' ? 'Phantom installed' : 'Phantom not installed'}
+        tone={walletAvailabilityTone(props.availability)}
+      />
+      <StatusBadge label={props.connectionStatus} tone={walletConnectionTone(props.connectionStatus)} />
+      {props.publicKey ? <span className={styles.metaText}>Wallet: {truncateMiddle(props.publicKey)}</span> : null}
+      {actionLabel ? <StatusBadge label={actionLabel} tone="info" /> : null}
+
+      {props.availability === 'not_installed' ? (
+        <a className={styles.button} href={PHANTOM_INSTALL_URL} target="_blank" rel="noreferrer">
+          Install Phantom
+        </a>
+      ) : props.connectionStatus === 'connected' ? (
+        <button type="button" className={styles.button} onClick={() => void props.onDisconnect()} disabled={props.pending}>
+          Disconnect
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={styles.button}
+          onClick={() => void props.onConnect()}
+          disabled={props.pending || props.availability !== 'installed'}
+        >
+          {props.connectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+        </button>
+      )}
+
+      {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
+    </>
+  );
+}
+
 type FirstSyncPanelProps = {
   character: CharacterReadModel;
+  walletAvailability: WalletAvailability;
+  walletConnectionStatus: WalletConnectionStatus;
+  walletActionStatus: WalletActionStatus;
+  walletPublicKey: string | null;
+  onConnectWallet: () => Promise<void>;
+  setWalletActionStatus: (status: WalletActionStatus) => void;
   onRefresh: () => Promise<void>;
 };
 
-function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
-  const [authority, setAuthority] = useState(character.chain?.playerAuthorityPubkey ?? '');
-  const [feePayer, setFeePayer] = useState(character.chain?.playerAuthorityPubkey ?? '');
-  const [playerAuthorizationSignature, setPlayerAuthorizationSignature] = useState('');
-  const [signedMessageBase64, setSignedMessageBase64] = useState('');
-  const [signedTransactionBase64, setSignedTransactionBase64] = useState('');
+function FirstSyncPanel(props: FirstSyncPanelProps) {
   const [authorizeData, setAuthorizeData] = useState<FirstSyncPreparationBase | null>(null);
   const [preparedData, setPreparedData] = useState<FirstSyncPreparedPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -216,20 +329,23 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
   const [preparePending, setPreparePending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
 
+  const chainStatus = props.character.chain?.chainCreationStatus ?? 'NOT_STARTED';
+  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
+  const buttonPending = preparePending || submitPending || props.walletConnectionStatus === 'connecting';
+
   useEffect(() => {
-    const nextAuthority = character.chain?.playerAuthorityPubkey ?? '';
-    setAuthority(nextAuthority);
-    setFeePayer(nextAuthority);
-    setPlayerAuthorizationSignature('');
-    setSignedMessageBase64('');
-    setSignedTransactionBase64('');
     setAuthorizeData(null);
     setPreparedData(null);
     setError(null);
     setSuccess(null);
-  }, [character.characterId, character.chain?.playerAuthorityPubkey, character.chain?.chainCreationStatus]);
+  }, [props.character.characterId, props.character.chain?.chainCreationStatus, props.walletPublicKey]);
 
   async function prepareAuthorize() {
+    if (!props.walletPublicKey) {
+      setError('Connect Phantom before preparing first sync.');
+      return;
+    }
+
     setPreparePending(true);
     setError(null);
     setSuccess(null);
@@ -238,9 +354,9 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
       const response = await apiRequest<FirstSyncPrepareResponse>('/api/solana/character/first-sync/prepare', {
         method: 'POST',
         body: JSON.stringify({
-          characterId: character.characterId,
-          authority,
-          feePayer: feePayer || authority,
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
         }),
       });
 
@@ -257,19 +373,35 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
     }
   }
 
-  async function prepareTransaction() {
+  async function signAuthorization() {
+    if (authorizeData === null) {
+      setError('Prepare authorization before requesting a Phantom signature.');
+      return;
+    }
+
+    const provider = getPhantomProvider();
+    if (provider === null) {
+      setError('Phantom wallet is not installed.');
+      return;
+    }
+
     setPreparePending(true);
     setError(null);
     setSuccess(null);
+    props.setWalletActionStatus('signing_message');
 
     try {
+      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageBase64(
+        provider,
+        authorizeData.playerAuthorizationMessageBase64,
+      );
       const response = await apiRequest<FirstSyncPrepareResponse>('/api/solana/character/first-sync/prepare', {
         method: 'POST',
         body: JSON.stringify({
-          characterId: character.characterId,
-          authority,
-          feePayer: feePayer || authority,
-          playerAuthorizationSignatureBase64: playerAuthorizationSignature,
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
+          playerAuthorizationSignatureBase64,
         }),
       });
 
@@ -280,23 +412,32 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
       setAuthorizeData(response);
       setPreparedData(response);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to prepare first-sync transaction.');
+      setError(normalizeWalletError(nextError));
     } finally {
+      props.setWalletActionStatus('idle');
       setPreparePending(false);
     }
   }
 
-  async function submit() {
+  async function signAndSubmit() {
     if (preparedData === null) {
-      setError('Prepare the transaction before submitting first sync.');
+      setError('Prepare the transaction before requesting a Phantom signature.');
+      return;
+    }
+
+    const provider = getPhantomProvider();
+    if (provider === null) {
+      setError('Phantom wallet is not installed.');
       return;
     }
 
     setSubmitPending(true);
     setError(null);
     setSuccess(null);
+    props.setWalletActionStatus('signing_transaction');
 
     try {
+      const signed = await signPreparedPlayerOwnedTransaction(provider, preparedData.preparedTransaction);
       const response = await apiRequest<{
         transactionSignature: string;
         chainCharacterIdHex: string;
@@ -305,28 +446,24 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
         method: 'POST',
         body: JSON.stringify({
           prepared: preparedData.preparedTransaction,
-          signedMessageBase64,
-          signedTransactionBase64,
+          signedMessageBase64: signed.signedMessageBase64,
+          signedTransactionBase64: signed.signedTransactionBase64,
         }),
       });
 
       setSuccess(
         `First sync confirmed. Tx ${truncateMiddle(response.transactionSignature)} | Character ${truncateMiddle(response.characterRootPubkey)}`,
       );
-      setPreparedData(null);
       setAuthorizeData(null);
-      setPlayerAuthorizationSignature('');
-      setSignedMessageBase64('');
-      setSignedTransactionBase64('');
-      await onRefresh();
+      setPreparedData(null);
+      await props.onRefresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to submit first sync.');
+      setError(normalizeWalletError(nextError));
     } finally {
+      props.setWalletActionStatus('idle');
       setSubmitPending(false);
     }
   }
-
-  const chainStatus = character.chain?.chainCreationStatus ?? 'NOT_STARTED';
 
   return (
     <section className={styles.panel}>
@@ -334,57 +471,61 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
         <div className={styles.stack}>
           <h2 className={styles.panelTitle}>First Sync</h2>
           <p className={styles.panelText}>
-            Use this panel when your character has local battle backlog that still needs to be
-            committed on chain. This implementation uses manual wallet fields because the repo does
-            not yet include a wallet adapter integration.
+            Use Phantom to authorize and sign the atomic first-sync transaction that creates the
+            character on chain and commits the first deferred settlement batch.
           </p>
         </div>
         <StatusBadge label={chainStatus} tone={chainTone(chainStatus)} />
       </div>
 
       <div className={styles.formGrid}>
-        <label className={styles.field}>
-          <span className={styles.label}>Authority public key</span>
-          <input
-            className={styles.input}
-            value={authority}
-            onChange={(event) => {
-              setAuthority(event.target.value);
-              if (feePayer.length === 0 || feePayer === authority) {
-                setFeePayer(event.target.value);
-              }
-            }}
-            placeholder="Player wallet base58 public key"
-            disabled={preparePending || submitPending}
-          />
-        </label>
+        {props.walletAvailability === 'not_installed' ? (
+          <div className={styles.infoBox}>
+            Phantom is required for first sync. Install the browser extension, refresh the page, and
+            connect the wallet you want to bind to this character.
+          </div>
+        ) : null}
 
-        <label className={styles.field}>
-          <span className={styles.label}>Fee payer public key</span>
-          <input
-            className={styles.input}
-            value={feePayer}
-            onChange={(event) => setFeePayer(event.target.value)}
-            placeholder="Defaults to authority"
-            disabled={preparePending || submitPending}
-          />
-        </label>
+        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
 
-        <div className={styles.buttonRow}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={prepareAuthorize}
-            disabled={preparePending || submitPending || authority.trim().length === 0}
-          >
-            {preparePending ? 'Preparing...' : 'Prepare Authorization'}
-          </button>
+        <div className={styles.keyValueGrid}>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Wallet authority</span>
+            <span className={styles.keyValue}>{truncateMiddle(props.walletPublicKey)}</span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Latest battle status</span>
+            <span className={styles.keyValue}>{props.character.latestBattle?.settlementStatus ?? 'No battle yet'}</span>
+          </div>
         </div>
 
-        {authorizeData ? (
+        {props.walletConnectionStatus !== 'connected' ? (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void props.onConnectWallet()}
+              disabled={buttonPending || props.walletAvailability !== 'installed'}
+            >
+              {props.walletConnectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+            </button>
+          </div>
+        ) : mismatchMessage ? null : preparedData ? (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void signAndSubmit()}
+              disabled={buttonPending}
+            >
+              {submitPending ? 'Submitting...' : 'Sign And Submit First Sync'}
+            </button>
+          </div>
+        ) : authorizeData ? (
           <>
             <div className={styles.infoBox}>
-              Sign the authorization message with the same wallet that owns the provided authority.
+              Phase 1 is ready. Phantom will now sign the authorization message and the app will ask
+              the backend to build the final transaction payload.
             </div>
             <div className={styles.keyValueGrid}>
               <div className={styles.keyValueItem}>
@@ -404,83 +545,30 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
                 <span className={styles.keyValue}>{truncateMiddle(authorizeData.permitDomain.batchHash, 12)}</span>
               </div>
             </div>
-            <label className={styles.field}>
-              <span className={styles.label}>Authorization message (base64)</span>
-              <textarea className={styles.textarea} value={authorizeData.playerAuthorizationMessageBase64} readOnly />
-            </label>
-            <label className={styles.field}>
-              <span className={styles.label}>Player authorization signature (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={playerAuthorizationSignature}
-                onChange={(event) => setPlayerAuthorizationSignature(event.target.value)}
-                placeholder="Paste the wallet signature here"
-                disabled={preparePending || submitPending}
-              />
-            </label>
-
             <div className={styles.buttonRow}>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={prepareTransaction}
-                disabled={preparePending || submitPending || playerAuthorizationSignature.trim().length === 0}
-              >
-                {preparePending ? 'Preparing Transaction...' : 'Prepare Transaction'}
+              <button type="button" className={styles.button} onClick={() => void signAuthorization()} disabled={buttonPending}>
+                {preparePending ? 'Requesting Signature...' : 'Sign Authorization'}
               </button>
             </div>
           </>
-        ) : null}
+        ) : (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void prepareAuthorize()}
+              disabled={buttonPending || !props.walletPublicKey}
+            >
+              {preparePending ? 'Preparing...' : 'Prepare First Sync'}
+            </button>
+          </div>
+        )}
 
         {preparedData ? (
-          <>
-            <div className={styles.successBox}>
-              Prepared atomic first-sync transaction. Sign the serialized transaction bytes and then
-              submit the signed payload below.
-            </div>
-
-            <label className={styles.field}>
-              <span className={styles.label}>Signed message (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={signedMessageBase64}
-                onChange={(event) => setSignedMessageBase64(event.target.value)}
-                placeholder="Paste the signed message bytes here"
-                disabled={submitPending}
-              />
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>Signed transaction (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={signedTransactionBase64}
-                onChange={(event) => setSignedTransactionBase64(event.target.value)}
-                placeholder="Paste the signed transaction bytes here"
-                disabled={submitPending}
-              />
-            </label>
-
-            <div className={styles.buttonRow}>
-              <button
-                type="button"
-                className={`${styles.button} ${styles.buttonPrimary}`}
-                onClick={submit}
-                disabled={
-                  submitPending ||
-                  signedMessageBase64.trim().length === 0 ||
-                  signedTransactionBase64.trim().length === 0
-                }
-              >
-                {submitPending ? 'Submitting...' : 'Submit First Sync'}
-              </button>
-            </div>
-
-            <details className={styles.details}>
-              <summary>Prepared transaction details</summary>
-              <pre className={styles.pre}>{jsonPreview(preparedData.preparedTransaction)}</pre>
-            </details>
-          </>
+          <div className={styles.successBox}>
+            Transaction prepared. Phantom will sign the versioned transaction and the app will submit
+            it to the backend broadcaster.
+          </div>
         ) : null}
 
         {error ? <div className={styles.errorBox}>{error}</div> : null}
@@ -492,15 +580,16 @@ function FirstSyncPanel({ character, onRefresh }: FirstSyncPanelProps) {
 
 type SettlementPanelProps = {
   character: CharacterReadModel;
+  walletAvailability: WalletAvailability;
+  walletConnectionStatus: WalletConnectionStatus;
+  walletActionStatus: WalletActionStatus;
+  walletPublicKey: string | null;
+  onConnectWallet: () => Promise<void>;
+  setWalletActionStatus: (status: WalletActionStatus) => void;
   onRefresh: () => Promise<void>;
 };
 
-function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
-  const [authority, setAuthority] = useState(character.chain?.playerAuthorityPubkey ?? '');
-  const [feePayer, setFeePayer] = useState(character.chain?.playerAuthorityPubkey ?? '');
-  const [playerAuthorizationSignature, setPlayerAuthorizationSignature] = useState('');
-  const [signedMessageBase64, setSignedMessageBase64] = useState('');
-  const [signedTransactionBase64, setSignedTransactionBase64] = useState('');
+function SettlementPanel(props: SettlementPanelProps) {
   const [authorizeData, setAuthorizeData] = useState<SettlementPreparationBase | null>(null);
   const [preparedData, setPreparedData] = useState<SettlementPreparedPhase | null>(null);
   const [submitResult, setSubmitResult] = useState<unknown>(null);
@@ -508,20 +597,27 @@ function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
   const [preparePending, setPreparePending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
 
+  const nextBatch = props.character.nextSettlementBatch;
+  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
+  const buttonPending = preparePending || submitPending || props.walletConnectionStatus === 'connecting';
+
   useEffect(() => {
-    const nextAuthority = character.chain?.playerAuthorityPubkey ?? '';
-    setAuthority(nextAuthority);
-    setFeePayer(nextAuthority);
-    setPlayerAuthorizationSignature('');
-    setSignedMessageBase64('');
-    setSignedTransactionBase64('');
     setAuthorizeData(null);
     setPreparedData(null);
     setSubmitResult(null);
     setError(null);
-  }, [character.characterId, character.chain?.playerAuthorityPubkey, character.nextSettlementBatch?.settlementBatchId]);
+  }, [props.character.characterId, props.character.nextSettlementBatch?.settlementBatchId, props.walletPublicKey]);
+
+  if (nextBatch === null) {
+    return null;
+  }
 
   async function prepareAuthorize() {
+    if (!props.walletPublicKey) {
+      setError('Connect Phantom before preparing settlement.');
+      return;
+    }
+
     setPreparePending(true);
     setError(null);
 
@@ -529,9 +625,9 @@ function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
       const response = await apiRequest<SettlementPrepareResponse>('/api/solana/settlement/prepare', {
         method: 'POST',
         body: JSON.stringify({
-          characterId: character.characterId,
-          authority,
-          feePayer: feePayer || authority,
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
         }),
       });
 
@@ -549,18 +645,34 @@ function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
     }
   }
 
-  async function prepareTransaction() {
+  async function signAuthorization() {
+    if (authorizeData === null) {
+      setError('Prepare authorization before requesting a Phantom signature.');
+      return;
+    }
+
+    const provider = getPhantomProvider();
+    if (provider === null) {
+      setError('Phantom wallet is not installed.');
+      return;
+    }
+
     setPreparePending(true);
     setError(null);
+    props.setWalletActionStatus('signing_message');
 
     try {
+      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageBase64(
+        provider,
+        authorizeData.playerAuthorizationMessageBase64,
+      );
       const response = await apiRequest<SettlementPrepareResponse>('/api/solana/settlement/prepare', {
         method: 'POST',
         body: JSON.stringify({
-          characterId: character.characterId,
-          authority,
-          feePayer: feePayer || authority,
-          playerAuthorizationSignatureBase64: playerAuthorizationSignature,
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
+          playerAuthorizationSignatureBase64,
         }),
       });
 
@@ -572,50 +684,51 @@ function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
       setPreparedData(response);
       setSubmitResult(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to prepare settlement transaction.');
+      setError(normalizeWalletError(nextError));
     } finally {
+      props.setWalletActionStatus('idle');
       setPreparePending(false);
     }
   }
 
-  async function submit() {
+  async function signAndSubmit() {
     if (preparedData === null) {
-      setError('Prepare the settlement transaction before submitting it.');
+      setError('Prepare the settlement transaction before requesting a Phantom signature.');
+      return;
+    }
+
+    const provider = getPhantomProvider();
+    if (provider === null) {
+      setError('Phantom wallet is not installed.');
       return;
     }
 
     setSubmitPending(true);
     setError(null);
+    props.setWalletActionStatus('signing_transaction');
 
     try {
+      const signed = await signPreparedPlayerOwnedTransaction(provider, preparedData.preparedTransaction);
       const response = await apiRequest<unknown>('/api/solana/settlement/submit', {
         method: 'POST',
         body: JSON.stringify({
           settlementBatchId: preparedData.settlementBatchId,
           prepared: preparedData.preparedTransaction,
-          signedMessageBase64,
-          signedTransactionBase64,
+          signedMessageBase64: signed.signedMessageBase64,
+          signedTransactionBase64: signed.signedTransactionBase64,
         }),
       });
 
       setSubmitResult(response);
-      setPreparedData(null);
       setAuthorizeData(null);
-      setPlayerAuthorizationSignature('');
-      setSignedMessageBase64('');
-      setSignedTransactionBase64('');
-      await onRefresh();
+      setPreparedData(null);
+      await props.onRefresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to submit settlement.');
+      setError(normalizeWalletError(nextError));
     } finally {
+      props.setWalletActionStatus('idle');
       setSubmitPending(false);
     }
-  }
-
-  const nextBatch = character.nextSettlementBatch;
-
-  if (nextBatch === null) {
-    return null;
   }
 
   return (
@@ -624,154 +737,103 @@ function SettlementPanel({ character, onRefresh }: SettlementPanelProps) {
         <div className={styles.stack}>
           <h2 className={styles.panelTitle}>Post-Sync Settlement</h2>
           <p className={styles.panelText}>
-            Settle the next pending batch after the character is already confirmed on chain.
+            Settle the next pending batch after the character is already confirmed on chain using the
+            connected Phantom wallet.
           </p>
         </div>
         <StatusBadge label={nextBatch.status} tone={settlementTone(nextBatch.status)} />
       </div>
 
-      <div className={styles.keyValueGrid}>
-        <div className={styles.keyValueItem}>
-          <span className={styles.keyLabel}>Batch ID</span>
-          <span className={styles.keyValue}>{nextBatch.batchId}</span>
-        </div>
-        <div className={styles.keyValueItem}>
-          <span className={styles.keyLabel}>Battle count</span>
-          <span className={styles.keyValue}>{nextBatch.battleCount}</span>
-        </div>
-        <div className={styles.keyValueItem}>
-          <span className={styles.keyLabel}>Nonce range</span>
-          <span className={styles.keyValue}>
-            {nextBatch.startNonce} - {nextBatch.endNonce}
-          </span>
-        </div>
-        <div className={styles.keyValueItem}>
-          <span className={styles.keyLabel}>Season</span>
-          <span className={styles.keyValue}>{nextBatch.seasonId}</span>
-        </div>
-      </div>
-
-      <div className={styles.divider} />
-
       <div className={styles.formGrid}>
-        <label className={styles.field}>
-          <span className={styles.label}>Authority public key</span>
-          <input
-            className={styles.input}
-            value={authority}
-            onChange={(event) => {
-              setAuthority(event.target.value);
-              if (feePayer.length === 0 || feePayer === authority) {
-                setFeePayer(event.target.value);
-              }
-            }}
-            placeholder="Player wallet base58 public key"
-            disabled={preparePending || submitPending}
-          />
-        </label>
-
-        <label className={styles.field}>
-          <span className={styles.label}>Fee payer public key</span>
-          <input
-            className={styles.input}
-            value={feePayer}
-            onChange={(event) => setFeePayer(event.target.value)}
-            placeholder="Defaults to authority"
-            disabled={preparePending || submitPending}
-          />
-        </label>
-
-        <div className={styles.buttonRow}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={prepareAuthorize}
-            disabled={preparePending || submitPending || authority.trim().length === 0}
-          >
-            {preparePending ? 'Preparing...' : 'Prepare Settlement Authorization'}
-          </button>
-        </div>
-
-        {authorizeData ? (
-          <>
-            <label className={styles.field}>
-              <span className={styles.label}>Authorization message (base64)</span>
-              <textarea className={styles.textarea} value={authorizeData.playerAuthorizationMessageBase64} readOnly />
-            </label>
-            <label className={styles.field}>
-              <span className={styles.label}>Player authorization signature (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={playerAuthorizationSignature}
-                onChange={(event) => setPlayerAuthorizationSignature(event.target.value)}
-                placeholder="Paste the wallet signature here"
-                disabled={preparePending || submitPending}
-              />
-            </label>
-            <div className={styles.buttonRow}>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={prepareTransaction}
-                disabled={preparePending || submitPending || playerAuthorizationSignature.trim().length === 0}
-              >
-                {preparePending ? 'Preparing Transaction...' : 'Prepare Settlement Transaction'}
-              </button>
-            </div>
-          </>
+        {props.walletAvailability === 'not_installed' ? (
+          <div className={styles.infoBox}>
+            Phantom is required for settlement. Install the extension, refresh the page, and connect
+            the wallet bound to this character.
+          </div>
         ) : null}
 
-        {preparedData ? (
+        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+
+        <div className={styles.keyValueGrid}>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Batch ID</span>
+            <span className={styles.keyValue}>{nextBatch.batchId}</span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Battle count</span>
+            <span className={styles.keyValue}>{nextBatch.battleCount}</span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Nonce range</span>
+            <span className={styles.keyValue}>
+              {nextBatch.startNonce} - {nextBatch.endNonce}
+            </span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Wallet authority</span>
+            <span className={styles.keyValue}>{truncateMiddle(props.walletPublicKey)}</span>
+          </div>
+        </div>
+
+        {props.walletConnectionStatus !== 'connected' ? (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void props.onConnectWallet()}
+              disabled={buttonPending || props.walletAvailability !== 'installed'}
+            >
+              {props.walletConnectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+            </button>
+          </div>
+        ) : mismatchMessage ? null : preparedData ? (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void signAndSubmit()}
+              disabled={buttonPending}
+            >
+              {submitPending ? 'Submitting...' : 'Sign And Submit Settlement'}
+            </button>
+          </div>
+        ) : authorizeData ? (
           <>
-            <label className={styles.field}>
-              <span className={styles.label}>Signed message (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={signedMessageBase64}
-                onChange={(event) => setSignedMessageBase64(event.target.value)}
-                placeholder="Paste the signed message bytes here"
-                disabled={submitPending}
-              />
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>Signed transaction (base64)</span>
-              <textarea
-                className={styles.textarea}
-                value={signedTransactionBase64}
-                onChange={(event) => setSignedTransactionBase64(event.target.value)}
-                placeholder="Paste the signed transaction bytes here"
-                disabled={submitPending}
-              />
-            </label>
-
+            <div className={styles.infoBox}>
+              Phase 1 is ready. Phantom will sign the settlement authorization message before the app
+              requests the final transaction payload.
+            </div>
             <div className={styles.buttonRow}>
-              <button
-                type="button"
-                className={`${styles.button} ${styles.buttonPrimary}`}
-                onClick={submit}
-                disabled={
-                  submitPending ||
-                  signedMessageBase64.trim().length === 0 ||
-                  signedTransactionBase64.trim().length === 0
-                }
-              >
-                {submitPending ? 'Submitting...' : 'Submit Settlement'}
+              <button type="button" className={styles.button} onClick={() => void signAuthorization()} disabled={buttonPending}>
+                {preparePending ? 'Requesting Signature...' : 'Sign Authorization'}
               </button>
             </div>
-
-            <details className={styles.details}>
-              <summary>Prepared settlement transaction</summary>
-              <pre className={styles.pre}>{jsonPreview(preparedData.preparedTransaction)}</pre>
-            </details>
           </>
+        ) : (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void prepareAuthorize()}
+              disabled={buttonPending || !props.walletPublicKey}
+            >
+              {preparePending ? 'Preparing...' : 'Prepare Settlement'}
+            </button>
+          </div>
+        )}
+
+        {preparedData ? (
+          <div className={styles.successBox}>
+            Settlement transaction prepared. Phantom will sign the transaction and the app will
+            submit it to the backend broadcaster.
+          </div>
         ) : null}
 
         {error ? <div className={styles.errorBox}>{error}</div> : null}
         {submitResult ? (
           <details className={styles.details}>
             <summary>Latest settlement result</summary>
-            <pre className={styles.pre}>{jsonPreview(submitResult)}</pre>
+            <pre className={styles.pre}>{JSON.stringify(submitResult, null, 2)}</pre>
           </details>
         ) : null}
       </div>
@@ -792,6 +854,18 @@ export default function GameClient() {
   const [battleError, setBattleError] = useState<string | null>(null);
   const [refreshPending, setRefreshPending] = useState(false);
   const [latestEncounter, setLatestEncounter] = useState<EncounterResponse | null>(null);
+  const [walletAvailability, setWalletAvailability] = useState<WalletAvailability>('unknown');
+  const [walletConnectionStatus, setWalletConnectionStatus] = useState<WalletConnectionStatus>('checking_trusted');
+  const [walletActionStatus, setWalletActionStatus] = useState<WalletActionStatus>('idle');
+  const [walletPublicKey, setWalletPublicKey] = useState<string | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
+
+  const walletPending = walletConnectionStatus === 'connecting' || walletActionStatus !== 'idle';
+  const expectedAuthority = character?.chain?.playerAuthorityPubkey ?? null;
+  const walletAuthorityMismatch = useMemo(
+    () => (character ? authorityMismatchMessage(character, walletPublicKey) : null),
+    [character, walletPublicKey],
+  );
 
   async function refreshCharacter(nextUserId?: string) {
     const resolvedUserId = nextUserId ?? userId;
@@ -866,11 +940,120 @@ export default function GameClient() {
   }, []);
 
   useEffect(() => {
+    const availability = getWalletAvailability();
+    setWalletAvailability(availability);
+
+    if (availability !== 'installed') {
+      setWalletConnectionStatus('disconnected');
+      setWalletPublicKey(null);
+      return;
+    }
+
+    let cancelled = false;
+    setWalletConnectionStatus('checking_trusted');
+
+    void connectPhantom({ onlyIfTrusted: true })
+      .then(({ publicKey }) => {
+        if (cancelled) {
+          return;
+        }
+        setWalletPublicKey(publicKey);
+        setWalletConnectionStatus('connected');
+        setWalletError(null);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setWalletPublicKey(null);
+        setWalletConnectionStatus('disconnected');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const provider = getPhantomProvider();
+    if (provider === null || typeof provider.on !== 'function' || typeof provider.removeListener !== 'function') {
+      return;
+    }
+
+    const handleConnect = () => {
+      const publicKey = provider.publicKey?.toBase58() ?? null;
+      setWalletPublicKey(publicKey);
+      setWalletConnectionStatus(publicKey ? 'connected' : 'disconnected');
+    };
+
+    const handleDisconnect = () => {
+      setWalletPublicKey(null);
+      setWalletConnectionStatus('disconnected');
+    };
+
+    const handleAccountChanged = (...args: unknown[]) => {
+      const [nextPublicKey] = args;
+      if (
+        nextPublicKey !== null &&
+        typeof nextPublicKey === 'object' &&
+        nextPublicKey !== undefined &&
+        'toBase58' in nextPublicKey &&
+        typeof (nextPublicKey as { toBase58?: unknown }).toBase58 === 'function'
+      ) {
+        setWalletPublicKey((nextPublicKey as { toBase58(): string }).toBase58());
+        setWalletConnectionStatus('connected');
+        return;
+      }
+
+      handleDisconnect();
+    };
+
+    provider.on('connect', handleConnect);
+    provider.on('disconnect', handleDisconnect);
+    provider.on('accountChanged', handleAccountChanged);
+
+    return () => {
+      provider.removeListener?.('connect', handleConnect);
+      provider.removeListener?.('disconnect', handleDisconnect);
+      provider.removeListener?.('accountChanged', handleAccountChanged);
+    };
+  }, []);
+
+  useEffect(() => {
     const maxZone = maxUnlockedZone(character);
     if (selectedZoneId > maxZone) {
       setSelectedZoneId(maxZone);
     }
   }, [character, selectedZoneId]);
+
+  async function handleConnectWallet() {
+    setWalletConnectionStatus('connecting');
+    setWalletError(null);
+
+    try {
+      const { publicKey } = await connectPhantom();
+      setWalletPublicKey(publicKey);
+      setWalletConnectionStatus('connected');
+    } catch (error) {
+      setWalletPublicKey(null);
+      setWalletConnectionStatus('disconnected');
+      setWalletError(normalizeWalletError(error));
+    }
+  }
+
+  async function handleDisconnectWallet() {
+    setWalletError(null);
+
+    try {
+      await disconnectPhantom();
+    } catch (error) {
+      setWalletError(normalizeWalletError(error));
+    } finally {
+      setWalletPublicKey(null);
+      setWalletConnectionStatus('disconnected');
+      setWalletActionStatus('idle');
+    }
+  }
 
   async function handleCreateCharacter() {
     if (!userId) {
@@ -933,7 +1116,7 @@ export default function GameClient() {
             <span className={styles.eyebrow}>Keep Pushing</span>
             <h1 className={styles.title}>Bootstrapping local-first gameplay</h1>
             <p className={styles.subtitle}>
-              Preparing the backend user and loading the current character read model.
+              Preparing the backend user, checking Phantom, and loading the current character read model.
             </p>
           </header>
 
@@ -988,11 +1171,21 @@ export default function GameClient() {
           <h1 className={styles.title}>Local-first battle and sync dashboard</h1>
           <p className={styles.subtitle}>
             Create a character, run real battles immediately, then move deferred results on chain
-            through first sync and later settlement batches.
+            through Phantom-driven first sync and later settlement batches.
           </p>
 
           <div className={styles.toolbar}>
             <span className={styles.metaText}>User ID: {truncateMiddle(userId)}</span>
+            <WalletToolbar
+              availability={walletAvailability}
+              connectionStatus={walletConnectionStatus}
+              actionStatus={walletActionStatus}
+              publicKey={walletPublicKey}
+              error={walletError}
+              pending={walletPending}
+              onConnect={handleConnectWallet}
+              onDisconnect={handleDisconnectWallet}
+            />
             {refreshPending ? <StatusBadge label="Refreshing state" tone="info" /> : null}
             <button
               type="button"
@@ -1155,14 +1348,17 @@ export default function GameClient() {
                         tone={settlementTone(character.nextSettlementBatch.status)}
                       />
                     ) : null}
+                    {walletPublicKey ? (
+                      <StatusBadge label={`Wallet ${truncateMiddle(walletPublicKey)}`} tone="info" />
+                    ) : null}
                   </div>
+
+                  {walletAuthorityMismatch ? <div className={styles.errorBox}>{walletAuthorityMismatch}</div> : null}
 
                   <div className={styles.keyValueGrid}>
                     <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Authority</span>
-                      <span className={styles.keyValue}>
-                        {truncateMiddle(character.chain?.playerAuthorityPubkey)}
-                      </span>
+                      <span className={styles.keyLabel}>Expected authority</span>
+                      <span className={styles.keyValue}>{truncateMiddle(expectedAuthority)}</span>
                     </div>
                     <div className={styles.keyValueItem}>
                       <span className={styles.keyLabel}>Character root</span>
@@ -1228,12 +1424,30 @@ export default function GameClient() {
               </section>
 
               {(character.chain?.chainCreationStatus ?? 'NOT_STARTED') !== 'CONFIRMED' ? (
-                <FirstSyncPanel character={character} onRefresh={() => refreshCharacter(character.userId)} />
+                <FirstSyncPanel
+                  character={character}
+                  walletAvailability={walletAvailability}
+                  walletConnectionStatus={walletConnectionStatus}
+                  walletActionStatus={walletActionStatus}
+                  walletPublicKey={walletPublicKey}
+                  onConnectWallet={handleConnectWallet}
+                  setWalletActionStatus={setWalletActionStatus}
+                  onRefresh={() => refreshCharacter(character.userId)}
+                />
               ) : null}
 
               {(character.chain?.chainCreationStatus ?? 'NOT_STARTED') === 'CONFIRMED' &&
               character.nextSettlementBatch !== null ? (
-                <SettlementPanel character={character} onRefresh={() => refreshCharacter(character.userId)} />
+                <SettlementPanel
+                  character={character}
+                  walletAvailability={walletAvailability}
+                  walletConnectionStatus={walletConnectionStatus}
+                  walletActionStatus={walletActionStatus}
+                  walletPublicKey={walletPublicKey}
+                  onConnectWallet={handleConnectWallet}
+                  setWalletActionStatus={setWalletActionStatus}
+                  onRefresh={() => refreshCharacter(character.userId)}
+                />
               ) : null}
             </div>
           </div>
