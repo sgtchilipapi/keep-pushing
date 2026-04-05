@@ -74,23 +74,25 @@ export default function BattleReplay({ result }: Props) {
   }, [result]);
 
   return (
-    <section>
-      <h2>Battle Replay</h2>
-      <p>Seed: {result.seed}</p>
-      <ul>
-        {Object.entries(hpState).map(([entityId, hp]) => (
-          <li key={entityId}>
-            {entityId}: {hp.hp}/{hp.hpMax}
-            <progress max={hp.hpMax} value={hp.hp} style={{ marginLeft: 8 }} />
-          </li>
-        ))}
-      </ul>
+    <details>
+      <summary>Battle Replay</summary>
+      <div>
+        <p>Seed: {result.seed}</p>
+        <ul>
+          {Object.entries(hpState).map(([entityId, hp]) => (
+            <li key={entityId}>
+              {entityId}: {hp.hp}/{hp.hpMax}
+              <progress max={hp.hpMax} value={hp.hp} style={{ marginLeft: 8 }} />
+            </li>
+          ))}
+        </ul>
 
-      <ol>
-        {result.events.map((_, index) => (
-          <li key={index}>{toLogLine(result, index)}</li>
-        ))}
-      </ol>
-    </section>
+        <ol>
+          {result.events.map((_, index) => (
+            <li key={index}>{toLogLine(result, index)}</li>
+          ))}
+        </ol>
+      </div>
+    </details>
   );
 }

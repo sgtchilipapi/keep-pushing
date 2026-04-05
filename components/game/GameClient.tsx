@@ -22,6 +22,12 @@ import BattleReplay from '../BattleReplay';
 import StatusBadge from './StatusBadge';
 import styles from './game-shell.module.css';
 import {
+  resolveEffectiveSeason,
+  resolvePassiveNames,
+  resolveSkillNames,
+  resolveSyncPanelState,
+} from './uiModel';
+import {
   connectPhantom,
   disconnectPhantom,
   getPhantomProvider,
@@ -266,47 +272,92 @@ type WalletToolbarProps = {
   availability: WalletAvailability;
   connectionStatus: WalletConnectionStatus;
   actionStatus: WalletActionStatus;
+  userId: string | null;
   publicKey: string | null;
   error: string | null;
   pending: boolean;
+  refreshPending: boolean;
   onConnect: () => Promise<void>;
   onDisconnect: () => Promise<void>;
+  onRefresh: () => void;
 };
 
 function WalletToolbar(props: WalletToolbarProps) {
   const actionLabel = walletActionLabel(props.actionStatus);
+  const walletStatusLabel =
+    props.connectionStatus === 'connected'
+      ? `Wallet ${truncateMiddle(props.publicKey)}`
+      : props.availability === 'installed'
+        ? 'Wallet disconnected'
+        : 'Phantom not installed';
 
   return (
-    <>
-      <StatusBadge
-        label={props.availability === 'installed' ? 'Phantom installed' : 'Phantom not installed'}
-        tone={walletAvailabilityTone(props.availability)}
-      />
-      <StatusBadge label={props.connectionStatus} tone={walletConnectionTone(props.connectionStatus)} />
-      {props.publicKey ? <span className={styles.metaText}>Wallet: {truncateMiddle(props.publicKey)}</span> : null}
-      {actionLabel ? <StatusBadge label={actionLabel} tone="info" /> : null}
+    <div className={styles.menuWrap}>
+      <details className={styles.menu}>
+        <summary className={styles.menuSummary}>
+          <span>Session</span>
+          <StatusBadge
+            label={walletStatusLabel}
+            tone={
+              props.connectionStatus === 'connected'
+                ? 'success'
+                : walletAvailabilityTone(props.availability)
+            }
+          />
+          {actionLabel ? <StatusBadge label={actionLabel} tone="info" /> : null}
+        </summary>
 
-      {props.availability === 'not_installed' ? (
-        <a className={styles.button} href={PHANTOM_INSTALL_URL} target="_blank" rel="noreferrer">
-          Install Phantom
-        </a>
-      ) : props.connectionStatus === 'connected' ? (
-        <button type="button" className={styles.button} onClick={() => void props.onDisconnect()} disabled={props.pending}>
-          Disconnect
-        </button>
-      ) : (
-        <button
-          type="button"
-          className={styles.button}
-          onClick={() => void props.onConnect()}
-          disabled={props.pending || props.availability !== 'installed'}
-        >
-          {props.connectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
-        </button>
-      )}
+        <div className={styles.menuContent}>
+          <div className={styles.keyValueGrid}>
+            <div className={styles.keyValueItem}>
+              <span className={styles.keyLabel}>User</span>
+              <span className={styles.keyValue}>{truncateMiddle(props.userId)}</span>
+            </div>
+            <div className={styles.keyValueItem}>
+              <span className={styles.keyLabel}>Wallet</span>
+              <span className={styles.keyValue}>{truncateMiddle(props.publicKey)}</span>
+            </div>
+          </div>
+
+          <div className={styles.buttonRow}>
+            {props.availability === 'not_installed' ? (
+              <a className={styles.button} href={PHANTOM_INSTALL_URL} target="_blank" rel="noreferrer">
+                Install Phantom
+              </a>
+            ) : props.connectionStatus === 'connected' ? (
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => void props.onDisconnect()}
+                disabled={props.pending}
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => void props.onConnect()}
+                disabled={props.pending || props.availability !== 'installed'}
+              >
+                {props.connectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+              </button>
+            )}
+
+            <button
+              type="button"
+              className={styles.button}
+              onClick={props.onRefresh}
+              disabled={props.refreshPending || !props.userId}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      </details>
 
       {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
-    </>
+    </div>
   );
 }
 
@@ -851,6 +902,258 @@ function SettlementPanel(props: SettlementPanelProps) {
   );
 }
 
+type SyncPanelProps = {
+  character: CharacterReadModel;
+  walletAvailability: WalletAvailability;
+  walletConnectionStatus: WalletConnectionStatus;
+  walletPublicKey: string | null;
+  setWalletActionStatus: (status: WalletActionStatus) => void;
+  onRefresh: () => Promise<void>;
+};
+
+function SyncPanel(props: SyncPanelProps) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const syncState = useMemo(() => resolveSyncPanelState(props.character), [props.character]);
+  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
+  const season = resolveEffectiveSeason(props.character);
+  const canSync = syncState.syncMode !== null;
+
+  useEffect(() => {
+    setError(null);
+    setSuccess(null);
+  }, [
+    props.character.characterId,
+    props.character.chain?.chainCreationStatus,
+    props.character.nextSettlementBatch?.settlementBatchId,
+    props.character.latestBattle?.battleId,
+    props.walletPublicKey,
+  ]);
+
+  async function handleSync() {
+    if (!canSync) {
+      setError('Nothing to sync right now.');
+      return;
+    }
+
+    if (!props.walletPublicKey) {
+      setError('Connect Phantom in the toolbar before syncing.');
+      return;
+    }
+
+    if (mismatchMessage) {
+      setError(mismatchMessage);
+      return;
+    }
+
+    const provider = getPhantomProvider();
+    if (provider === null) {
+      setError('Phantom wallet is not installed.');
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      if (syncState.syncMode === 'first_sync') {
+        const authorizeResponse = await apiRequest<FirstSyncPrepareResponse>(
+          '/api/solana/character/first-sync/prepare',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              characterId: props.character.characterId,
+              authority: props.walletPublicKey,
+              feePayer: props.walletPublicKey,
+            }),
+          },
+        );
+
+        if (authorizeResponse.phase !== 'authorize') {
+          throw new Error('Unexpected first-sync response: expected authorize phase.');
+        }
+
+        if (authorizeResponse.payload.signatureScheme !== 1) {
+          throw new Error(
+            'This pending first-sync batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or prepare a fresh wallet-text batch.',
+          );
+        }
+
+        props.setWalletActionStatus('signing_message');
+        const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
+          provider,
+          authorizeResponse.playerAuthorizationMessageUtf8,
+        );
+
+        const preparedResponse = await apiRequest<FirstSyncPrepareResponse>(
+          '/api/solana/character/first-sync/prepare',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              characterId: props.character.characterId,
+              authority: props.walletPublicKey,
+              feePayer: props.walletPublicKey,
+              playerAuthorizationSignatureBase64,
+            }),
+          },
+        );
+
+        if (preparedResponse.phase !== 'sign_transaction') {
+          throw new Error('Unexpected first-sync response: expected sign_transaction phase.');
+        }
+
+        props.setWalletActionStatus('signing_transaction');
+        const signed = await signPreparedPlayerOwnedTransaction(
+          provider,
+          preparedResponse.preparedTransaction,
+        );
+
+        const response = await apiRequest<{
+          transactionSignature: string;
+          characterRootPubkey: string;
+        }>('/api/solana/character/first-sync/submit', {
+          method: 'POST',
+          body: JSON.stringify({
+            prepared: preparedResponse.preparedTransaction,
+            signedMessageBase64: signed.signedMessageBase64,
+            signedTransactionBase64: signed.signedTransactionBase64,
+          }),
+        });
+
+        setSuccess(
+          `Sync confirmed. Tx ${truncateMiddle(response.transactionSignature)} | Character ${truncateMiddle(response.characterRootPubkey)}`,
+        );
+      } else {
+        const authorizeResponse = await apiRequest<SettlementPrepareResponse>(
+          '/api/solana/settlement/prepare',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              characterId: props.character.characterId,
+              authority: props.walletPublicKey,
+              feePayer: props.walletPublicKey,
+            }),
+          },
+        );
+
+        if (authorizeResponse.phase !== 'authorize') {
+          throw new Error('Unexpected settlement response: expected authorize phase.');
+        }
+
+        if (authorizeResponse.payload.signatureScheme !== 1) {
+          throw new Error(
+            'This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.',
+          );
+        }
+
+        props.setWalletActionStatus('signing_message');
+        const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
+          provider,
+          authorizeResponse.playerAuthorizationMessageUtf8,
+        );
+
+        const preparedResponse = await apiRequest<SettlementPrepareResponse>(
+          '/api/solana/settlement/prepare',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              characterId: props.character.characterId,
+              authority: props.walletPublicKey,
+              feePayer: props.walletPublicKey,
+              playerAuthorizationSignatureBase64,
+            }),
+          },
+        );
+
+        if (preparedResponse.phase !== 'sign_transaction') {
+          throw new Error('Unexpected settlement response: expected sign_transaction phase.');
+        }
+
+        props.setWalletActionStatus('signing_transaction');
+        const signed = await signPreparedPlayerOwnedTransaction(
+          provider,
+          preparedResponse.preparedTransaction,
+        );
+
+        await apiRequest<unknown>('/api/solana/settlement/submit', {
+          method: 'POST',
+          body: JSON.stringify({
+            settlementBatchId: preparedResponse.settlementBatchId,
+            prepared: preparedResponse.preparedTransaction,
+            signedMessageBase64: signed.signedMessageBase64,
+            signedTransactionBase64: signed.signedTransactionBase64,
+          }),
+        });
+
+        setSuccess('Sync confirmed.');
+      }
+
+      await props.onRefresh();
+    } catch (nextError) {
+      setError(normalizeWalletError(nextError));
+    } finally {
+      props.setWalletActionStatus('idle');
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className={styles.panel}>
+      <div className={styles.stack}>
+        <div className={styles.keyValueGrid}>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Season</span>
+            <span className={styles.keyValue}>{season ?? 'Not available'}</span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>On-chain sync</span>
+            <span className={styles.keyValue}>
+              <StatusBadge label={syncState.statusLabel} tone={syncState.statusTone} />
+            </span>
+          </div>
+        </div>
+
+        <p className={styles.noteText}>
+          <em>Note: Unsynced progress after the new season starts will be deleted.</em>
+        </p>
+
+        {props.walletAvailability === 'not_installed' ? (
+          <div className={styles.infoBox}>
+            Phantom is required for sync. Install it, refresh the page, and connect your wallet.
+          </div>
+        ) : null}
+
+        {props.walletConnectionStatus !== 'connected' ? (
+          <div className={styles.infoBox}>Connect Phantom in the toolbar before syncing.</div>
+        ) : null}
+
+        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+        {error ? <div className={styles.errorBox}>{error}</div> : null}
+        {success ? <div className={styles.successBox}>{success}</div> : null}
+
+        <div className={styles.buttonRow}>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonPrimary}`}
+            onClick={() => void handleSync()}
+            disabled={
+              pending ||
+              props.walletConnectionStatus !== 'connected' ||
+              !canSync ||
+              Boolean(mismatchMessage)
+            }
+          >
+            {pending ? 'Syncing...' : 'Sync'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function GameClient() {
   const [appPhase, setAppPhase] = useState<AppPhase>('bootstrapping_user');
   const [userId, setUserId] = useState<string | null>(null);
@@ -871,10 +1174,13 @@ export default function GameClient() {
   const [walletError, setWalletError] = useState<string | null>(null);
 
   const walletPending = walletConnectionStatus === 'connecting' || walletActionStatus !== 'idle';
-  const expectedAuthority = character?.chain?.playerAuthorityPubkey ?? null;
-  const walletAuthorityMismatch = useMemo(
-    () => (character ? authorityMismatchMessage(character, walletPublicKey) : null),
-    [character, walletPublicKey],
+  const activeSkillNames = useMemo(
+    () => (character ? resolveSkillNames(character.activeSkills).join(', ') : ''),
+    [character],
+  );
+  const passiveSkillNames = useMemo(
+    () => (character ? resolvePassiveNames(character.passiveSkills).join(', ') : ''),
+    [character],
   );
 
   async function issueAnonymousUser(): Promise<string> {
@@ -1148,11 +1454,7 @@ export default function GameClient() {
       <main className={styles.page}>
         <div className={styles.shell}>
           <header className={styles.header}>
-            <span className={styles.eyebrow}>Keep Pushing</span>
-            <h1 className={styles.title}>Bootstrapping local-first gameplay</h1>
-            <p className={styles.subtitle}>
-              Preparing the backend user, checking Phantom, and loading the current character read model.
-            </p>
+            <h1 className={styles.title}>RUNANA</h1>
           </header>
 
           <div className={styles.panelGrid}>
@@ -1174,11 +1476,7 @@ export default function GameClient() {
       <main className={styles.page}>
         <div className={styles.shell}>
           <header className={styles.header}>
-            <span className={styles.eyebrow}>Keep Pushing</span>
-            <h1 className={styles.title}>Frontend bootstrap failed</h1>
-            <p className={styles.subtitle}>
-              The app could not complete anonymous user bootstrap or load the current character.
-            </p>
+            <h1 className={styles.title}>RUNANA</h1>
           </header>
 
           <section className={styles.panel}>
@@ -1202,38 +1500,27 @@ export default function GameClient() {
     <main className={styles.page}>
       <div className={styles.shell}>
         <header className={styles.header}>
-          <span className={styles.eyebrow}>Keep Pushing</span>
-          <h1 className={styles.title}>Local-first battle and sync dashboard</h1>
-          <p className={styles.subtitle}>
-            Create a character, run real battles immediately, then move deferred results on chain
-            through Phantom-driven first sync and later settlement batches.
-          </p>
+          <h1 className={styles.title}>RUNANA</h1>
 
           <div className={styles.toolbar}>
-            <span className={styles.metaText}>User ID: {truncateMiddle(userId)}</span>
             <WalletToolbar
               availability={walletAvailability}
               connectionStatus={walletConnectionStatus}
               actionStatus={walletActionStatus}
+              userId={userId}
               publicKey={walletPublicKey}
               error={walletError}
               pending={walletPending}
+              refreshPending={refreshPending}
               onConnect={handleConnectWallet}
               onDisconnect={handleDisconnectWallet}
-            />
-            {refreshPending ? <StatusBadge label="Refreshing state" tone="info" /> : null}
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => {
+              onRefresh={() => {
                 if (userId) {
                   void refreshCharacter(userId);
                 }
               }}
-              disabled={refreshPending || !userId}
-            >
-              Refresh Read Model
-            </button>
+            />
+            {refreshPending ? <StatusBadge label="Refreshing state" tone="info" /> : null}
           </div>
         </header>
 
@@ -1249,23 +1536,16 @@ export default function GameClient() {
           <div className={styles.dashboardGrid}>
             <div className={styles.panelGrid}>
               <section className={styles.panel}>
-                <div className={styles.panelTitleRow}>
+                <div className={styles.stack}>
                   <div className={styles.stack}>
                     <h2 className={styles.panelTitle}>{character.name}</h2>
-                    <p className={styles.panelText}>
-                      Level {character.level} character. Primary dashboard action: {primaryActionLabel(character)}.
-                    </p>
                   </div>
-                  <StatusBadge
-                    label={character.chain?.chainCreationStatus ?? 'NOT_STARTED'}
-                    tone={chainTone(character.chain?.chainCreationStatus ?? 'NOT_STARTED')}
-                  />
                 </div>
 
                 <div className={styles.keyValueGrid}>
                   <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Character ID</span>
-                    <span className={styles.keyValue}>{character.characterId}</span>
+                    <span className={styles.keyLabel}>Level</span>
+                    <span className={styles.levelValue}>{character.level}</span>
                   </div>
                   <div className={styles.keyValueItem}>
                     <span className={styles.keyLabel}>Experience</span>
@@ -1285,11 +1565,11 @@ export default function GameClient() {
                   </div>
                   <div className={styles.keyValueItem}>
                     <span className={styles.keyLabel}>Active skills</span>
-                    <span className={styles.keyValue}>{character.activeSkills.join(', ')}</span>
+                    <span className={styles.keyValue}>{activeSkillNames}</span>
                   </div>
                   <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Passives</span>
-                    <span className={styles.keyValue}>{character.passiveSkills.join(', ')}</span>
+                    <span className={styles.keyLabel}>Passive skills</span>
+                    <span className={styles.keyValue}>{passiveSkillNames}</span>
                   </div>
                 </div>
               </section>
@@ -1298,10 +1578,6 @@ export default function GameClient() {
                 <div className={styles.panelTitleRow}>
                   <div className={styles.stack}>
                     <h2 className={styles.panelTitle}>Battle</h2>
-                    <p className={styles.panelText}>
-                      Run a persisted encounter. The backend generates the battle seed and stores the
-                      result immediately.
-                    </p>
                   </div>
                   {character.latestBattle ? (
                     <StatusBadge
@@ -1335,7 +1611,7 @@ export default function GameClient() {
                       onClick={handleBattle}
                       disabled={battlePending}
                     >
-                      {battlePending ? 'Running Battle...' : 'Battle'}
+                      {battlePending ? 'Running battle...' : 'Run battle'}
                     </button>
                   </div>
 
@@ -1360,130 +1636,14 @@ export default function GameClient() {
             </div>
 
             <div className={styles.panelGrid}>
-              <section className={styles.panel}>
-                <div className={styles.panelTitleRow}>
-                  <div className={styles.stack}>
-                    <h2 className={styles.panelTitle}>Chain and progression</h2>
-                    <p className={styles.panelText}>
-                      Read-model snapshot for chain identity, progression, and latest persisted
-                      battle/settlement state.
-                    </p>
-                  </div>
-                </div>
-
-                <div className={styles.stack}>
-                  <div className={styles.inlineStack}>
-                    <StatusBadge
-                      label={character.chain?.chainCreationStatus ?? 'NOT_STARTED'}
-                      tone={chainTone(character.chain?.chainCreationStatus ?? 'NOT_STARTED')}
-                    />
-                    {character.nextSettlementBatch ? (
-                      <StatusBadge
-                        label={`Batch ${character.nextSettlementBatch.status}`}
-                        tone={settlementTone(character.nextSettlementBatch.status)}
-                      />
-                    ) : null}
-                    {walletPublicKey ? (
-                      <StatusBadge label={`Wallet ${truncateMiddle(walletPublicKey)}`} tone="info" />
-                    ) : null}
-                  </div>
-
-                  {walletAuthorityMismatch ? <div className={styles.errorBox}>{walletAuthorityMismatch}</div> : null}
-
-                  <div className={styles.keyValueGrid}>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Expected authority</span>
-                      <span className={styles.keyValue}>{truncateMiddle(expectedAuthority)}</span>
-                    </div>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Character root</span>
-                      <span className={styles.keyValue}>
-                        {truncateMiddle(character.chain?.characterRootPubkey)}
-                      </span>
-                    </div>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Created on chain</span>
-                      <span className={styles.keyValue}>{formatDateTime(character.chain?.chainCreatedAt ?? null)}</span>
-                    </div>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Last reconciled battle</span>
-                      <span className={styles.keyValue}>
-                        {formatUnixTimestamp(character.chain?.cursor?.lastReconciledBattleTs ?? null)}
-                      </span>
-                    </div>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Highest unlocked zone</span>
-                      <span className={styles.keyValue}>
-                        {character.provisionalProgress?.highestUnlockedZoneId ?? 'Not available'}
-                      </span>
-                    </div>
-                    <div className={styles.keyValueItem}>
-                      <span className={styles.keyLabel}>Highest cleared zone</span>
-                      <span className={styles.keyValue}>
-                        {character.provisionalProgress?.highestClearedZoneId ?? 'Not available'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {character.latestBattle ? (
-                    <>
-                      <div className={styles.divider} />
-                      <div className={styles.stack}>
-                        <h3 className={styles.panelTitle}>Latest battle summary</h3>
-                        <div className={styles.keyValueGrid}>
-                          <div className={styles.keyValueItem}>
-                            <span className={styles.keyLabel}>Battle ID</span>
-                            <span className={styles.keyValue}>{character.latestBattle.battleId}</span>
-                          </div>
-                          <div className={styles.keyValueItem}>
-                            <span className={styles.keyLabel}>Zone / Enemy</span>
-                            <span className={styles.keyValue}>
-                              Zone {character.latestBattle.zoneId} / Enemy {character.latestBattle.enemyArchetypeId}
-                            </span>
-                          </div>
-                          <div className={styles.keyValueItem}>
-                            <span className={styles.keyLabel}>Battle time</span>
-                            <span className={styles.keyValue}>{formatUnixTimestamp(character.latestBattle.battleTs)}</span>
-                          </div>
-                          <div className={styles.keyValueItem}>
-                            <span className={styles.keyLabel}>Settlement status</span>
-                            <span className={styles.keyValue}>{character.latestBattle.settlementStatus}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className={styles.infoBox}>No battle has been persisted yet.</div>
-                  )}
-                </div>
-              </section>
-
-              {(character.chain?.chainCreationStatus ?? 'NOT_STARTED') !== 'CONFIRMED' ? (
-                <FirstSyncPanel
-                  character={character}
-                  walletAvailability={walletAvailability}
-                  walletConnectionStatus={walletConnectionStatus}
-                  walletActionStatus={walletActionStatus}
-                  walletPublicKey={walletPublicKey}
-                  onConnectWallet={handleConnectWallet}
-                  setWalletActionStatus={setWalletActionStatus}
-                  onRefresh={() => refreshCharacter(character.userId)}
-                />
-              ) : null}
-
-              {(character.chain?.chainCreationStatus ?? 'NOT_STARTED') === 'CONFIRMED' &&
-              character.nextSettlementBatch !== null ? (
-                <SettlementPanel
-                  character={character}
-                  walletAvailability={walletAvailability}
-                  walletConnectionStatus={walletConnectionStatus}
-                  walletActionStatus={walletActionStatus}
-                  walletPublicKey={walletPublicKey}
-                  onConnectWallet={handleConnectWallet}
-                  setWalletActionStatus={setWalletActionStatus}
-                  onRefresh={() => refreshCharacter(character.userId)}
-                />
-              ) : null}
+              <SyncPanel
+                character={character}
+                walletAvailability={walletAvailability}
+                walletConnectionStatus={walletConnectionStatus}
+                walletPublicKey={walletPublicKey}
+                setWalletActionStatus={setWalletActionStatus}
+                onRefresh={() => refreshCharacter(character.userId)}
+              />
             </div>
           </div>
         )}
