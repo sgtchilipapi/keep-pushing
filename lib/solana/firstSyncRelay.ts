@@ -46,14 +46,15 @@ import {
   buildApplyBattleSettlementBatchV1Instruction,
   buildCanonicalSettlementMessages,
 } from './runanaSettlementInstructions';
+import { buildCanonicalPlayerAuthorizationMessageText } from './settlementCanonical';
 import { settlementBatchRecordToPayload } from './settlementSealing';
 import {
   createRunanaConnection,
-  loadRunanaSettlementLookupTables,
   loadRunanaTrustedServerSigner,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
+import { resolveRunanaSettlementLookupTablesOrAutoCreate } from './autoSettlementLookupTables';
 import {
   computeGenesisStateHashHex,
   deriveCharacterBatchCursorPda,
@@ -404,6 +405,18 @@ export async function prepareSolanaFirstSync(
     clusterId,
   });
   const playerAuthorizationMessageBase64 = toBase64(canonicalMessages.playerAuthorizationMessage);
+  const playerAuthorizationMessageUtf8 =
+    payload.signatureScheme === 1
+      ? buildCanonicalPlayerAuthorizationMessageText({
+          programId: programId.toBytes(),
+          clusterId,
+          playerAuthorityPubkey: authority.toBytes(),
+          characterRootPubkey: characterRoot.toBytes(),
+          batchHash: Buffer.from(payload.batchHash, 'hex'),
+          batchId: payload.batchId,
+          signatureScheme: 1,
+        })
+      : Buffer.from(canonicalMessages.playerAuthorizationMessage).toString('utf8');
 
   if (!input.playerAuthorizationSignatureBase64) {
     return {
@@ -412,6 +425,8 @@ export async function prepareSolanaFirstSync(
       expectedCursor,
       permitDomain,
       playerAuthorizationMessageBase64,
+      playerAuthorizationMessageUtf8,
+      playerAuthorizationMessageEncoding: 'utf8',
     };
   }
 
@@ -461,7 +476,15 @@ export async function prepareSolanaFirstSync(
   });
 
   const addressLookupTableAccounts =
-    deps.addressLookupTableAccounts ?? (await loadRunanaSettlementLookupTables(connection));
+    deps.addressLookupTableAccounts ??
+    (await resolveRunanaSettlementLookupTablesOrAutoCreate({
+      connection,
+      commitment,
+      payload,
+      playerAuthority: authority,
+      characterRootPubkey: new PublicKey(characterRootPubkey),
+      programId,
+    }));
   const buildPreparedTx = deps.buildPreparedTransaction ?? buildPreparedVersionedTransaction;
 
   let preparedVersioned: Awaited<ReturnType<typeof buildPreparedVersionedTransaction>>;
@@ -520,6 +543,8 @@ export async function prepareSolanaFirstSync(
     expectedCursor,
     permitDomain,
     playerAuthorizationMessageBase64,
+    playerAuthorizationMessageUtf8,
+    playerAuthorizationMessageEncoding: 'utf8',
     playerAuthorizationSignatureBase64: input.playerAuthorizationSignatureBase64,
     serverAttestationMessageBase64: toBase64(canonicalMessages.serverAttestationMessage),
     preparedTransaction,

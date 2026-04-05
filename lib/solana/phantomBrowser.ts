@@ -145,12 +145,12 @@ export function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
-export async function signAuthorizationMessageBase64(
+export async function signAuthorizationMessageUtf8(
   provider: PhantomSolanaProvider,
-  playerAuthorizationMessageBase64: string,
+  playerAuthorizationMessageUtf8: string,
 ): Promise<string> {
-  const messageBytes = base64ToBytes(playerAuthorizationMessageBase64);
-  const signed = await provider.signMessage(messageBytes);
+  const messageBytes = new TextEncoder().encode(playerAuthorizationMessageUtf8);
+  const signed = await provider.signMessage(messageBytes, 'utf8');
   return bytesToBase64(signed.signature);
 }
 

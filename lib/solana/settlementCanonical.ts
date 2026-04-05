@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PublicKey } from "@solana/web3.js";
 
 import type {
   EncounterCountEntry,
@@ -52,6 +53,16 @@ export interface CanonicalPlayerAuthorizationMessageArgs {
   batchHash: BytesLike;
   batchId: number;
   signatureScheme: SettlementSignatureScheme;
+}
+
+export interface CanonicalPlayerAuthorizationTextArgs {
+  programId: BytesLike;
+  clusterId: number;
+  playerAuthorityPubkey: BytesLike;
+  characterRootPubkey: BytesLike;
+  batchHash: BytesLike;
+  batchId: number;
+  signatureScheme: 1;
 }
 
 function toBytes(value: BytesLike, field: string, expectedLength?: number): Uint8Array {
@@ -118,6 +129,18 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   }
 
   return out;
+}
+
+function utf8Bytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function encodeBase64Url(bytes: BytesLike): string {
+  return Buffer.from(toBytes(bytes, "bytes"))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function encodeZoneProgressDelta(entries: readonly ZoneProgressDeltaEntry[]): Uint8Array {
@@ -227,6 +250,20 @@ export function encodeCanonicalServerAttestationMessage(
 export function encodeCanonicalPlayerAuthorizationMessage(
   args: CanonicalPlayerAuthorizationMessageArgs,
 ): Uint8Array {
+  if (args.signatureScheme === 1) {
+    return utf8Bytes(
+      buildCanonicalPlayerAuthorizationMessageText({
+        programId: args.programId,
+        clusterId: args.clusterId,
+        playerAuthorityPubkey: args.playerAuthorityPubkey,
+        characterRootPubkey: args.characterRootPubkey,
+        batchHash: args.batchHash,
+        batchId: args.batchId,
+        signatureScheme: 1,
+      }),
+    );
+  }
+
   return concatBytes([
     toBytes(args.programId, "programId", 32),
     u8(args.clusterId, "clusterId"),
@@ -236,6 +273,22 @@ export function encodeCanonicalPlayerAuthorizationMessage(
     u64(args.batchId, "batchId"),
     u8(args.signatureScheme, "signatureScheme"),
   ]);
+}
+
+export function buildCanonicalPlayerAuthorizationMessageText(
+  args: CanonicalPlayerAuthorizationTextArgs,
+): string {
+  return [
+    "RUNANA",
+    "settlement",
+    String(args.signatureScheme),
+    String(args.clusterId),
+    new PublicKey(toBytes(args.programId, "programId", 32)).toBase58(),
+    new PublicKey(toBytes(args.playerAuthorityPubkey, "playerAuthorityPubkey", 32)).toBase58(),
+    new PublicKey(toBytes(args.characterRootPubkey, "characterRootPubkey", 32)).toBase58(),
+    String(args.batchId),
+    encodeBase64Url(args.batchHash),
+  ].join("|");
 }
 
 export function encodeHexLower(bytes: BytesLike): string {

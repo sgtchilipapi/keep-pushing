@@ -28,13 +28,14 @@ import {
   type PreparedSettlementVersionedTransaction,
 } from './settlementTransactionAssembly';
 import { buildCanonicalSettlementMessages } from './runanaSettlementInstructions';
+import { buildCanonicalPlayerAuthorizationMessageText } from './settlementCanonical';
 import {
   createRunanaConnection,
-  loadRunanaSettlementLookupTables,
   loadRunanaTrustedServerSigner,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
+import { resolveRunanaSettlementLookupTablesOrAutoCreate } from './autoSettlementLookupTables';
 import { RUNANA_CLUSTER_ID_LOCALNET } from './runanaProgram';
 import type { SettlementBatchPayloadV2 } from '../../types/settlement';
 
@@ -114,7 +115,7 @@ function permitDomainFromBatch(args: {
     characterRootPubkey: args.characterRootPubkey,
     batchHash: args.batch.batchHash,
     batchId: args.batch.batchId,
-    signatureScheme: args.batch.signatureScheme as 0,
+    signatureScheme: args.batch.signatureScheme as 0 | 1,
   };
 }
 
@@ -236,6 +237,18 @@ export async function prepareSolanaSettlement(
   const playerAuthorizationMessageBase64 = Buffer.from(
     canonicalMessages.playerAuthorizationMessage,
   ).toString('base64');
+  const playerAuthorizationMessageUtf8 =
+    sealed.payload.signatureScheme === 1
+      ? buildCanonicalPlayerAuthorizationMessageText({
+          programId: programId.toBytes(),
+          clusterId,
+          playerAuthorityPubkey: authority.toBytes(),
+          characterRootPubkey: envelope.characterRoot.pubkey.toBytes(),
+          batchHash: Buffer.from(sealed.payload.batchHash, 'hex'),
+          batchId: sealed.payload.batchId,
+          signatureScheme: 1,
+        })
+      : Buffer.from(canonicalMessages.playerAuthorizationMessage).toString('utf8');
 
   if (!input.playerAuthorizationSignatureBase64) {
     return {
@@ -245,6 +258,8 @@ export async function prepareSolanaSettlement(
       expectedCursor,
       permitDomain,
       playerAuthorizationMessageBase64,
+      playerAuthorizationMessageUtf8,
+      playerAuthorizationMessageEncoding: 'utf8',
     };
   }
 
@@ -253,7 +268,15 @@ export async function prepareSolanaSettlement(
   );
   const serverSigner = deps.serverSigner ?? loadRunanaTrustedServerSigner().signer;
   const addressLookupTableAccounts =
-    deps.addressLookupTableAccounts ?? (await loadRunanaSettlementLookupTables(connection));
+    deps.addressLookupTableAccounts ??
+    (await resolveRunanaSettlementLookupTablesOrAutoCreate({
+      connection,
+      commitment,
+      payload: sealed.payload,
+      playerAuthority: authority,
+      characterRootPubkey: envelope.characterRoot.pubkey,
+      programId,
+    }));
   const buildPreparedSettlement =
     deps.buildPreparedSettlement ??
     ((args: Parameters<typeof buildPreparedSettlementVersionedTransaction>[0]) =>
@@ -311,6 +334,8 @@ export async function prepareSolanaSettlement(
     expectedCursor,
     permitDomain,
     playerAuthorizationMessageBase64,
+    playerAuthorizationMessageUtf8,
+    playerAuthorizationMessageEncoding: 'utf8',
     playerAuthorizationSignatureBase64: input.playerAuthorizationSignatureBase64,
     serverAttestationMessageBase64: preparedVersioned.serverAttestationMessageBase64,
     preparedTransaction,

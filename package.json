@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "app:local:fresh": "bash scripts/appLocalFresh.sh",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -10,7 +11,9 @@
     "test:solana:localnet": "RUNANA_ENABLE_LOCALNET_TESTS=1 jest --runInBand tests/runanaLocalnet.integration.test.ts",
     "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts",
     "solana:manual:character:setup": "bash scripts/solana/setupManualCharacterTest.sh",
+    "solana:lookup-table:create": "npx tsx scripts/solana/createSettlementLookupTable.ts",
     "solana:character:create": "npx tsx scripts/solana/createCharacter.ts",
+    "solana:first-sync": "npx tsx scripts/solana/runFirstSync.ts",
     "solana:encounter:settle": "npx tsx scripts/solana/runEncounterSettlement.ts",
     "solana:bootstrap": "npx tsx scripts/solana/seedBootstrap.ts",
     "solana:bootstrap:dry-run": "npx tsx scripts/solana/seedBootstrap.ts --dry-run"

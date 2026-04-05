@@ -86,7 +86,7 @@ describe('settlementSealing', () => {
       lastBattleTs: 1_700_000_150,
       seasonId: 4,
       schemaVersion: 2,
-      signatureScheme: 0,
+      signatureScheme: 1,
       encounterHistogram: [
         { zoneId: 1, enemyArchetypeId: 10, count: 2 },
         { zoneId: 2, enemyArchetypeId: 20, count: 1 },

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -13,6 +13,7 @@ import { RUNANA_PROGRAM_ID } from './runanaProgram';
 
 const DEFAULT_RUNANA_RPC_URL = 'http://127.0.0.1:8899';
 const COMMITMENTS: readonly Commitment[] = ['processed', 'confirmed', 'finalized'];
+const DEFAULT_MANUAL_TEST_ROOT = '.tmp/manual-character-test';
 
 function assertCommitment(value: string, field: string): Commitment {
   if (!COMMITMENTS.includes(value as Commitment)) {
@@ -109,6 +110,30 @@ export function loadKeypairFromFile(filePath: string): Keypair {
   return Keypair.fromSecretKey(secretKey);
 }
 
+function findLatestManualTestKeypairPath(
+  fileName: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const root = resolve(process.cwd(), env.RUNANA_MANUAL_TEST_ROOT?.trim() || DEFAULT_MANUAL_TEST_ROOT);
+  if (!existsSync(root)) {
+    return null;
+  }
+
+  const runDirs = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  for (let index = runDirs.length - 1; index >= 0; index -= 1) {
+    const candidate = resolve(root, runDirs[index], 'keypairs', fileName);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 export interface RunanaBootstrapAuthorities {
   admin: Keypair;
   payer: Keypair;
@@ -124,7 +149,8 @@ export interface RunanaTrustedServerSigner {
 export function loadRunanaBootstrapAuthorities(
   env: NodeJS.ProcessEnv = process.env,
 ): RunanaBootstrapAuthorities {
-  const adminPath = env.RUNANA_ADMIN_KEYPAIR_PATH?.trim();
+  const adminPath =
+    env.RUNANA_ADMIN_KEYPAIR_PATH?.trim() ?? findLatestManualTestKeypairPath('admin.json', env) ?? undefined;
   if (!adminPath) {
     throw new Error(
       'ERR_MISSING_ADMIN_KEYPAIR_PATH: set RUNANA_ADMIN_KEYPAIR_PATH to the admin signer keypair JSON path',
@@ -146,7 +172,9 @@ export function loadRunanaTrustedServerSigner(
 ): RunanaTrustedServerSigner {
   const signerPath =
     env.RUNANA_SERVER_SIGNER_KEYPAIR_PATH?.trim() ??
-    env.RUNANA_TRUSTED_SERVER_SIGNER_KEYPAIR_PATH?.trim();
+    env.RUNANA_TRUSTED_SERVER_SIGNER_KEYPAIR_PATH?.trim() ??
+    findLatestManualTestKeypairPath('server.json', env) ??
+    undefined;
 
   if (!signerPath) {
     throw new Error(

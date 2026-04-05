@@ -2,6 +2,55 @@
 
 Status: Reusable local runbook for starting the full `keep-pushing` app stack needed by the current frontend dashboard at `/`.
 
+## Summary
+
+Quickest fresh start:
+
+1. Run the one-shot helper
+```bash
+cd /home/paps/projects/keep-pushing
+npm run app:local:fresh
+```
+
+2. Open the dashboard
+
+```text
+http://127.0.0.1:3000/
+```
+
+3. Test from the browser
+
+- create character
+- run local battle
+- connect Phantom
+- first sync
+
+Truly fresh:
+
+cd /home/paps/projects/keep-pushing
+pkill -f "next dev" || true
+pkill -f solana-test-validator || true
+docker compose --env-file .env.docker down -v || true
+npm run app:local:fresh
+
+
+What the one-shot helper now does:
+
+- starts Dockerized Postgres
+- stops stale local app and validator processes
+- stops any stale Docker app on `3000`
+- bootstraps a fresh validator
+- rebuilds `runana-program` when local source is newer than the deployed `.so`
+- deploys and seeds the Solana program
+- starts the backend with the fresh trusted server signer wired automatically
+- enables backend-side auto-ALT creation for local first-sync and settlement preparation
+
+4. Shutdown
+```bash
+pkill -f "next dev"
+pkill -f solana-test-validator
+```
+
 This runbook supports two local workflows:
 
 - Option A: production-like runtime
@@ -33,9 +82,9 @@ Inside your Linux shell / WSL:
 - Node/npm
 - Solana CLI
 
-Program artifacts must already exist in the sibling repo:
+The helper rebuilds `runana-program` automatically when needed, but the sibling repo and program keypair must still exist:
 
-- `/home/paps/projects/runana-program/target/deploy/runana_program.so`
+- `/home/paps/projects/runana-program`
 - `/home/paps/projects/runana-program/target/deploy/runana_program-keypair.json`
 
 ## One-Time Setup
@@ -144,6 +193,7 @@ Important:
 
 - `RUNANA_SKIP_SERVER_START=1` is required in this mode because the app is already running
 - if another validator is already running and you want a clean chain, stop it before running the helper
+- after this helper finishes, restart the app with the generated `RUNANA_SERVER_SIGNER_KEYPAIR_PATH`
 
 To stop an existing validator first:
 
@@ -185,24 +235,36 @@ http://127.0.0.1:3000/battle%20(old%20pof)
 
 ### First Sync Path
 
-The current frontend exposes a manual first-sync panel.
+The current frontend uses Phantom directly for first sync.
 
 This means:
 
-- you enter the wallet authority public key manually
-- you copy the authorization message out of the UI
-- you sign it externally
-- you paste the base64 signature back into the UI
-- you prepare the transaction
-- you sign the transaction externally
-- you paste the signed message and signed transaction base64 back into the UI
-- you submit through the app
+- you connect Phantom in the browser
+- the app prepares the readable authorization message
+- Phantom signs that message
+- the app prepares the transaction
+- Phantom signs the transaction
+- the app submits through the backend broadcaster
 
-This is expected for now. The repo does not yet include a browser wallet adapter integration.
+When the app is started through `npm run app:local:fresh`, backend-side auto-ALT creation is already enabled, so you should not need a manual lookup-table step for normal browser testing.
+
+If you need a developer fallback without using the browser UI, use:
+
+```bash
+npm run solana:first-sync -- --player-keypair <path> --character-id <id>
+```
 
 ### Post-Sync Settlement Path
 
-After the character becomes `CONFIRMED`, the dashboard shows the same style of manual prepare/sign/submit flow for later settlement batches.
+After the character becomes `CONFIRMED`, the dashboard uses the same Phantom prepare/sign/submit pattern for later settlement batches.
+
+When the app is started through `npm run app:local:fresh`, backend-side auto-ALT creation is also enabled for later settlement preparation.
+
+For CLI-driven fallback on a confirmed character:
+
+```bash
+npm run solana:encounter:settle -- --player-keypair <path> --character-id <id>
+```
 
 ## Shutdown
 
@@ -249,6 +311,40 @@ Make sure:
 ```bash
 export RUNANA_ACTIVE_SEASON_ID=1
 ```
+
+### First-sync or settlement fails because the trusted server signer path is missing
+
+Restart the host-run app with the generated signer path:
+
+```bash
+cd /home/paps/projects/keep-pushing
+export RUNANA_SERVER_SIGNER_KEYPAIR_PATH="$(find .tmp/manual-character-test -path '*/keypairs/server.json' | sort | tail -n 1)"
+```
+
+### First-sync or settlement fails with `ERR_SETTLEMENT_LOOKUP_TABLE_REQUIRED`
+
+If you started the app manually instead of through `npm run app:local:fresh`, either:
+
+- restart with `RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES=1`, or
+- create or extend the ALT explicitly for the current character
+
+Manual fallback:
+
+```bash
+cd /home/paps/projects/keep-pushing
+npm run solana:lookup-table:create -- \
+  --mode first-sync \
+  --character-id <character-id> \
+  --authority <phantom-wallet-pubkey> \
+  --payer-keypair "$(find .tmp/manual-character-test -path '*/keypairs/player.json' | sort | tail -n 1)"
+
+export RUNANA_SETTLEMENT_LOOKUP_TABLES=<lookup-table-address>
+```
+
+The helper supports both:
+
+- `--mode first-sync` for local-first characters
+- `--mode settlement` for already-confirmed characters
 
 ### Port `3000` is already in use
 

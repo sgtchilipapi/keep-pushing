@@ -1,10 +1,12 @@
 import {
+  buildCanonicalPlayerAuthorizationMessageText,
   computeCanonicalEndStateHashHex,
   computeSettlementBatchHashHex,
   encodeCanonicalPlayerAuthorizationMessage,
   encodeCanonicalServerAttestationMessage,
   encodeHexLower,
 } from "../lib/solana/settlementCanonical";
+import { PublicKey } from "@solana/web3.js";
 
 function seq(start: number, length: number): Uint8Array {
   return Uint8Array.from({ length }, (_, index) => (start + index) & 0xff);
@@ -99,5 +101,37 @@ describe("settlementCanonical", () => {
     ).toBe(
       "707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f01b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f070000000000000000",
     );
+  });
+
+  it("builds a readable wallet-safe authorization message for signature scheme 1", () => {
+    const program = new PublicKey(seq(0x70, 32)).toBase58();
+    const playerAuthority = new PublicKey(seq(0xb0, 32)).toBase58();
+    const characterRoot = new PublicKey(seq(0x90, 32)).toBase58();
+    const text = buildCanonicalPlayerAuthorizationMessageText({
+      programId: seq(0x70, 32),
+      clusterId: 1,
+      playerAuthorityPubkey: seq(0xb0, 32),
+      characterRootPubkey: seq(0x90, 32),
+      batchHash: seq(0x50, 32),
+      batchId: 7,
+      signatureScheme: 1,
+    });
+
+    expect(text).toBe(
+      `RUNANA|settlement|1|1|${program}|${playerAuthority}|${characterRoot}|7|UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8`,
+    );
+    expect(
+      Buffer.from(
+        encodeCanonicalPlayerAuthorizationMessage({
+          programId: seq(0x70, 32),
+          clusterId: 1,
+          playerAuthorityPubkey: seq(0xb0, 32),
+          characterRootPubkey: seq(0x90, 32),
+          batchHash: seq(0x50, 32),
+          batchId: 7,
+          signatureScheme: 1,
+        }),
+      ).toString("utf8"),
+    ).toBe(text);
   });
 });

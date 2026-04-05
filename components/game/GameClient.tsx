@@ -27,7 +27,7 @@ import {
   getPhantomProvider,
   getWalletAvailability,
   normalizeWalletError,
-  signAuthorizationMessageBase64,
+  signAuthorizationMessageUtf8,
   signPreparedPlayerOwnedTransaction,
   type WalletActionStatus,
   type WalletAvailability,
@@ -391,9 +391,14 @@ function FirstSyncPanel(props: FirstSyncPanelProps) {
     props.setWalletActionStatus('signing_message');
 
     try {
-      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageBase64(
+      if (authorizeData.payload.signatureScheme !== 1) {
+        throw new Error(
+          'This pending first-sync batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or prepare a fresh wallet-text batch.',
+        );
+      }
+      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
         provider,
-        authorizeData.playerAuthorizationMessageBase64,
+        authorizeData.playerAuthorizationMessageUtf8,
       );
       const response = await apiRequest<FirstSyncPrepareResponse>('/api/solana/character/first-sync/prepare', {
         method: 'POST',
@@ -662,9 +667,14 @@ function SettlementPanel(props: SettlementPanelProps) {
     props.setWalletActionStatus('signing_message');
 
     try {
-      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageBase64(
+      if (authorizeData.payload.signatureScheme !== 1) {
+        throw new Error(
+          'This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.',
+        );
+      }
+      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
         provider,
-        authorizeData.playerAuthorizationMessageBase64,
+        authorizeData.playerAuthorizationMessageUtf8,
       );
       const response = await apiRequest<SettlementPrepareResponse>('/api/solana/settlement/prepare', {
         method: 'POST',
@@ -867,6 +877,17 @@ export default function GameClient() {
     [character, walletPublicKey],
   );
 
+  async function issueAnonymousUser(): Promise<string> {
+    const created = await apiRequest<AnonymousUserResponse>('/api/auth/anon', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+
+    window.localStorage.setItem(USER_STORAGE_KEY, created.userId);
+    setUserId(created.userId);
+    return created.userId;
+  }
+
   async function refreshCharacter(nextUserId?: string) {
     const resolvedUserId = nextUserId ?? userId;
 
@@ -897,12 +918,7 @@ export default function GameClient() {
         let resolvedUserId = storedUserId;
 
         if (!resolvedUserId) {
-          const created = await apiRequest<AnonymousUserResponse>('/api/auth/anon', {
-            method: 'POST',
-            body: JSON.stringify({}),
-          });
-          resolvedUserId = created.userId;
-          window.localStorage.setItem(USER_STORAGE_KEY, resolvedUserId);
+          resolvedUserId = await issueAnonymousUser();
         }
 
         if (cancelled) {
@@ -1065,15 +1081,34 @@ export default function GameClient() {
     setCreateError(null);
 
     try {
-      await apiRequest<CreateCharacterResponse>('/api/character/create', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId,
-          name: createName,
-        }),
-      });
+      let activeUserId = userId;
 
-      await refreshCharacter(userId);
+      try {
+        await apiRequest<CreateCharacterResponse>('/api/character/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            userId: activeUserId,
+            name: createName,
+          }),
+        });
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'User not found.') {
+          throw error;
+        }
+
+        window.localStorage.removeItem(USER_STORAGE_KEY);
+        activeUserId = await issueAnonymousUser();
+
+        await apiRequest<CreateCharacterResponse>('/api/character/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            userId: activeUserId,
+            name: createName,
+          }),
+        });
+      }
+
+      await refreshCharacter(activeUserId);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Failed to create character.');
     } finally {

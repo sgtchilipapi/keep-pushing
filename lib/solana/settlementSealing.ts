@@ -17,7 +17,10 @@ import {
 } from './settlementCanonical';
 
 export const SETTLEMENT_SCHEMA_VERSION_V2: SettlementSchemaVersion = 2;
-export const SETTLEMENT_SIGNATURE_SCHEME_ED25519: SettlementSignatureScheme = 0;
+export const SETTLEMENT_SIGNATURE_SCHEME_ED25519_RAW: SettlementSignatureScheme = 0;
+export const SETTLEMENT_SIGNATURE_SCHEME_WALLET_TEXT_V1: SettlementSignatureScheme = 1;
+export const DEFAULT_SETTLEMENT_SIGNATURE_SCHEME: SettlementSignatureScheme =
+  SETTLEMENT_SIGNATURE_SCHEME_WALLET_TEXT_V1;
 
 export interface SettlementSealingCursor {
   lastCommittedEndNonce: number;
@@ -249,7 +252,7 @@ export function sealSettlementBatchDraft(args: SealSettlementBatchArgs): SealedS
     lastBattleTs: last.battleTs,
     seasonId: first.seasonId,
     schemaVersion: SETTLEMENT_SCHEMA_VERSION_V2,
-    signatureScheme: SETTLEMENT_SIGNATURE_SCHEME_ED25519,
+    signatureScheme: DEFAULT_SETTLEMENT_SIGNATURE_SCHEME,
   };
 
   const endStateHash = computeCanonicalEndStateHashHex({

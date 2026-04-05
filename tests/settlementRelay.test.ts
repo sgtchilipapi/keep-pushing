@@ -26,7 +26,7 @@ function buildBatch(overrides: Partial<SettlementBatchRecord> = {}): SettlementB
     optionalLoadoutRevision: null,
     batchHash: '33'.repeat(32),
     schemaVersion: 2,
-    signatureScheme: 0,
+    signatureScheme: 1,
     status: 'SEALED',
     failureCategory: null,
     failureCode: null,
@@ -106,7 +106,7 @@ describe('settlementRelay', () => {
             lastBattleTs: batch.lastBattleTs,
             seasonId: batch.seasonId,
             schemaVersion: 2 as const,
-            signatureScheme: 0 as const,
+            signatureScheme: 1 as const,
           },
           dryRunResult: {},
           validationContext: {},
@@ -129,6 +129,8 @@ describe('settlementRelay', () => {
     expect(result.phase).toBe('authorize');
     expect(result.settlementBatchId).toBe(batch.id);
     expect(result.permitDomain.batchHash).toBe(batch.batchHash);
+    expect(result.payload.signatureScheme).toBe(1);
+    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA Wallet Authorization');
     expect(Buffer.from(result.playerAuthorizationMessageBase64, 'base64').length).toBeGreaterThan(32);
   });
 
@@ -179,7 +181,7 @@ describe('settlementRelay', () => {
             lastBattleTs: batch.lastBattleTs,
             seasonId: batch.seasonId,
             schemaVersion: 2 as const,
-            signatureScheme: 0 as const,
+            signatureScheme: 1 as const,
           },
           dryRunResult: {},
           validationContext: {},

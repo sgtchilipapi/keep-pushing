@@ -52,6 +52,15 @@ function assertFieldMatch(
   }
 }
 
+function assertSupportedSignatureScheme(value: number, field: string): void {
+  assertInteger(value, field, 0);
+  if (value !== 0 && value !== 1) {
+    throw new Error(
+      `ERR_UNSUPPORTED_SIGNATURE_SCHEME: ${field} must be a supported settlement signature scheme`,
+    );
+  }
+}
+
 function buildSettlementRelayMetadata(
   request: PrepareSettlementTransactionRequest,
 ): SettlementRelayMetadata {
@@ -81,7 +90,7 @@ function buildSettlementRelayMetadata(
   assertInteger(request.expectedCursor.lastCommittedBatchId, "lastCommittedBatchId", 0);
   assertInteger(request.permitDomain.clusterId, "clusterId", 1);
   assertInteger(request.permitDomain.batchId, "permitDomain.batchId", 1);
-  assertInteger(request.permitDomain.signatureScheme, "signatureScheme", 0);
+  assertSupportedSignatureScheme(request.permitDomain.signatureScheme, "signatureScheme");
 
   if (payload.endNonce < payload.startNonce) {
     throw new Error(
@@ -184,7 +193,7 @@ function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): vo
   assertInteger(payload.lastBattleTs, "payload.lastBattleTs", 0);
   assertInteger(payload.seasonId, "payload.seasonId", 0);
   assertInteger(payload.schemaVersion, "payload.schemaVersion", 2);
-  assertInteger(payload.signatureScheme, "payload.signatureScheme", 0);
+  assertSupportedSignatureScheme(payload.signatureScheme, "payload.signatureScheme");
 
   if (payload.schemaVersion !== 2) {
     throw new Error(
@@ -192,11 +201,6 @@ function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): vo
     );
   }
 
-  if (payload.signatureScheme !== 0) {
-    throw new Error(
-      "ERR_UNSUPPORTED_SIGNATURE_SCHEME: canonical settlement preparation requires signatureScheme = 0",
-    );
-  }
 }
 
 function buildPreparedTransaction(

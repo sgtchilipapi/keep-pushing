@@ -128,7 +128,7 @@ function buildPreparedRebase(authority: string, batchCount = 1) {
           lastBattleTs: 1_700_000_040 + index * 40,
           seasonId: 4,
           schemaVersion: 2 as const,
-          signatureScheme: 0 as const,
+          signatureScheme: 1 as const,
         },
         sealedBattleIds: [`battle-${startNonce}`, `battle-${endNonce}`],
       };
@@ -159,7 +159,7 @@ function buildPersistedBatch(
     optionalLoadoutRevision: null,
     batchHash: draft.payload.batchHash,
     schemaVersion: 2 as const,
-    signatureScheme: 0 as const,
+    signatureScheme: 1 as const,
     status: 'SEALED' as const,
     failureCategory: null,
     failureCode: null,
@@ -207,6 +207,8 @@ describe('firstSyncRelay', () => {
     expect(result.phase).toBe('authorize');
     expect(result.expectedCursor.lastCommittedEndNonce).toBe(0);
     expect(result.permitDomain.playerAuthority).toBe(authority);
+    expect(result.payload.signatureScheme).toBe(1);
+    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA|settlement|1|');
     expect(Buffer.from(result.playerAuthorizationMessageBase64, 'base64').length).toBeGreaterThan(
       32,
     );
@@ -374,7 +376,7 @@ describe('firstSyncRelay', () => {
           characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
           batchHash: preparedRebase.batchDrafts[0]!.payload.batchHash,
           batchId: preparedRebase.batchDrafts[0]!.payload.batchId,
-          signatureScheme: 0,
+          signatureScheme: 1,
         },
       },
     });
@@ -513,7 +515,7 @@ describe('firstSyncRelay', () => {
           characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
           batchHash: preparedRebase.batchDrafts[0]!.payload.batchHash,
           batchId: preparedRebase.batchDrafts[0]!.payload.batchId,
-          signatureScheme: 0,
+          signatureScheme: 1,
         },
       },
     });

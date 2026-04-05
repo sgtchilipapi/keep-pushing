@@ -1,7 +1,7 @@
 export type ZoneState = 0 | 1 | 2;
 export type ProgressZoneState = 1 | 2;
 export type SettlementSchemaVersion = 2;
-export type SettlementSignatureScheme = 0;
+export type SettlementSignatureScheme = 0 | 1;
 
 export interface EncounterCountEntry {
   zoneId: number;

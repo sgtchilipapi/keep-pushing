@@ -4,6 +4,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   resolvePhantomProvider,
+  signAuthorizationMessageUtf8,
   signPreparedPlayerOwnedTransaction,
 } from '../lib/solana/phantomBrowser';
 import type { PreparedPlayerOwnedTransaction } from '../types/api/solana';
@@ -36,6 +37,32 @@ describe('phantomBrowser helpers', () => {
     const encoded = bytesToBase64(bytes);
 
     expect(base64ToBytes(encoded)).toEqual(bytes);
+  });
+
+  it('signs authorization messages with Phantom utf8 display mode', async () => {
+    const signature = Uint8Array.from({ length: 64 }, (_, index) => (index + 1) % 256);
+    const signMessage = jest.fn(async () => ({
+      publicKey: { toBase58: () => 'wallet' },
+      signature,
+    }));
+
+    const result = await signAuthorizationMessageUtf8(
+      {
+        isPhantom: true,
+        publicKey: { toBase58: () => 'wallet' },
+        connect: async () => ({ publicKey: { toBase58: () => 'wallet' } }),
+        disconnect: async () => undefined,
+        signMessage,
+        signTransaction: async (transaction) => transaction,
+      },
+      'Authorize settlement batch',
+    );
+
+    expect(signMessage).toHaveBeenCalledWith(
+      new TextEncoder().encode('Authorize settlement batch'),
+      'utf8',
+    );
+    expect(result).toBe(bytesToBase64(signature));
   });
 
   it('signs a prepared player-owned transaction and returns base64 payloads', async () => {

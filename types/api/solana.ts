@@ -146,6 +146,8 @@ export interface SettlementPreparationBase {
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
   playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
 }
 
 export interface SettlementAuthorizationPhase extends SettlementPreparationBase {
@@ -179,6 +181,8 @@ export interface FirstSyncPreparationBase {
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
   playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
 }
 
 export interface FirstSyncAuthorizationPhase extends FirstSyncPreparationBase {

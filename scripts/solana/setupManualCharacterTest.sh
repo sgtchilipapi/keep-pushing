@@ -20,6 +20,7 @@ VALIDATOR_PORT="$(node -e "process.stdout.write(new URL(process.argv[1]).port ||
 PROGRAM_KEYPAIR_PATH="${RUNANA_PROGRAM_KEYPAIR_PATH:-$RUNANA_PROGRAM_ROOT/target/deploy/runana_program-keypair.json}"
 PROGRAM_SO_PATH="${RUNANA_PROGRAM_SO_PATH:-$RUNANA_PROGRAM_ROOT/target/deploy/runana_program.so}"
 PROGRAM_ID="${RUNANA_PROGRAM_ID:-$(solana-keygen pubkey "$PROGRAM_KEYPAIR_PATH")}"
+PROGRAM_SOURCE_DIR="${RUNANA_PROGRAM_SOURCE_DIR:-$RUNANA_PROGRAM_ROOT/programs/runana-program/src}"
 
 ZONE_ID="${RUNANA_BOOTSTRAP_ZONE_ID:-1}"
 SEASON_ID="${RUNANA_BOOTSTRAP_SEASON_ID:-1}"
@@ -144,6 +145,37 @@ function deploy_program_if_needed() {
     "$PROGRAM_SO_PATH" >/dev/null
 }
 
+function build_program_if_needed() {
+  if [[ "${RUNANA_SKIP_PROGRAM_BUILD:-0}" == "1" ]]; then
+    note "Skipping runana-program rebuild because RUNANA_SKIP_PROGRAM_BUILD=1"
+    return
+  fi
+
+  local needs_build=0
+  if [[ ! -f "$PROGRAM_SO_PATH" ]]; then
+    needs_build=1
+  elif [[ -d "$PROGRAM_SOURCE_DIR" ]] && find "$PROGRAM_SOURCE_DIR" -type f -newer "$PROGRAM_SO_PATH" | grep -q .; then
+    needs_build=1
+  elif [[ -f "$RUNANA_PROGRAM_ROOT/Anchor.toml" && "$RUNANA_PROGRAM_ROOT/Anchor.toml" -nt "$PROGRAM_SO_PATH" ]]; then
+    needs_build=1
+  elif [[ -f "$RUNANA_PROGRAM_ROOT/Cargo.lock" && "$RUNANA_PROGRAM_ROOT/Cargo.lock" -nt "$PROGRAM_SO_PATH" ]]; then
+    needs_build=1
+  elif [[ -f "$RUNANA_PROGRAM_ROOT/programs/runana-program/Cargo.toml" && "$RUNANA_PROGRAM_ROOT/programs/runana-program/Cargo.toml" -nt "$PROGRAM_SO_PATH" ]]; then
+    needs_build=1
+  fi
+
+  if [[ "$needs_build" != "1" ]]; then
+    note "Using existing program build at $PROGRAM_SO_PATH"
+    return
+  fi
+
+  note "Building latest runana-program artifact"
+  (
+    cd "$RUNANA_PROGRAM_ROOT"
+    anchor build -p runana-program >/dev/null
+  )
+}
+
 function write_bootstrap_config() {
   local trusted_server_signer="$1"
 
@@ -225,8 +257,10 @@ function start_server_if_needed() {
       RUNANA_SOLANA_COMMITMENT="$SOLANA_COMMITMENT" \
       RUNANA_PROGRAM_ID="$PROGRAM_ID" \
       RUNANA_SERVER_SIGNER_KEYPAIR_PATH="$SERVER_SIGNER_KEYPAIR_PATH" \
+      RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES="${RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES:-0}" \
       PORT="$SERVER_PORT" \
-      npm run dev -- --hostname "$SERVER_HOST" --port "$SERVER_PORT" >"$SERVER_LOG_PATH" 2>&1 &
+      sh -lc 'npx prisma migrate deploy && npm run dev -- --hostname "$0" --port "$1"' \
+      "$SERVER_HOST" "$SERVER_PORT" >"$SERVER_LOG_PATH" 2>&1 &
     echo "$!" >"$SERVER_PID_PATH"
   )
 
@@ -291,11 +325,14 @@ EOF
 require_command curl
 require_command node
 require_command npm
+require_command anchor
 require_command solana
 require_command solana-keygen
 require_command solana-test-validator
 
 [[ -f "$PROGRAM_KEYPAIR_PATH" ]] || fail "program keypair not found at $PROGRAM_KEYPAIR_PATH"
+
+build_program_if_needed
 [[ -f "$PROGRAM_SO_PATH" ]] || fail "program binary not found at $PROGRAM_SO_PATH"
 
 if [[ -n "${RUNANA_DB_CLEANUP_CMD:-}" ]]; then

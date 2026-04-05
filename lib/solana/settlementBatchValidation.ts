@@ -200,7 +200,11 @@ export function applyBattleSettlementBatchV1(
     "histogram entry count exceeds max policy",
   );
   assertCondition(payload.schemaVersion === 2, "ERR_SCHEMA_VERSION", "schema version must be canonical V2");
-  assertCondition(payload.signatureScheme === 0, "ERR_SIGNATURE_SCHEME", "signature scheme must be ed25519 domain 0");
+  assertCondition(
+    payload.signatureScheme === 0 || payload.signatureScheme === 1,
+    "ERR_SIGNATURE_SCHEME",
+    "signature scheme must be a supported settlement authorization scheme",
+  );
 
   assertCondition(
     payload.startNonce === cursor.lastCommittedEndNonce + 1,
