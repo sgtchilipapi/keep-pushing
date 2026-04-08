@@ -1,57 +1,168 @@
-# Character SSOT Compatibility Assessment (Current Engine)
+# Character SSOT Adaptation Plan (Aligned to Current Engine)
 
-This assessment compares the proposed Character SSOT to the **current battle implementation**.
+This revision adapts the Character SSOT to the **current implementation constraints** and calls out what is unsupported.
 
-## Executive summary
+## Scope requested
 
-The SSOT is **not directly compatible** with the current implementation. The largest incompatibilities are:
+From the prior incompatibility set:
 
-1. Data model mismatch (`HIT` vs `accuracyBP/evadeBP`, plus extra `hpMax`).
-2. Skill catalog mismatch (SSOT skills/classes do not exist in registry).
-3. Passive model mismatch (SSOT flat-only passives vs current support for conditional passives).
-4. Formula mismatch (SSOT damage baseline `ATK - DEF` vs current mitigation formula).
+1. Data model mismatch (`HIT` vs `accuracyBP/evadeBP` + `hpMax`)
+2. Skill catalog mismatch (handle by creating v2 registry docs using current schema)
+3. Passive model mismatch (flat-only SSOT vs current conditional-capable engine)
+4. Damage formula mismatch (`ATK - DEF` vs current mitigation formula)
 
-All of these are refactorable, but introducing the SSOT as-is is a **medium/high-risk gameplay migration** unless done behind versioned registries.
+This document resolves #1, #3, #4 by recommending SSOT changes, and resolves #2 by proposing a v2 skill registry spec that conforms to current logic.
 
-## Current implementation baseline (evidence)
+---
 
-- Combat snapshot currently uses `hp`, `hpMax`, `atk`, `def`, `spd`, `accuracyBP`, `evadeBP`, two active skills, and optional two passives. There is no `HIT` stat field. (`types/combat.ts`).
-- Skill system is registry-driven with hardcoded IDs `1000-1005` and names: Basic Attack, Volt Strike, Finishing Blow, Surge, Barrier, Repair (`engine/battle/skillRegistry.ts`).
-- Status system supports exactly: `stunned`, `shielded`, `broken_armor`, `overheated`, `recovering` (`engine/battle/statuses/statusRegistry.ts`).
-- Passive system supports both flat modifiers and conditional modifiers (for example `target_hp_below_bp`) (`engine/battle/passiveRegistry.ts`, `engine/battle/applyPassives.ts`).
-- Damage currently uses `floor((skill.basePower + atk) * 100 / (100 + def))`, with minimum 1 (`engine/battle/resolveDamage.ts`).
+## Current implementation constraints (must prevail)
 
-## Incompatibility matrix and estimated refactor cost/risk
+- Combat snapshot contract currently uses: `hp`, `hpMax`, `atk`, `def`, `spd`, `accuracyBP`, `evadeBP`, `activeSkillIds`, optional `passiveSkillIds`. No `HIT` field exists.
+- Skills are resolved using schema: `resolutionMode`, `basePower`, `accuracyModBP`, `cooldownTurns`, `tags`, `appliesStatusIds`, `selfAppliesStatusIds`.
+- Valid status IDs are currently: `stunned`, `shielded`, `broken_armor`, `overheated`, `recovering`.
+- Damage and hit math are currently:
+  - hit chance: `clamp(accuracyBP - evadeBP + accuracyModBP, 500, 9500)`
+  - damage: `max(1, floor((basePower + atk) * 100 / (100 + def)))`
+- Passives support both flat and conditional modifiers.
 
-| SSOT item | Compatibility with current code | Why incompatible (current behavior) | Refactor cost | Refactor risk |
-|---|---|---|---|---|
-| Base/derived stat naming (`baseHP`→`HP`, etc.) | **Incompatible** | Runtime and DTO use lowercase live combat stats, no base-to-derived layer, and use `accuracyBP/evadeBP` not `HIT`. | **Medium** | **Medium** |
-| Stat surface locked to `HP/ATK/DEF/SPD/HIT` only | **Incompatible** | Current surface includes `hpMax` and separate hit components (`accuracyBP`,`evadeBP`). | **Medium** | **Medium** |
-| Hit rule `roll <= HIT` | **Partially incompatible** | Current hit uses `accuracyBP - evadeBP + skill accuracy mod`, clamped to `[500,9500]`, then `roll<=chance`. | **Low/Medium** | **Medium** |
-| Damage baseline `ATK - DEF` min 1 | **Incompatible** | Current formula is defense-mitigation scaling with `basePower` contribution. | **Medium** | **High** (major rebalance) |
-| 4 archetypes + world labels | **Partially compatible** | `archetypeId` exists in AI context, but not enforced as SSOT class map in combat contracts. | **Low** | **Low** |
-| Global/class skill catalogs (16 active skills total) | **Incompatible** | Registry currently contains 6 fixed skills with different semantics/tags/status bindings. | **High** | **High** |
-| Skill categories (`DMG/BUFF/DEBUFF/HOT/DOT/UTILITY`) | **Incompatible** | Current system models behavior via `resolutionMode`, `tags`, status application arrays; no category enum. | **Medium** | **Medium** |
-| Multi-effect skills (e.g., Overdrive +ATK/-DEF) | **Incompatible** | No direct per-skill transient stat bundle; effects are represented through statuses/passives. | **Medium/High** | **Medium/High** |
-| Formula skills (`ATK + DEF/2`, `ATK + SPD/2`) | **Partially incompatible** | Technically possible, but current skill def only has scalar `basePower`; would need formula hooks/expressions. | **Medium** | **Medium** |
-| Flicker `+120 initiative` self utility | **Incompatible** | No mechanism for utility skill to add initiative directly; utility currently applies statuses only. | **Medium** | **Medium** |
-| Cooldowns/durations in SSOT values | **Partially compatible** | Engine supports both cooldowns and status durations, but many values differ from SSOT and are currently hardcoded in registries. | **Low/Medium** | **Low/Medium** |
-| No stacking; refresh duration only | **Compatible** | `applyStatus` refreshes by setting remaining turns to max(current, base duration) and does not stack duplicates. | **Low** | **Low** |
-| Flat-only passives, no conditional passives | **Incompatible by policy** | Implementation currently allows conditional passives (e.g., execution window accuracy bonus). | **Low/Medium** | **Low** |
-| Common/class passive catalog (7 passives) | **Incompatible** | Registry currently defines only 2 passives with different identities/effects. | **Medium** | **Medium** |
-| Initiative: +SPD, action cost 100 | **Compatible** | This matches current initiative loop behavior. | **Low** | **Low** |
+---
 
-## Suggested migration path (risk reduction)
+## 1) Data model adaptation (SSOT change required)
 
-1. **Introduce `combatRulesVersion` (v1 current, v2 SSOT)** at input boundary and event metadata.
-2. **Add v2 registries** (`skillRegistry.v2.ts`, `passiveRegistry.v2.ts`, status mapping) rather than replacing in place.
-3. **Add a stat adapter** for v2 (`HIT` -> internal accuracy model) or migrate all internals to strict `HIT`.
-4. **Gate formula differences** (damage, hit, initiative utility effects) behind version-specific resolver modules.
-5. **Dual-run deterministic snapshot tests** for v1/v2 to verify no regressions in existing battles.
-6. **Switch default to v2** only after telemetry + fixture parity.
+### Why
+Your SSOT defines `HIT` as a single stat and does not include `hpMax`, but the engine requires `accuracyBP`, `evadeBP`, and `hpMax` in the canonical combatant contract.
 
-## Recommended cost/risk rollup
+### What should change in Character SSOT
 
-- **If done as in-place replacement:** cost **High**, risk **High**.
-- **If done as versioned migration:** cost **High**, risk **Medium**.
-- **Most volatile area:** battle balance and AI scoring behavior after formula/catalog changes.
+1. Replace stat surface section with:
+   - `HP` (runtime current hp)
+   - `HP_MAX`
+   - `ATK`
+   - `DEF`
+   - `SPD`
+   - `ACC_BP`
+   - `EVA_BP`
+2. If you want to keep presentation-level `HIT`, treat it as a derived/editor value only, then map to engine fields before simulation.
+3. Keep initiative runtime-derived (do not include in canonical input snapshot).
+
+### Refactor assessment
+
+- Code change size: **Medium** (type/schema/docs/API contracts where SSOT is enforced).
+- Risk: **Medium** (data migration + balancing due to split hit model).
+
+---
+
+## 3) Passive model adaptation (SSOT change required)
+
+### Why
+Current passives can be conditional (e.g., trigger on target HP threshold). SSOT currently forbids conditional passives.
+
+### What should change in Character SSOT
+
+Adopt one of these two explicit policies:
+
+- **Policy A (recommended):** allow conditional passives but only deterministic integer predicates (e.g., target hp below basis points), no randomness.
+- **Policy B:** keep flat-only passives for v2 catalog and mark conditional passives as engine capability not used by this balance set.
+
+Either policy must be stated explicitly to avoid spec drift.
+
+### Refactor assessment
+
+- If Policy A: **Low/Medium** cost, **Low** risk (already supported).
+- If Policy B: **Low** cost, **Low** risk (content restriction only).
+
+---
+
+## 4) Damage formula adaptation (SSOT change required)
+
+### Why
+Current engine damage formula is mitigation-based with `basePower + atk`; SSOT baseline says `ATK - DEF`.
+
+### What should change in Character SSOT
+
+Replace baseline damage section with the current engine formula:
+
+```txt
+damage = max(1, floor((basePower + ATK) * 100 / (100 + DEF)))
+```
+
+Keep `ATK - DEF` only as historical note, not active rule.
+
+### Refactor assessment
+
+- If SSOT adapts to engine: **Low** cost, **Low** risk.
+- If engine changes to SSOT: **Medium** cost, **High** risk (major rebalance + AI score drift).
+
+---
+
+## 2) Skills: v2 registry proposal in current schema
+
+Below is the proposed v2 catalog status under **current resolution logic**.
+
+### Legend
+- **Supported**: can be represented exactly with current skill schema + status model.
+- **Supported with revision**: close, but text/effects must be rewritten to match current model.
+- **Not supported**: cannot be represented without engine changes; current implementation should prevail.
+
+| Skill | SSOT intent | Support status | Why |
+|---|---|---|---|
+| Strike | DMG `ATK + 5` | Supported with revision | Represent as `attack` + tuned `basePower`; exact additive text replaced by formula-based damage. |
+| Guard | `+5 DEF` buff | Not supported | No direct temporary DEF stat buff in skill effects; only status-based multipliers currently. |
+| Break | `-5 DEF` enemy | Not supported | No direct temporary enemy DEF reducer; `broken_armor` is damage-taken multiplier, not DEF stat change. |
+| Pulse | DMG `ATK + 8` | Supported with revision | Same as Strike: tunable via `basePower`. |
+| Mend | HOT heal/turn | Supported with revision | Can map to self status apply (`recovering`), but current tick/duration values differ. |
+| Wither | DOT dmg/turn | Supported with revision | Can map to target status apply (`overheated`), but current values differ. |
+| Overdrive | self `+ATK` and `-DEF` | Not supported | Multi-stat temporary self modifier is not modeled by current skill effect schema. |
+| Cleave | DMG + accuracy penalty this action | Supported | `attack` skill with tuned `basePower` and negative `accuracyModBP`. |
+| Shatter | enemy `-DEF` | Not supported | Same limitation as Break. |
+| Fortify | self `+DEF` | Not supported | Same limitation as Guard. |
+| Crush | DMG `ATK + DEF/2` | Not supported | Dynamic formula terms from actor DEF are not expressible in scalar `basePower`. |
+| Reinforce | HOT heal/turn | Supported with revision | Same mapping limits as Mend. |
+| Velocity | DMG `ATK + SPD/2` | Not supported | Dynamic SPD-based scaling is not expressible in scalar `basePower`. |
+| Bleed | DOT dmg/turn | Supported with revision | Map to `overheated`; values/duration require SSOT revision or new status defs. |
+| Surge (SSOT) | `+15 SPD` buff | Not supported | No temporary SPD buff effect path in skill schema. |
+| Flicker | `+120 initiative` self | Not supported | No utility path to directly modify initiative from skill execution. |
+
+### Proposed v2 skill registry shape (doc-level)
+
+Use current `SkillDef` fields only:
+
+- `skillId`, `skillName`, `resolutionMode`, `basePower`, `accuracyModBP`, `cooldownTurns`, `tags`, `appliesStatusIds`, `selfAppliesStatusIds`
+
+For unsupported skills above, either:
+1. replace with supported equivalents using existing statuses/formulas, or
+2. keep as future backlog requiring explicit engine feature work.
+
+---
+
+## Character classes/archetypes: implementation assessment
+
+### Current state
+
+- Combat contract does not currently enforce class/archetype identity in `CombatantSnapshot`.
+- AI context supports optional `archetypeId`, so the concept exists but is not canonical at the shared combat DTO boundary.
+
+### What should change
+
+1. Add optional then required `archetypeId` to `CombatantSnapshot` with enum/string-union values (e.g., `Balanced`, `High_ATK`, `High_DEF`, `High_SPD`).
+2. Add class-to-archetype mapping in shared types or config (`Meridian/Raze/Bulwark/Swift`).
+3. Validate loadout rules by archetype (allowed active/passive IDs).
+4. Use `archetypeId` as the deterministic hook for AI priors and balancing tables.
+
+### Refactor assessment
+
+- Type/API change: **Low/Medium**.
+- Validation + content wiring: **Medium**.
+- Runtime risk: **Low/Medium** (mostly contract and registry wiring, not core battle loop).
+
+---
+
+## Recommended next decision
+
+If you want minimal disruption, adopt this order:
+
+1. Update SSOT text to engine-aligned stat/hit/damage rules (#1, #4).
+2. Freeze passive policy explicitly (#3 Policy A or B).
+3. Publish v2 registry with only supported skills; mark unsupported skills as backlog.
+4. Add `archetypeId` to canonical combat snapshot and class-loadout validation.
+
