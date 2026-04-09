@@ -213,8 +213,9 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
         <div className={styles.stack}>
           <h2 className={styles.panelTitle}>Create your first character</h2>
           <p className={styles.panelText}>
-            Create the local character first, then use Phantom to create the
-            matching on-chain character before battles begin.
+            Create the local character first. You can battle locally right
+            away, then use Phantom later to save that character genesis on
+            chain.
           </p>
         </div>
       </div>
@@ -841,10 +842,9 @@ function SyncPanel(props: SyncPanelProps) {
             {
               method: "POST",
               body: JSON.stringify({
-                userId: props.character.userId,
+                characterId: props.character.characterId,
                 authority: props.walletPublicKey,
                 feePayer: props.walletPublicKey,
-                name: props.character.name,
                 initialUnlockedZoneId,
               }),
             },

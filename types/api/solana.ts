@@ -178,10 +178,9 @@ export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTra
 }
 
 export interface PrepareCharacterCreationRouteRequest {
-  userId: string;
+  characterId: string;
   authority: string;
   feePayer?: string;
-  name?: string;
   initialUnlockedZoneId: number;
 }
 

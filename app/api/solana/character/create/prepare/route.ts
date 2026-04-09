@@ -14,8 +14,12 @@ function statusForError(message: string): number {
     return 400;
   }
 
-  if (message.startsWith("ERR_USER_NOT_FOUND")) {
+  if (message.startsWith("ERR_CHARACTER_NOT_FOUND")) {
     return 404;
+  }
+
+  if (message.startsWith("ERR_CHARACTER_CHAIN_IDENTITY_ALREADY_RESERVED")) {
+    return 409;
   }
 
   return 500;
@@ -33,10 +37,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await prepareSolanaCharacterCreation({
-      userId: typeof body.userId === "string" ? body.userId : "",
+      characterId:
+        typeof body.characterId === "string" ? body.characterId : "",
       authority: typeof body.authority === "string" ? body.authority : "",
       feePayer: typeof body.feePayer === "string" ? body.feePayer : undefined,
-      name: typeof body.name === "string" ? body.name : undefined,
       initialUnlockedZoneId:
         typeof body.initialUnlockedZoneId === "number"
           ? body.initialUnlockedZoneId

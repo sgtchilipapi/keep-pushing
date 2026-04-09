@@ -7,11 +7,8 @@ jest.mock("../engine/battle/passiveRegistry", () => ({
 }));
 
 const prismaMock = {
-  user: {
-    findUnique: jest.fn(),
-  },
   character: {
-    create: jest.fn(),
+    findById: jest.fn(),
     findChainState: jest.fn(),
     updateChainIdentity: jest.fn(),
     updateCursorSnapshot: jest.fn(),
@@ -71,8 +68,7 @@ describe("characterCreation", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    prismaMock.user.findUnique.mockResolvedValue({ id: "user-1" });
-    prismaMock.character.create.mockResolvedValue({
+    prismaMock.character.findById.mockResolvedValue({
       id: "character-1",
       userId: "user-1",
       name: "Rookie",
@@ -86,7 +82,23 @@ describe("characterCreation", () => {
       accuracyBP: 8000,
       evadeBP: 1200,
     });
-    prismaMock.character.findChainState.mockResolvedValue(null);
+    prismaMock.character.findChainState.mockResolvedValue({
+      id: "character-1",
+      playerAuthorityPubkey: null,
+      chainCharacterIdHex: null,
+      characterRootPubkey: null,
+      chainCreationStatus: "NOT_STARTED",
+      chainCreationTxSignature: null,
+      chainCreatedAt: null,
+      chainCreationTs: null,
+      chainCreationSeasonId: null,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      lastReconciledAt: null,
+    });
     prismaMock.character.updateChainIdentity.mockResolvedValue({});
     prismaMock.character.updateCursorSnapshot.mockResolvedValue({});
   });
@@ -120,7 +132,7 @@ describe("characterCreation", () => {
 
     const result = await prepareSolanaCharacterCreation(
       {
-        userId: "user-1",
+        characterId: "character-1",
         authority,
         initialUnlockedZoneId: 1,
       },
@@ -136,7 +148,7 @@ describe("characterCreation", () => {
       },
     );
 
-    expect(prismaMock.character.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.character.findById).toHaveBeenCalledWith("character-1");
     expect(prismaMock.character.updateChainIdentity).toHaveBeenCalledTimes(2);
     expect(
       prismaMock.character.updateChainIdentity.mock.calls[0]?.[1],
@@ -163,6 +175,42 @@ describe("characterCreation", () => {
     expect(
       result.preparedTransaction.characterCreationRelay?.seasonIdAtCreation,
     ).toBeUndefined();
+  });
+
+  it("rejects prepare when the local character already has a chain identity", async () => {
+    prismaMock.character.findChainState.mockResolvedValue({
+      id: "character-1",
+      playerAuthorityPubkey: "wallet",
+      chainCharacterIdHex: "11".repeat(16),
+      characterRootPubkey: Keypair.generate().publicKey.toBase58(),
+      chainCreationStatus: "PENDING",
+      chainCreationTxSignature: null,
+      chainCreatedAt: null,
+      chainCreationTs: null,
+      chainCreationSeasonId: null,
+      lastReconciledEndNonce: null,
+      lastReconciledStateHash: null,
+      lastReconciledBatchId: null,
+      lastReconciledBattleTs: null,
+      lastReconciledSeasonId: null,
+      lastReconciledAt: null,
+    });
+
+    await expect(
+      prepareSolanaCharacterCreation(
+        {
+          characterId: "character-1",
+          authority: Keypair.generate().publicKey.toBase58(),
+          initialUnlockedZoneId: 1,
+        },
+        {
+          connection: {} as never,
+          env: {
+            RUNANA_ACTIVE_SEASON_ID: "4",
+          },
+        },
+      ),
+    ).rejects.toThrow(/ERR_CHARACTER_CHAIN_IDENTITY_ALREADY_RESERVED/);
   });
 
   it("accepts a wallet-signed create transaction when only the message bytes differ", async () => {

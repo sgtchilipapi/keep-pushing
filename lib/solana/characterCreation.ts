@@ -72,10 +72,9 @@ interface CreatedCharacterRecord {
 }
 
 export interface PrepareSolanaCharacterCreationInput {
-  userId: string;
+  characterId: string;
   authority: string;
   feePayer?: string;
-  name?: string;
   initialUnlockedZoneId: number;
 }
 
@@ -216,28 +215,6 @@ function isRetryableCharacterIdentityCollision(error: unknown): boolean {
       message.includes("chainCharacterIdHex") ||
       message.includes("characterRootPubkey"))
   );
-}
-
-function createStarterCharacter(
-  userId: string,
-  name: string,
-): Promise<CreatedCharacterRecord> {
-  STARTER_ACTIVE_SKILLS.forEach((skillId) => getSkillDef(skillId));
-  STARTER_PASSIVES.forEach((passiveId) => getPassiveDef(passiveId));
-
-  return prisma.character.create({
-    userId,
-    name,
-    hp: 1200,
-    hpMax: 1200,
-    atk: 120,
-    def: 70,
-    spd: 100,
-    accuracyBP: 8000,
-    evadeBP: 1200,
-    activeSkills: STARTER_ACTIVE_SKILLS,
-    passiveSkills: STARTER_PASSIVES,
-  });
 }
 
 function sha256HexFromBase64(base64Value: string): string {
@@ -577,11 +554,33 @@ async function updateCharacterChainState(args: {
   });
 }
 
+function assertCharacterReadyForFirstChainBinding(args: {
+  characterId: string;
+  chainState: Awaited<ReturnType<typeof prisma.character.findChainState>>;
+}): void {
+  if (args.chainState === null) {
+    throw new Error(
+      `ERR_CHARACTER_NOT_FOUND: local character ${args.characterId} was not found`,
+    );
+  }
+
+  if (
+    args.chainState.playerAuthorityPubkey !== null ||
+    args.chainState.chainCharacterIdHex !== null ||
+    args.chainState.characterRootPubkey !== null ||
+    args.chainState.chainCreationStatus !== "NOT_STARTED"
+  ) {
+    throw new Error(
+      "ERR_CHARACTER_CHAIN_IDENTITY_ALREADY_RESERVED: character already has a reserved or confirmed on-chain identity",
+    );
+  }
+}
+
 export async function prepareSolanaCharacterCreation(
   input: PrepareSolanaCharacterCreationInput,
   deps: CharacterCreationServiceDependencies = {},
 ): Promise<PreparedSolanaCharacterCreationResult> {
-  assertNonEmptyString(input.userId, "userId");
+  assertNonEmptyString(input.characterId, "characterId");
   assertNonEmptyString(input.authority, "authority");
   assertInteger(input.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
 
@@ -592,12 +591,18 @@ export async function prepareSolanaCharacterCreation(
       "ERR_PLAYER_MUST_PAY: character_create requires feePayer to match authority",
     );
   }
-  const name = normalizeName(input.name);
-  const user = await prisma.user.findUnique(input.userId);
-
-  if (user === null) {
-    throw new Error("ERR_USER_NOT_FOUND: user was not found");
+  const character = await prisma.character.findById(input.characterId);
+  if (character === null) {
+    throw new Error(
+      `ERR_CHARACTER_NOT_FOUND: local character ${input.characterId} was not found`,
+    );
   }
+  STARTER_ACTIVE_SKILLS.forEach((skillId) => getSkillDef(skillId));
+  STARTER_PASSIVES.forEach((passiveId) => getPassiveDef(passiveId));
+  assertCharacterReadyForFirstChainBinding({
+    characterId: character.id,
+    chainState: await prisma.character.findChainState(character.id),
+  });
 
   const connection = deps.connection ?? createRunanaConnection();
   const commitment = deps.commitment ?? resolveRunanaCommitment();
@@ -618,7 +623,6 @@ export async function prepareSolanaCharacterCreation(
     initialUnlockedZoneId: input.initialUnlockedZoneId,
   });
 
-  const character = await createStarterCharacter(input.userId, name);
   const generateCharacterIdHex =
     deps.generateCharacterIdHex ?? defaultCharacterIdHex;
 

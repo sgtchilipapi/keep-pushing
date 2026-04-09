@@ -847,6 +847,39 @@ export const prisma = {
         inventory: inventory.rows
       };
     },
+    async findById(characterId: string) {
+      const characterResult = await pool.query(
+        'SELECT id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP" FROM "Character" WHERE id = $1 LIMIT 1',
+        [characterId]
+      );
+      const character = characterResult.rows[0];
+      if (character === undefined) {
+        return null;
+      }
+
+      const [skills, passives, unlocks, inventory] = await Promise.all([
+        pool.query('SELECT "skillId" FROM "EquippedSkill" WHERE "characterId" = $1 ORDER BY slot ASC', [
+          character.id
+        ]),
+        pool.query('SELECT "passiveId" FROM "EquippedPassive" WHERE "characterId" = $1 ORDER BY slot ASC', [
+          character.id
+        ]),
+        pool.query('SELECT "skillId" FROM "SkillUnlock" WHERE "characterId" = $1 ORDER BY "unlockedAt" ASC', [
+          character.id
+        ]),
+        pool.query('SELECT "itemId", quantity FROM "InventoryItem" WHERE "characterId" = $1 ORDER BY "itemId" ASC', [
+          character.id
+        ])
+      ]);
+
+      return {
+        ...character,
+        activeSkills: skills.rows.map((row) => row.skillId),
+        passiveSkills: passives.rows.map((row) => row.passiveId),
+        unlockedSkillIds: unlocks.rows.map((row) => row.skillId),
+        inventory: inventory.rows
+      };
+    },
     async findUnique(id: string) {
       const result = await pool.query('SELECT id FROM "Character" WHERE id = $1 LIMIT 1', [id]);
       return result.rows[0] ?? null;
