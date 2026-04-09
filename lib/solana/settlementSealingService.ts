@@ -5,6 +5,7 @@ import {
   accountStateHashHex,
   fetchCharacterSettlementBatchCursorAccount,
   fetchProgramConfigAccount,
+  fetchSeasonPolicyAccount,
 } from './runanaAccounts';
 import {
   buildSettlementValidationContext,
@@ -20,6 +21,7 @@ import { loadSettlementInstructionAccountEnvelope } from './runanaSettlementEnve
 import {
   deriveCharacterBatchCursorPda,
   deriveProgramConfigPda,
+  deriveSeasonPolicyPda,
 } from './runanaProgram';
 import type { SettlementBatchPayloadV2, SettlementValidationContext } from '../../types/settlement';
 
@@ -87,6 +89,159 @@ function batchDraftToCreateInput(characterId: string, draft: SealedSettlementBat
   };
 }
 
+function assertCursorSnapshotAvailable(
+  characterId: string,
+  chainState: Awaited<ReturnType<typeof prisma.character.findChainState>>,
+): asserts chainState is NonNullable<Awaited<ReturnType<typeof prisma.character.findChainState>>> & {
+  lastReconciledEndNonce: number;
+  lastReconciledStateHash: string;
+  lastReconciledBatchId: number;
+  lastReconciledBattleTs: number;
+  lastReconciledSeasonId: number;
+} {
+  assertCondition(chainState !== null, 'ERR_CHARACTER_NOT_FOUND', `character ${characterId} was not found`);
+  assertCondition(
+    chainState.lastReconciledEndNonce !== null &&
+      chainState.lastReconciledStateHash !== null &&
+      chainState.lastReconciledBatchId !== null &&
+      chainState.lastReconciledBattleTs !== null &&
+      chainState.lastReconciledSeasonId !== null,
+    'ERR_CHARACTER_CURSOR_UNAVAILABLE',
+    'character is missing the last reconciled cursor snapshot required for sealing',
+  );
+}
+
+function buildSequentialBatchDrafts(args: {
+  cursor: {
+    lastCommittedEndNonce: number;
+    lastCommittedStateHash: string;
+    lastCommittedBatchId: number;
+    lastCommittedBattleTs: number;
+    lastCommittedSeasonId: number;
+  };
+  battles: Parameters<typeof sealSettlementBatchDraft>[0]['pendingBattles'];
+  maxBattlesPerBatch: number;
+  maxHistogramEntriesPerBatch: number;
+  characterIdHex: string;
+}): SealedSettlementBatchDraft[] {
+  const drafts: SealedSettlementBatchDraft[] = [];
+  let cursor = args.cursor;
+  let remaining = [...args.battles].sort((left, right) => left.battleNonce! - right.battleNonce!);
+
+  while (remaining.length > 0) {
+    const draft = sealSettlementBatchDraft({
+      characterIdHex: args.characterIdHex,
+      cursor,
+      pendingBattles: remaining,
+      maxBattlesPerBatch: args.maxBattlesPerBatch,
+      maxHistogramEntriesPerBatch: args.maxHistogramEntriesPerBatch,
+    });
+    const sealedBattleIds = new Set(draft.sealedBattleIds);
+
+    drafts.push(draft);
+    remaining = remaining.filter((battle) => !sealedBattleIds.has(battle.id));
+    cursor = {
+      lastCommittedEndNonce: draft.payload.endNonce,
+      lastCommittedStateHash: draft.payload.endStateHash,
+      lastCommittedBatchId: draft.payload.batchId,
+      lastCommittedBattleTs: draft.payload.lastBattleTs,
+      lastCommittedSeasonId: draft.payload.seasonId,
+    };
+  }
+
+  return drafts;
+}
+
+async function materializeInitialSettlementBacklog(args: {
+  characterId: string;
+  chainState: Awaited<ReturnType<typeof prisma.character.findChainState>>;
+  connection: Connection;
+  commitment?: Commitment;
+  programId: PublicKey;
+  now: Date;
+}) {
+  if (args.chainState?.chainCreationStatus !== 'CONFIRMED') {
+    return false;
+  }
+
+  assertCursorSnapshotAvailable(args.characterId, args.chainState);
+  const chainState = args.chainState;
+
+  const awaitingBattles = await prisma.battleOutcomeLedger.listAwaitingFirstSyncForCharacter(
+    args.characterId,
+    10_000,
+  );
+  if (awaitingBattles.length === 0) {
+    return false;
+  }
+
+  const programConfig = await fetchProgramConfigAccount(
+    args.connection,
+    deriveProgramConfigPda(args.programId),
+    args.commitment,
+  );
+  const currentTs = currentUnixTimestamp(args.now);
+  const battlesBySeason = new Map<number, typeof awaitingBattles>();
+
+  for (const battle of awaitingBattles) {
+    const existing = battlesBySeason.get(battle.seasonId) ?? [];
+    existing.push(battle);
+    battlesBySeason.set(battle.seasonId, existing);
+  }
+
+  const archivedBattleIds: string[] = [];
+  for (const seasonId of battlesBySeason.keys()) {
+    const seasonPolicy = await fetchSeasonPolicyAccount(
+      args.connection,
+      deriveSeasonPolicyPda(seasonId, args.programId),
+      args.commitment,
+    );
+    if (currentTs > Number(seasonPolicy.commitGraceEndTs)) {
+      archivedBattleIds.push(...(battlesBySeason.get(seasonId) ?? []).map((battle) => battle.id));
+    }
+  }
+
+  if (archivedBattleIds.length > 0) {
+    await prisma.battleOutcomeLedger.markArchivedLocalOnly(archivedBattleIds);
+  }
+
+  const remainingBattles = awaitingBattles
+    .filter((battle) => !archivedBattleIds.includes(battle.id))
+    .sort((left, right) => left.localSequence - right.localSequence);
+  assertCondition(
+    remainingBattles.length > 0,
+    'ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES',
+    'all awaiting-first-sync backlog was archived as stale local-only history',
+  );
+
+  const rebasedBattles = await prisma.battleOutcomeLedger.rebaseAwaitingFirstSyncBattleNonces(
+    args.characterId,
+    remainingBattles.map((battle, index) => ({
+      id: battle.id,
+      battleNonce: chainState.lastReconciledEndNonce + index + 1,
+    })),
+  );
+  const drafts = buildSequentialBatchDrafts({
+    cursor: {
+      lastCommittedEndNonce: chainState.lastReconciledEndNonce,
+      lastCommittedStateHash: chainState.lastReconciledStateHash,
+      lastCommittedBatchId: chainState.lastReconciledBatchId,
+      lastCommittedBattleTs: chainState.lastReconciledBattleTs,
+      lastCommittedSeasonId: chainState.lastReconciledSeasonId,
+    },
+    battles: rebasedBattles,
+    maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+    maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
+    characterIdHex: chainState.chainCharacterIdHex!,
+  });
+
+  for (const draft of drafts) {
+    await prisma.settlementBatch.createSealed(batchDraftToCreateInput(args.characterId, draft));
+  }
+
+  return true;
+}
+
 async function dryRunPayloadAgainstLiveEnvelope(args: {
   connection: Connection;
   commitment?: Commitment;
@@ -128,7 +283,8 @@ export async function loadOrSealNextSettlementBatchForCharacter(
   const programId = deps.programId ?? resolveRunanaProgramId();
   const now = (deps.now ?? (() => new Date()))();
 
-  const chainState = toRequiredChainState(characterId, await prisma.character.findChainState(characterId));
+  const fullChainState = await prisma.character.findChainState(characterId);
+  const chainState = toRequiredChainState(characterId, fullChainState);
   const existingBatch = await prisma.settlementBatch.findNextUnconfirmedForCharacter(characterId);
 
   if (existingBatch !== null) {
@@ -149,6 +305,41 @@ export async function loadOrSealNextSettlementBatchForCharacter(
       dryRunResult: dryRun.dryRunResult,
       validationContext: dryRun.validationContext,
       wasExistingBatch: true,
+    };
+  }
+
+  const didMaterializeInitialBacklog = await materializeInitialSettlementBacklog({
+    characterId,
+    chainState: fullChainState,
+    connection,
+    commitment,
+    programId,
+    now,
+  });
+  if (didMaterializeInitialBacklog) {
+    const initialBatch = await prisma.settlementBatch.findNextUnconfirmedForCharacter(characterId);
+    assertCondition(
+      initialBatch !== null,
+      'ERR_INITIAL_SETTLEMENT_BATCH_MISSING',
+      'initial settlement materialization did not create a retrievable batch',
+    );
+    const payload = settlementBatchRecordToPayload(initialBatch, chainState.chainCharacterIdHex);
+    const dryRun = await dryRunPayloadAgainstLiveEnvelope({
+      connection,
+      commitment,
+      programId,
+      payload,
+      playerAuthorityPubkey: chainState.playerAuthorityPubkey,
+      characterRootPubkey: chainState.characterRootPubkey,
+      now,
+    });
+
+    return {
+      batch: initialBatch,
+      payload,
+      dryRunResult: dryRun.dryRunResult,
+      validationContext: dryRun.validationContext,
+      wasExistingBatch: false,
     };
   }
 

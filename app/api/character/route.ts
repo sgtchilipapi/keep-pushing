@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { deriveCharacterSyncState } from '../../../lib/characterSync';
 import { prisma } from '../../../lib/prisma';
 
 export async function GET(request: Request) {
@@ -23,6 +24,24 @@ export async function GET(request: Request) {
     prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
   ]);
 
+  const syncState = deriveCharacterSyncState({
+    chain:
+      chainState === null
+        ? null
+        : {
+            chainCreationStatus: chainState.chainCreationStatus,
+            lastReconciledBatchId: chainState.lastReconciledBatchId,
+          },
+    latestBattleSettlementStatus: latestBattle?.settlementStatus ?? null,
+    nextSettlementBatch:
+      nextSettlementBatch === null
+        ? null
+        : {
+            batchId: nextSettlementBatch.batchId,
+            status: nextSettlementBatch.status,
+          },
+  });
+
   return NextResponse.json({
     character: {
       characterId: character.id,
@@ -30,6 +49,8 @@ export async function GET(request: Request) {
       name: character.name,
       level: character.level,
       exp: character.exp,
+      syncPhase: syncState.syncPhase,
+      battleEligible: syncState.battleEligible,
       stats: {
         hp: character.hp,
         hpMax: character.hpMax,

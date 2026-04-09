@@ -4,7 +4,7 @@ import type { CharacterReadModel } from '../../types/api/frontend';
 
 export type PanelTone = 'neutral' | 'warning' | 'success' | 'danger' | 'info';
 
-export type SyncMode = 'first_sync' | 'settlement' | null;
+export type SyncMode = 'create_then_settle' | 'settlement' | null;
 
 export interface SyncPanelState {
   season: number | null;
@@ -48,49 +48,49 @@ export function resolveEffectiveSeason(character: CharacterReadModel): number | 
 }
 
 export function resolveSyncPanelState(character: CharacterReadModel): SyncPanelState {
-  const chainStatus = character.chain?.chainCreationStatus ?? 'NOT_STARTED';
-  const latestSettlementStatus = character.latestBattle?.settlementStatus ?? null;
-  const hasFirstSyncBacklog =
-    latestSettlementStatus === 'AWAITING_FIRST_SYNC' ||
-    latestSettlementStatus === 'SEALED' ||
-    chainStatus === 'PENDING' ||
-    chainStatus === 'FAILED';
-  const hasConfirmedSettlementBacklog =
-    latestSettlementStatus === 'PENDING' ||
-    latestSettlementStatus === 'SEALED' ||
-    character.nextSettlementBatch !== null;
-
-  if (chainStatus === 'CONFIRMED' && hasConfirmedSettlementBacklog) {
-    return {
-      season: resolveEffectiveSeason(character),
-      statusLabel: 'PENDING',
-      statusTone: 'warning',
-      syncMode: 'settlement',
-    };
+  switch (character.syncPhase) {
+    case 'LOCAL_ONLY':
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'LOCAL ONLY',
+        statusTone: 'neutral',
+        syncMode: 'create_then_settle',
+      };
+    case 'CREATING_ON_CHAIN':
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'CREATING',
+        statusTone: 'info',
+        syncMode: null,
+      };
+    case 'INITIAL_SETTLEMENT_REQUIRED':
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'FIRST BATCH REQUIRED',
+        statusTone: 'warning',
+        syncMode: 'settlement',
+      };
+    case 'SETTLEMENT_PENDING':
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'PENDING',
+        statusTone: 'warning',
+        syncMode: 'settlement',
+      };
+    case 'FAILED':
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'FAILED',
+        statusTone: 'danger',
+        syncMode: 'create_then_settle',
+      };
+    case 'SYNCED':
+    default:
+      return {
+        season: resolveEffectiveSeason(character),
+        statusLabel: 'CONFIRMED',
+        statusTone: 'success',
+        syncMode: null,
+      };
   }
-
-  if (chainStatus === 'CONFIRMED') {
-    return {
-      season: resolveEffectiveSeason(character),
-      statusLabel: 'CONFIRMED',
-      statusTone: 'success',
-      syncMode: null,
-    };
-  }
-
-  if (hasFirstSyncBacklog) {
-    return {
-      season: resolveEffectiveSeason(character),
-      statusLabel: chainStatus === 'FAILED' ? 'FAILED' : 'PENDING',
-      statusTone: chainStatus === 'FAILED' ? 'danger' : 'warning',
-      syncMode: 'first_sync',
-    };
-  }
-
-  return {
-    season: resolveEffectiveSeason(character),
-    statusLabel: chainStatus,
-    statusTone: chainStatus === 'SUBMITTED' ? 'info' : 'neutral',
-    syncMode: null,
-  };
 }

@@ -167,17 +167,26 @@ function buildCharacterCreationRelayMetadata(
   assertNonEmptyString(request.chainCharacterIdHex, "chainCharacterIdHex");
   assertNonEmptyString(request.characterRootPubkey, "characterRootPubkey");
   assertNonEmptyString(request.recentBlockhash, "recentBlockhash");
-  assertInteger(request.characterCreationTs, "characterCreationTs", 0);
-  assertInteger(request.seasonIdAtCreation, "seasonIdAtCreation", 0);
   assertInteger(request.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
   assertInteger(request.lastValidBlockHeight, "lastValidBlockHeight", 0);
+
+  if (request.characterCreationTs !== undefined) {
+    assertInteger(request.characterCreationTs, "characterCreationTs", 0);
+  }
+  if (request.seasonIdAtCreation !== undefined) {
+    assertInteger(request.seasonIdAtCreation, "seasonIdAtCreation", 0);
+  }
 
   return {
     localCharacterId: request.localCharacterId,
     chainCharacterIdHex: request.chainCharacterIdHex,
     characterRootPubkey: request.characterRootPubkey,
-    characterCreationTs: request.characterCreationTs,
-    seasonIdAtCreation: request.seasonIdAtCreation,
+    ...(request.characterCreationTs !== undefined
+      ? { characterCreationTs: request.characterCreationTs }
+      : {}),
+    ...(request.seasonIdAtCreation !== undefined
+      ? { seasonIdAtCreation: request.seasonIdAtCreation }
+      : {}),
     initialUnlockedZoneId: request.initialUnlockedZoneId,
     recentBlockhash: request.recentBlockhash,
     lastValidBlockHeight: request.lastValidBlockHeight,
@@ -297,12 +306,6 @@ export function acceptSignedPlayerOwnedTransaction(
 ): SubmittedPlayerOwnedTransaction {
   assertNonEmptyString(request.signedMessageBase64, "signedMessageBase64");
   assertNonEmptyString(request.signedTransactionBase64, "signedTransactionBase64");
-
-  if (request.signedMessageBase64 !== request.prepared.serializedMessageBase64) {
-    throw new Error(
-      "ERR_SIGNED_MESSAGE_MISMATCH: signed submission does not match the prepared message bytes",
-    );
-  }
 
   return {
     kind: request.prepared.kind,

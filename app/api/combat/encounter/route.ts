@@ -18,6 +18,7 @@ function statusForError(message: string): number {
   if (
     message.startsWith('ERR_CHARACTER_NOT_CONFIRMED') ||
     message.startsWith('ERR_CHARACTER_CURSOR_UNAVAILABLE') ||
+    message.startsWith('ERR_INITIAL_SETTLEMENT_REQUIRED') ||
     message.startsWith('ERR_ZONE_LOCKED') ||
     message.startsWith('ERR_SEASON_NOT_ACTIVE') ||
     message.startsWith('ERR_ACTIVE_SEASON_UNRESOLVED')

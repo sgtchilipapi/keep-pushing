@@ -1,4 +1,4 @@
-import { Keypair, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import { Keypair, Transaction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 
 import {
   base64ToBytes,
@@ -101,6 +101,109 @@ describe('phantomBrowser helpers', () => {
         connect: async () => ({ publicKey: { toBase58: () => 'wallet' } }),
         disconnect: async () => undefined,
         signMessage: async () => ({ publicKey: { toBase58: () => 'wallet' }, signature }),
+        signTransaction,
+      },
+      prepared,
+    );
+
+    expect(signTransaction).toHaveBeenCalledTimes(1);
+    expect(result.signedMessageBase64).toBe(prepared.serializedMessageBase64);
+    expect(result.signedTransactionBase64).not.toBe(prepared.serializedTransactionBase64);
+  });
+
+  it('accepts versioned transactions returned from Phantom without relying on instanceof checks', async () => {
+    const payer = Keypair.generate();
+    const versionedTransaction = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: '11111111111111111111111111111111',
+        instructions: [],
+      }).compileToV0Message(),
+    );
+
+    const prepared = {
+      kind: 'battle_settlement',
+      authority: 'authority',
+      feePayer: 'authority',
+      serializedMessageBase64: bytesToBase64(versionedTransaction.message.serialize()),
+      serializedTransactionBase64: bytesToBase64(versionedTransaction.serialize()),
+      messageSha256Hex: 'abc',
+      requiresPlayerSignature: true,
+      serverBroadcast: true,
+    } satisfies PreparedPlayerOwnedTransaction;
+
+    const signTransaction = jest.fn(async () => ({
+      message: {
+        serialize: () => versionedTransaction.message.serialize(),
+      },
+      serialize: () => versionedTransaction.serialize(),
+    }));
+
+    const result = await signPreparedPlayerOwnedTransaction(
+      {
+        isPhantom: true,
+        publicKey: { toBase58: () => 'wallet' },
+        connect: async () => ({ publicKey: { toBase58: () => 'wallet' } }),
+        disconnect: async () => undefined,
+        signMessage: async () => ({ publicKey: { toBase58: () => 'wallet' }, signature: new Uint8Array(64) }),
+        signTransaction: signTransaction as never,
+      },
+      prepared,
+    );
+
+    expect(signTransaction).toHaveBeenCalledTimes(1);
+    expect(result.signedMessageBase64).toBe(prepared.serializedMessageBase64);
+    expect(result.signedTransactionBase64).toBe(prepared.serializedTransactionBase64);
+  });
+
+  it('signs a prepared legacy transaction and returns matching legacy message bytes', async () => {
+    const payer = Keypair.generate();
+    const transaction = new Transaction({
+      feePayer: payer.publicKey,
+      blockhash: '11111111111111111111111111111111',
+      lastValidBlockHeight: 42,
+    });
+
+    const prepared = {
+      kind: 'character_create',
+      authority: 'authority',
+      feePayer: 'authority',
+      serializedMessageBase64: bytesToBase64(transaction.serializeMessage()),
+      serializedTransactionBase64: bytesToBase64(
+        transaction.serialize({
+          requireAllSignatures: false,
+          verifySignatures: false,
+        }),
+      ),
+      messageSha256Hex: 'abc',
+      requiresPlayerSignature: true,
+      serverBroadcast: true,
+    } satisfies PreparedPlayerOwnedTransaction;
+
+    const signed = new Transaction({
+      feePayer: payer.publicKey,
+      blockhash: '11111111111111111111111111111111',
+      lastValidBlockHeight: 42,
+    });
+    signed.signatures = [
+      {
+        publicKey: payer.publicKey,
+        signature: Buffer.from(new Uint8Array(64).fill(9)),
+      },
+    ];
+
+    const signTransaction = jest.fn(async () => signed);
+
+    const result = await signPreparedPlayerOwnedTransaction(
+      {
+        isPhantom: true,
+        publicKey: { toBase58: () => payer.publicKey.toBase58() },
+        connect: async () => ({ publicKey: { toBase58: () => payer.publicKey.toBase58() } }),
+        disconnect: async () => undefined,
+        signMessage: async () => ({
+          publicKey: { toBase58: () => payer.publicKey.toBase58() },
+          signature: new Uint8Array(64),
+        }),
         signTransaction,
       },
       prepared,

@@ -1,6 +1,10 @@
-import { VersionedTransaction } from '@solana/web3.js';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import type { PreparedPlayerOwnedTransaction } from '../../types/api/solana';
+import {
+  deserializeLegacyOrVersionedTransactionBase64,
+  serializeLegacyOrVersionedTransactionMessageBase64,
+} from './playerOwnedV0Transactions';
 
 export type WalletAvailability = 'unknown' | 'installed' | 'not_installed';
 export type WalletConnectionStatus = 'checking_trusted' | 'disconnected' | 'connecting' | 'connected';
@@ -25,7 +29,9 @@ export interface PhantomSolanaProvider {
   connect(options?: PhantomConnectOptions): Promise<{ publicKey: PhantomPublicKeyLike }>;
   disconnect(): Promise<void>;
   signMessage(message: Uint8Array, display?: 'utf8' | 'hex'): Promise<PhantomMessageSignature>;
-  signTransaction(transaction: VersionedTransaction): Promise<VersionedTransaction>;
+  signTransaction(
+    transaction: Transaction | VersionedTransaction,
+  ): Promise<Transaction | VersionedTransaction>;
   on?(event: 'connect' | 'disconnect' | 'accountChanged', handler: (...args: unknown[]) => void): void;
   removeListener?(event: 'connect' | 'disconnect' | 'accountChanged', handler: (...args: unknown[]) => void): void;
 }
@@ -161,14 +167,22 @@ export async function signPreparedPlayerOwnedTransaction(
   signedMessageBase64: string;
   signedTransactionBase64: string;
 }> {
-  const transactionBytes = base64ToBytes(prepared.serializedTransactionBase64);
-  const transaction = VersionedTransaction.deserialize(transactionBytes);
+  const transaction = deserializeLegacyOrVersionedTransactionBase64(
+    prepared.serializedTransactionBase64,
+  );
   const signedTransaction = await provider.signTransaction(transaction);
-  const signedMessageBytes = signedTransaction.message.serialize();
-  const signedTransactionBytes = signedTransaction.serialize();
+  const signedMessageBase64 = serializeLegacyOrVersionedTransactionMessageBase64(signedTransaction);
+  const maybeLegacy = signedTransaction as Transaction & { serializeMessage?: unknown };
+  const signedTransactionBytes =
+    typeof maybeLegacy.serializeMessage === 'function'
+      ? maybeLegacy.serialize({
+          requireAllSignatures: false,
+          verifySignatures: false,
+        })
+      : (signedTransaction as VersionedTransaction).serialize();
 
   return {
-    signedMessageBase64: bytesToBase64(signedMessageBytes),
+    signedMessageBase64,
     signedTransactionBase64: bytesToBase64(signedTransactionBytes),
   };
 }

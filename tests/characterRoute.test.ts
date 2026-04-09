@@ -100,6 +100,8 @@ describe('GET /api/character', () => {
     expect(response.status).toBe(200);
     expect(json.character.characterId).toBe('character-1');
     expect(json.character.chain.chainCreationStatus).toBe('PENDING');
+    expect(json.character.syncPhase).toBe('CREATING_ON_CHAIN');
+    expect(json.character.battleEligible).toBe(false);
     expect(json.character.provisionalProgress.highestUnlockedZoneId).toBe(2);
     expect(json.character.latestBattle.settlementStatus).toBe('AWAITING_FIRST_SYNC');
     expect(json.character.nextSettlementBatch.batchId).toBe(1);

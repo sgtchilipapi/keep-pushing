@@ -1,32 +1,30 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
 
 import type {
-  FirstSyncPreparedPhase,
-  FirstSyncPreparationBase,
+  PrepareCharacterCreationRouteResponse,
   SettlementPreparedPhase,
   SettlementPreparationBase,
-} from '../../types/api/solana';
+  SubmitCharacterCreationRouteResponse,
+} from "../../types/api/solana";
 import type {
   AnonymousUserResponse,
-  ChainCreationStatus,
   CharacterQueryResponse,
   CharacterReadModel,
   CreateCharacterResponse,
   EncounterResponse,
-  FirstSyncPrepareResponse,
   SettlementPrepareResponse,
-} from '../../types/api/frontend';
-import BattleReplay from '../BattleReplay';
-import StatusBadge from './StatusBadge';
-import styles from './game-shell.module.css';
+} from "../../types/api/frontend";
+import BattleReplay from "../BattleReplay";
+import StatusBadge from "./StatusBadge";
+import styles from "./game-shell.module.css";
 import {
   resolveEffectiveSeason,
   resolvePassiveNames,
   resolveSkillNames,
   resolveSyncPanelState,
-} from './uiModel';
+} from "./uiModel";
 import {
   connectPhantom,
   disconnectPhantom,
@@ -38,35 +36,45 @@ import {
   type WalletActionStatus,
   type WalletAvailability,
   type WalletConnectionStatus,
-} from '../../lib/solana/phantomBrowser';
+} from "../../lib/solana/phantomBrowser";
 
-const USER_STORAGE_KEY = 'keep-pushing:user-id';
-const PHANTOM_INSTALL_URL = 'https://phantom.app/download';
+const USER_STORAGE_KEY = "keep-pushing:user-id";
+const PHANTOM_INSTALL_URL = "https://phantom.app/download";
 
-type AppPhase = 'bootstrapping_user' | 'loading_character' | 'ready' | 'fatal_error';
+type AppPhase =
+  | "bootstrapping_user"
+  | "loading_character"
+  | "ready"
+  | "fatal_error";
 
 type ApiErrorShape = {
   error?: string;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
-async function apiRequest<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+async function apiRequest<T>(
+  input: RequestInfo,
+  init?: RequestInit,
+): Promise<T> {
   const response = await fetch(input, {
     ...init,
     headers: {
-      'content-type': 'application/json',
+      "content-type": "application/json",
       ...(init?.headers ?? {}),
     },
   });
 
-  const data = (await response.json().catch(() => null)) as T | ApiErrorShape | null;
+  const data = (await response.json().catch(() => null)) as
+    | T
+    | ApiErrorShape
+    | null;
 
   if (!response.ok) {
     const message =
-      isObject(data) && typeof data.error === 'string'
+      isObject(data) && typeof data.error === "string"
         ? data.error
         : `Request failed with status ${response.status}`;
     throw new Error(message);
@@ -77,7 +85,7 @@ async function apiRequest<T>(input: RequestInfo, init?: RequestInit): Promise<T>
 
 function formatDateTime(value: string | null): string {
   if (!value) {
-    return 'Not available';
+    return "Not available";
   }
 
   const date = new Date(value);
@@ -86,7 +94,7 @@ function formatDateTime(value: string | null): string {
 
 function formatUnixTimestamp(value: number | null): string {
   if (value === null) {
-    return 'Not available';
+    return "Not available";
   }
 
   return new Date(value * 1000).toLocaleString();
@@ -94,7 +102,7 @@ function formatUnixTimestamp(value: number | null): string {
 
 function truncateMiddle(value: string | null | undefined, edge = 8): string {
   if (!value) {
-    return 'Not available';
+    return "Not available";
   }
 
   if (value.length <= edge * 2 + 3) {
@@ -104,107 +112,80 @@ function truncateMiddle(value: string | null | undefined, edge = 8): string {
   return `${value.slice(0, edge)}...${value.slice(-edge)}`;
 }
 
-function chainTone(status: ChainCreationStatus | 'NOT_STARTED'): 'neutral' | 'warning' | 'success' | 'danger' | 'info' {
+function settlementTone(
+  status: string | null | undefined,
+): "neutral" | "warning" | "success" | "danger" | "info" {
   switch (status) {
-    case 'CONFIRMED':
-      return 'success';
-    case 'FAILED':
-      return 'danger';
-    case 'SUBMITTED':
-      return 'info';
-    case 'PENDING':
-      return 'warning';
-    case 'NOT_STARTED':
+    case "COMMITTED":
+    case "CONFIRMED":
+      return "success";
+    case "FAILED":
+    case "LOCAL_ONLY_ARCHIVED":
+      return "danger";
+    case "SUBMITTED":
+      return "info";
+    case "AWAITING_FIRST_SYNC":
+    case "SEALED":
+    case "PENDING":
+    case "PREPARED":
+      return "warning";
     default:
-      return 'neutral';
+      return "neutral";
   }
 }
 
-function settlementTone(status: string | null | undefined): 'neutral' | 'warning' | 'success' | 'danger' | 'info' {
+function walletAvailabilityTone(
+  status: WalletAvailability,
+): "neutral" | "warning" | "success" {
   switch (status) {
-    case 'COMMITTED':
-    case 'CONFIRMED':
-      return 'success';
-    case 'FAILED':
-    case 'LOCAL_ONLY_ARCHIVED':
-      return 'danger';
-    case 'SUBMITTED':
-      return 'info';
-    case 'AWAITING_FIRST_SYNC':
-    case 'SEALED':
-    case 'PENDING':
-    case 'PREPARED':
-      return 'warning';
+    case "installed":
+      return "success";
+    case "not_installed":
+      return "warning";
+    case "unknown":
     default:
-      return 'neutral';
+      return "neutral";
   }
 }
 
-function walletAvailabilityTone(status: WalletAvailability): 'neutral' | 'warning' | 'success' {
+function walletConnectionTone(
+  status: WalletConnectionStatus,
+): "neutral" | "warning" | "success" | "info" {
   switch (status) {
-    case 'installed':
-      return 'success';
-    case 'not_installed':
-      return 'warning';
-    case 'unknown':
+    case "connected":
+      return "success";
+    case "connecting":
+    case "checking_trusted":
+      return "info";
+    case "disconnected":
     default:
-      return 'neutral';
-  }
-}
-
-function walletConnectionTone(status: WalletConnectionStatus): 'neutral' | 'warning' | 'success' | 'info' {
-  switch (status) {
-    case 'connected':
-      return 'success';
-    case 'connecting':
-    case 'checking_trusted':
-      return 'info';
-    case 'disconnected':
-    default:
-      return 'neutral';
+      return "neutral";
   }
 }
 
 function walletActionLabel(status: WalletActionStatus): string | null {
   switch (status) {
-    case 'signing_message':
-      return 'Signing message';
-    case 'signing_transaction':
-      return 'Signing transaction';
-    case 'idle':
+    case "signing_message":
+      return "Signing message";
+    case "signing_transaction":
+      return "Signing transaction";
+    case "idle":
     default:
       return null;
   }
 }
 
-function primaryActionLabel(character: CharacterReadModel): string {
-  const chainStatus = character.chain?.chainCreationStatus ?? 'NOT_STARTED';
-
-  if (chainStatus !== 'CONFIRMED') {
-    if (
-      character.latestBattle?.settlementStatus === 'AWAITING_FIRST_SYNC' ||
-      character.latestBattle?.settlementStatus === 'SEALED' ||
-      chainStatus === 'PENDING' ||
-      chainStatus === 'FAILED'
-    ) {
-      return 'Sync to Chain';
-    }
-
-    return 'Battle';
-  }
-
-  if (character.nextSettlementBatch !== null) {
-    return 'Settle Pending Batch';
-  }
-
-  return 'Battle';
-}
-
 function maxUnlockedZone(character: CharacterReadModel | null): number {
-  return Math.max(1, character?.provisionalProgress?.highestUnlockedZoneId ?? 1);
+  return Math.max(
+    1,
+    character?.provisionalProgress?.highestUnlockedZoneId ?? 1,
+  );
 }
 
-function authorityMismatchMessage(character: CharacterReadModel, walletPublicKey: string | null): string | null {
+function authorityMismatchMessage(
+  character: CharacterReadModel,
+  walletPublicKey: string | null,
+): string | null {
   const expectedAuthority = character.chain?.playerAuthorityPubkey;
   if (!expectedAuthority || !walletPublicKey) {
     return null;
@@ -232,8 +213,8 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
         <div className={styles.stack}>
           <h2 className={styles.panelTitle}>Create your first character</h2>
           <p className={styles.panelText}>
-            This project starts local-first. You can create a character and battle immediately, then
-            sync the backlog on chain later.
+            Create the local character first, then use Phantom to create the
+            matching on-chain character before battles begin.
           </p>
         </div>
       </div>
@@ -251,7 +232,9 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
           />
         </label>
 
-        {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
+        {props.error ? (
+          <div className={styles.errorBox}>{props.error}</div>
+        ) : null}
 
         <div className={styles.buttonRow}>
           <button
@@ -260,7 +243,7 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
             onClick={props.onSubmit}
             disabled={props.pending}
           >
-            {props.pending ? 'Creating Character...' : 'Create Character'}
+            {props.pending ? "Creating Character..." : "Create Character"}
           </button>
         </div>
       </div>
@@ -285,11 +268,11 @@ type WalletToolbarProps = {
 function WalletToolbar(props: WalletToolbarProps) {
   const actionLabel = walletActionLabel(props.actionStatus);
   const walletStatusLabel =
-    props.connectionStatus === 'connected'
+    props.connectionStatus === "connected"
       ? `Wallet ${truncateMiddle(props.publicKey)}`
-      : props.availability === 'installed'
-        ? 'Wallet disconnected'
-        : 'Phantom not installed';
+      : props.availability === "installed"
+        ? "Wallet disconnected"
+        : "Phantom not installed";
 
   return (
     <div className={styles.menuWrap}>
@@ -299,8 +282,8 @@ function WalletToolbar(props: WalletToolbarProps) {
           <StatusBadge
             label={walletStatusLabel}
             tone={
-              props.connectionStatus === 'connected'
-                ? 'success'
+              props.connectionStatus === "connected"
+                ? "success"
                 : walletAvailabilityTone(props.availability)
             }
           />
@@ -311,20 +294,29 @@ function WalletToolbar(props: WalletToolbarProps) {
           <div className={styles.keyValueGrid}>
             <div className={styles.keyValueItem}>
               <span className={styles.keyLabel}>User</span>
-              <span className={styles.keyValue}>{truncateMiddle(props.userId)}</span>
+              <span className={styles.keyValue}>
+                {truncateMiddle(props.userId)}
+              </span>
             </div>
             <div className={styles.keyValueItem}>
               <span className={styles.keyLabel}>Wallet</span>
-              <span className={styles.keyValue}>{truncateMiddle(props.publicKey)}</span>
+              <span className={styles.keyValue}>
+                {truncateMiddle(props.publicKey)}
+              </span>
             </div>
           </div>
 
           <div className={styles.buttonRow}>
-            {props.availability === 'not_installed' ? (
-              <a className={styles.button} href={PHANTOM_INSTALL_URL} target="_blank" rel="noreferrer">
+            {props.availability === "not_installed" ? (
+              <a
+                className={styles.button}
+                href={PHANTOM_INSTALL_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
                 Install Phantom
               </a>
-            ) : props.connectionStatus === 'connected' ? (
+            ) : props.connectionStatus === "connected" ? (
               <button
                 type="button"
                 className={styles.button}
@@ -338,9 +330,11 @@ function WalletToolbar(props: WalletToolbarProps) {
                 type="button"
                 className={styles.button}
                 onClick={() => void props.onConnect()}
-                disabled={props.pending || props.availability !== 'installed'}
+                disabled={props.pending || props.availability !== "installed"}
               >
-                {props.connectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+                {props.connectionStatus === "connecting"
+                  ? "Connecting..."
+                  : "Connect Phantom"}
               </button>
             )}
 
@@ -356,281 +350,10 @@ function WalletToolbar(props: WalletToolbarProps) {
         </div>
       </details>
 
-      {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
+      {props.error ? (
+        <div className={styles.errorBox}>{props.error}</div>
+      ) : null}
     </div>
-  );
-}
-
-type FirstSyncPanelProps = {
-  character: CharacterReadModel;
-  walletAvailability: WalletAvailability;
-  walletConnectionStatus: WalletConnectionStatus;
-  walletActionStatus: WalletActionStatus;
-  walletPublicKey: string | null;
-  onConnectWallet: () => Promise<void>;
-  setWalletActionStatus: (status: WalletActionStatus) => void;
-  onRefresh: () => Promise<void>;
-};
-
-function FirstSyncPanel(props: FirstSyncPanelProps) {
-  const [authorizeData, setAuthorizeData] = useState<FirstSyncPreparationBase | null>(null);
-  const [preparedData, setPreparedData] = useState<FirstSyncPreparedPhase | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [preparePending, setPreparePending] = useState(false);
-  const [submitPending, setSubmitPending] = useState(false);
-
-  const chainStatus = props.character.chain?.chainCreationStatus ?? 'NOT_STARTED';
-  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
-  const buttonPending = preparePending || submitPending || props.walletConnectionStatus === 'connecting';
-
-  useEffect(() => {
-    setAuthorizeData(null);
-    setPreparedData(null);
-    setError(null);
-    setSuccess(null);
-  }, [props.character.characterId, props.character.chain?.chainCreationStatus, props.walletPublicKey]);
-
-  async function prepareAuthorize() {
-    if (!props.walletPublicKey) {
-      setError('Connect Phantom before preparing first sync.');
-      return;
-    }
-
-    setPreparePending(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const response = await apiRequest<FirstSyncPrepareResponse>('/api/solana/character/first-sync/prepare', {
-        method: 'POST',
-        body: JSON.stringify({
-          characterId: props.character.characterId,
-          authority: props.walletPublicKey,
-          feePayer: props.walletPublicKey,
-        }),
-      });
-
-      if (response.phase !== 'authorize') {
-        throw new Error('Unexpected prepare response: expected authorize phase.');
-      }
-
-      setAuthorizeData(response);
-      setPreparedData(null);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to prepare first sync.');
-    } finally {
-      setPreparePending(false);
-    }
-  }
-
-  async function signAuthorization() {
-    if (authorizeData === null) {
-      setError('Prepare authorization before requesting a Phantom signature.');
-      return;
-    }
-
-    const provider = getPhantomProvider();
-    if (provider === null) {
-      setError('Phantom wallet is not installed.');
-      return;
-    }
-
-    setPreparePending(true);
-    setError(null);
-    setSuccess(null);
-    props.setWalletActionStatus('signing_message');
-
-    try {
-      if (authorizeData.payload.signatureScheme !== 1) {
-        throw new Error(
-          'This pending first-sync batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or prepare a fresh wallet-text batch.',
-        );
-      }
-      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
-        provider,
-        authorizeData.playerAuthorizationMessageUtf8,
-      );
-      const response = await apiRequest<FirstSyncPrepareResponse>('/api/solana/character/first-sync/prepare', {
-        method: 'POST',
-        body: JSON.stringify({
-          characterId: props.character.characterId,
-          authority: props.walletPublicKey,
-          feePayer: props.walletPublicKey,
-          playerAuthorizationSignatureBase64,
-        }),
-      });
-
-      if (response.phase !== 'sign_transaction') {
-        throw new Error('Unexpected prepare response: expected sign_transaction phase.');
-      }
-
-      setAuthorizeData(response);
-      setPreparedData(response);
-    } catch (nextError) {
-      setError(normalizeWalletError(nextError));
-    } finally {
-      props.setWalletActionStatus('idle');
-      setPreparePending(false);
-    }
-  }
-
-  async function signAndSubmit() {
-    if (preparedData === null) {
-      setError('Prepare the transaction before requesting a Phantom signature.');
-      return;
-    }
-
-    const provider = getPhantomProvider();
-    if (provider === null) {
-      setError('Phantom wallet is not installed.');
-      return;
-    }
-
-    setSubmitPending(true);
-    setError(null);
-    setSuccess(null);
-    props.setWalletActionStatus('signing_transaction');
-
-    try {
-      const signed = await signPreparedPlayerOwnedTransaction(provider, preparedData.preparedTransaction);
-      const response = await apiRequest<{
-        transactionSignature: string;
-        chainCharacterIdHex: string;
-        characterRootPubkey: string;
-      }>('/api/solana/character/first-sync/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          prepared: preparedData.preparedTransaction,
-          signedMessageBase64: signed.signedMessageBase64,
-          signedTransactionBase64: signed.signedTransactionBase64,
-        }),
-      });
-
-      setSuccess(
-        `First sync confirmed. Tx ${truncateMiddle(response.transactionSignature)} | Character ${truncateMiddle(response.characterRootPubkey)}`,
-      );
-      setAuthorizeData(null);
-      setPreparedData(null);
-      await props.onRefresh();
-    } catch (nextError) {
-      setError(normalizeWalletError(nextError));
-    } finally {
-      props.setWalletActionStatus('idle');
-      setSubmitPending(false);
-    }
-  }
-
-  return (
-    <section className={styles.panel}>
-      <div className={styles.panelTitleRow}>
-        <div className={styles.stack}>
-          <h2 className={styles.panelTitle}>First Sync</h2>
-          <p className={styles.panelText}>
-            Use Phantom to authorize and sign the atomic first-sync transaction that creates the
-            character on chain and commits the first deferred settlement batch.
-          </p>
-        </div>
-        <StatusBadge label={chainStatus} tone={chainTone(chainStatus)} />
-      </div>
-
-      <div className={styles.formGrid}>
-        {props.walletAvailability === 'not_installed' ? (
-          <div className={styles.infoBox}>
-            Phantom is required for first sync. Install the browser extension, refresh the page, and
-            connect the wallet you want to bind to this character.
-          </div>
-        ) : null}
-
-        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
-
-        <div className={styles.keyValueGrid}>
-          <div className={styles.keyValueItem}>
-            <span className={styles.keyLabel}>Wallet authority</span>
-            <span className={styles.keyValue}>{truncateMiddle(props.walletPublicKey)}</span>
-          </div>
-          <div className={styles.keyValueItem}>
-            <span className={styles.keyLabel}>Latest battle status</span>
-            <span className={styles.keyValue}>{props.character.latestBattle?.settlementStatus ?? 'No battle yet'}</span>
-          </div>
-        </div>
-
-        {props.walletConnectionStatus !== 'connected' ? (
-          <div className={styles.buttonRow}>
-            <button
-              type="button"
-              className={`${styles.button} ${styles.buttonPrimary}`}
-              onClick={() => void props.onConnectWallet()}
-              disabled={buttonPending || props.walletAvailability !== 'installed'}
-            >
-              {props.walletConnectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
-            </button>
-          </div>
-        ) : mismatchMessage ? null : preparedData ? (
-          <div className={styles.buttonRow}>
-            <button
-              type="button"
-              className={`${styles.button} ${styles.buttonPrimary}`}
-              onClick={() => void signAndSubmit()}
-              disabled={buttonPending}
-            >
-              {submitPending ? 'Submitting...' : 'Sign And Submit First Sync'}
-            </button>
-          </div>
-        ) : authorizeData ? (
-          <>
-            <div className={styles.infoBox}>
-              Phase 1 is ready. Phantom will now sign the authorization message and the app will ask
-              the backend to build the final transaction payload.
-            </div>
-            <div className={styles.keyValueGrid}>
-              <div className={styles.keyValueItem}>
-                <span className={styles.keyLabel}>Batch ID</span>
-                <span className={styles.keyValue}>{authorizeData.payload.batchId}</span>
-              </div>
-              <div className={styles.keyValueItem}>
-                <span className={styles.keyLabel}>Battle count</span>
-                <span className={styles.keyValue}>{authorizeData.payload.battleCount}</span>
-              </div>
-              <div className={styles.keyValueItem}>
-                <span className={styles.keyLabel}>Season</span>
-                <span className={styles.keyValue}>{authorizeData.payload.seasonId}</span>
-              </div>
-              <div className={styles.keyValueItem}>
-                <span className={styles.keyLabel}>Batch hash</span>
-                <span className={styles.keyValue}>{truncateMiddle(authorizeData.permitDomain.batchHash, 12)}</span>
-              </div>
-            </div>
-            <div className={styles.buttonRow}>
-              <button type="button" className={styles.button} onClick={() => void signAuthorization()} disabled={buttonPending}>
-                {preparePending ? 'Requesting Signature...' : 'Sign Authorization'}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className={styles.buttonRow}>
-            <button
-              type="button"
-              className={`${styles.button} ${styles.buttonPrimary}`}
-              onClick={() => void prepareAuthorize()}
-              disabled={buttonPending || !props.walletPublicKey}
-            >
-              {preparePending ? 'Preparing...' : 'Prepare First Sync'}
-            </button>
-          </div>
-        )}
-
-        {preparedData ? (
-          <div className={styles.successBox}>
-            Transaction prepared. Phantom will sign the versioned transaction and the app will submit
-            it to the backend broadcaster.
-          </div>
-        ) : null}
-
-        {error ? <div className={styles.errorBox}>{error}</div> : null}
-        {success ? <div className={styles.successBox}>{success}</div> : null}
-      </div>
-    </section>
   );
 }
 
@@ -642,27 +365,39 @@ type SettlementPanelProps = {
   walletPublicKey: string | null;
   onConnectWallet: () => Promise<void>;
   setWalletActionStatus: (status: WalletActionStatus) => void;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<CharacterReadModel | null>;
 };
 
 function SettlementPanel(props: SettlementPanelProps) {
-  const [authorizeData, setAuthorizeData] = useState<SettlementPreparationBase | null>(null);
-  const [preparedData, setPreparedData] = useState<SettlementPreparedPhase | null>(null);
+  const [authorizeData, setAuthorizeData] =
+    useState<SettlementPreparationBase | null>(null);
+  const [preparedData, setPreparedData] =
+    useState<SettlementPreparedPhase | null>(null);
   const [submitResult, setSubmitResult] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
   const [preparePending, setPreparePending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
 
   const nextBatch = props.character.nextSettlementBatch;
-  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
-  const buttonPending = preparePending || submitPending || props.walletConnectionStatus === 'connecting';
+  const mismatchMessage = authorityMismatchMessage(
+    props.character,
+    props.walletPublicKey,
+  );
+  const buttonPending =
+    preparePending ||
+    submitPending ||
+    props.walletConnectionStatus === "connecting";
 
   useEffect(() => {
     setAuthorizeData(null);
     setPreparedData(null);
     setSubmitResult(null);
     setError(null);
-  }, [props.character.characterId, props.character.nextSettlementBatch?.settlementBatchId, props.walletPublicKey]);
+  }, [
+    props.character.characterId,
+    props.character.nextSettlementBatch?.settlementBatchId,
+    props.walletPublicKey,
+  ]);
 
   if (nextBatch === null) {
     return null;
@@ -670,7 +405,7 @@ function SettlementPanel(props: SettlementPanelProps) {
 
   async function prepareAuthorize() {
     if (!props.walletPublicKey) {
-      setError('Connect Phantom before preparing settlement.');
+      setError("Connect Phantom before preparing settlement.");
       return;
     }
 
@@ -678,24 +413,33 @@ function SettlementPanel(props: SettlementPanelProps) {
     setError(null);
 
     try {
-      const response = await apiRequest<SettlementPrepareResponse>('/api/solana/settlement/prepare', {
-        method: 'POST',
-        body: JSON.stringify({
-          characterId: props.character.characterId,
-          authority: props.walletPublicKey,
-          feePayer: props.walletPublicKey,
-        }),
-      });
+      const response = await apiRequest<SettlementPrepareResponse>(
+        "/api/solana/settlement/prepare",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            characterId: props.character.characterId,
+            authority: props.walletPublicKey,
+            feePayer: props.walletPublicKey,
+          }),
+        },
+      );
 
-      if (response.phase !== 'authorize') {
-        throw new Error('Unexpected settlement response: expected authorize phase.');
+      if (response.phase !== "authorize") {
+        throw new Error(
+          "Unexpected settlement response: expected authorize phase.",
+        );
       }
 
       setAuthorizeData(response);
       setPreparedData(null);
       setSubmitResult(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to prepare settlement.');
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to prepare settlement.",
+      );
     } finally {
       setPreparePending(false);
     }
@@ -703,42 +447,48 @@ function SettlementPanel(props: SettlementPanelProps) {
 
   async function signAuthorization() {
     if (authorizeData === null) {
-      setError('Prepare authorization before requesting a Phantom signature.');
+      setError("Prepare authorization before requesting a Phantom signature.");
       return;
     }
 
     const provider = getPhantomProvider();
     if (provider === null) {
-      setError('Phantom wallet is not installed.');
+      setError("Phantom wallet is not installed.");
       return;
     }
 
     setPreparePending(true);
     setError(null);
-    props.setWalletActionStatus('signing_message');
+    props.setWalletActionStatus("signing_message");
 
     try {
       if (authorizeData.payload.signatureScheme !== 1) {
         throw new Error(
-          'This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.',
+          "This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.",
         );
       }
-      const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
-        provider,
-        authorizeData.playerAuthorizationMessageUtf8,
+      const playerAuthorizationSignatureBase64 =
+        await signAuthorizationMessageUtf8(
+          provider,
+          authorizeData.playerAuthorizationMessageUtf8,
+        );
+      const response = await apiRequest<SettlementPrepareResponse>(
+        "/api/solana/settlement/prepare",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            characterId: props.character.characterId,
+            authority: props.walletPublicKey,
+            feePayer: props.walletPublicKey,
+            playerAuthorizationSignatureBase64,
+          }),
+        },
       );
-      const response = await apiRequest<SettlementPrepareResponse>('/api/solana/settlement/prepare', {
-        method: 'POST',
-        body: JSON.stringify({
-          characterId: props.character.characterId,
-          authority: props.walletPublicKey,
-          feePayer: props.walletPublicKey,
-          playerAuthorizationSignatureBase64,
-        }),
-      });
 
-      if (response.phase !== 'sign_transaction') {
-        throw new Error('Unexpected settlement response: expected sign_transaction phase.');
+      if (response.phase !== "sign_transaction") {
+        throw new Error(
+          "Unexpected settlement response: expected sign_transaction phase.",
+        );
       }
 
       setAuthorizeData(response);
@@ -747,38 +497,46 @@ function SettlementPanel(props: SettlementPanelProps) {
     } catch (nextError) {
       setError(normalizeWalletError(nextError));
     } finally {
-      props.setWalletActionStatus('idle');
+      props.setWalletActionStatus("idle");
       setPreparePending(false);
     }
   }
 
   async function signAndSubmit() {
     if (preparedData === null) {
-      setError('Prepare the settlement transaction before requesting a Phantom signature.');
+      setError(
+        "Prepare the settlement transaction before requesting a Phantom signature.",
+      );
       return;
     }
 
     const provider = getPhantomProvider();
     if (provider === null) {
-      setError('Phantom wallet is not installed.');
+      setError("Phantom wallet is not installed.");
       return;
     }
 
     setSubmitPending(true);
     setError(null);
-    props.setWalletActionStatus('signing_transaction');
+    props.setWalletActionStatus("signing_transaction");
 
     try {
-      const signed = await signPreparedPlayerOwnedTransaction(provider, preparedData.preparedTransaction);
-      const response = await apiRequest<unknown>('/api/solana/settlement/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          settlementBatchId: preparedData.settlementBatchId,
-          prepared: preparedData.preparedTransaction,
-          signedMessageBase64: signed.signedMessageBase64,
-          signedTransactionBase64: signed.signedTransactionBase64,
-        }),
-      });
+      const signed = await signPreparedPlayerOwnedTransaction(
+        provider,
+        preparedData.preparedTransaction,
+      );
+      const response = await apiRequest<unknown>(
+        "/api/solana/settlement/submit",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            settlementBatchId: preparedData.settlementBatchId,
+            prepared: preparedData.preparedTransaction,
+            signedMessageBase64: signed.signedMessageBase64,
+            signedTransactionBase64: signed.signedTransactionBase64,
+          }),
+        },
+      );
 
       setSubmitResult(response);
       setAuthorizeData(null);
@@ -787,7 +545,7 @@ function SettlementPanel(props: SettlementPanelProps) {
     } catch (nextError) {
       setError(normalizeWalletError(nextError));
     } finally {
-      props.setWalletActionStatus('idle');
+      props.setWalletActionStatus("idle");
       setSubmitPending(false);
     }
   }
@@ -798,22 +556,27 @@ function SettlementPanel(props: SettlementPanelProps) {
         <div className={styles.stack}>
           <h2 className={styles.panelTitle}>Post-Sync Settlement</h2>
           <p className={styles.panelText}>
-            Settle the next pending batch after the character is already confirmed on chain using the
-            connected Phantom wallet.
+            Settle the next pending batch after the character is already
+            confirmed on chain using the connected Phantom wallet.
           </p>
         </div>
-        <StatusBadge label={nextBatch.status} tone={settlementTone(nextBatch.status)} />
+        <StatusBadge
+          label={nextBatch.status}
+          tone={settlementTone(nextBatch.status)}
+        />
       </div>
 
       <div className={styles.formGrid}>
-        {props.walletAvailability === 'not_installed' ? (
+        {props.walletAvailability === "not_installed" ? (
           <div className={styles.infoBox}>
-            Phantom is required for settlement. Install the extension, refresh the page, and connect
-            the wallet bound to this character.
+            Phantom is required for settlement. Install the extension, refresh
+            the page, and connect the wallet bound to this character.
           </div>
         ) : null}
 
-        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+        {mismatchMessage ? (
+          <div className={styles.errorBox}>{mismatchMessage}</div>
+        ) : null}
 
         <div className={styles.keyValueGrid}>
           <div className={styles.keyValueItem}>
@@ -832,19 +595,25 @@ function SettlementPanel(props: SettlementPanelProps) {
           </div>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>Wallet authority</span>
-            <span className={styles.keyValue}>{truncateMiddle(props.walletPublicKey)}</span>
+            <span className={styles.keyValue}>
+              {truncateMiddle(props.walletPublicKey)}
+            </span>
           </div>
         </div>
 
-        {props.walletConnectionStatus !== 'connected' ? (
+        {props.walletConnectionStatus !== "connected" ? (
           <div className={styles.buttonRow}>
             <button
               type="button"
               className={`${styles.button} ${styles.buttonPrimary}`}
               onClick={() => void props.onConnectWallet()}
-              disabled={buttonPending || props.walletAvailability !== 'installed'}
+              disabled={
+                buttonPending || props.walletAvailability !== "installed"
+              }
             >
-              {props.walletConnectionStatus === 'connecting' ? 'Connecting...' : 'Connect Phantom'}
+              {props.walletConnectionStatus === "connecting"
+                ? "Connecting..."
+                : "Connect Phantom"}
             </button>
           </div>
         ) : mismatchMessage ? null : preparedData ? (
@@ -855,18 +624,25 @@ function SettlementPanel(props: SettlementPanelProps) {
               onClick={() => void signAndSubmit()}
               disabled={buttonPending}
             >
-              {submitPending ? 'Submitting...' : 'Sign And Submit Settlement'}
+              {submitPending ? "Submitting..." : "Sign And Submit Settlement"}
             </button>
           </div>
         ) : authorizeData ? (
           <>
             <div className={styles.infoBox}>
-              Phase 1 is ready. Phantom will sign the settlement authorization message before the app
-              requests the final transaction payload.
+              Phase 1 is ready. Phantom will sign the settlement authorization
+              message before the app requests the final transaction payload.
             </div>
             <div className={styles.buttonRow}>
-              <button type="button" className={styles.button} onClick={() => void signAuthorization()} disabled={buttonPending}>
-                {preparePending ? 'Requesting Signature...' : 'Sign Authorization'}
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => void signAuthorization()}
+                disabled={buttonPending}
+              >
+                {preparePending
+                  ? "Requesting Signature..."
+                  : "Sign Authorization"}
               </button>
             </div>
           </>
@@ -878,15 +654,15 @@ function SettlementPanel(props: SettlementPanelProps) {
               onClick={() => void prepareAuthorize()}
               disabled={buttonPending || !props.walletPublicKey}
             >
-              {preparePending ? 'Preparing...' : 'Prepare Settlement'}
+              {preparePending ? "Preparing..." : "Prepare Settlement"}
             </button>
           </div>
         )}
 
         {preparedData ? (
           <div className={styles.successBox}>
-            Settlement transaction prepared. Phantom will sign the transaction and the app will
-            submit it to the backend broadcaster.
+            Settlement transaction prepared. Phantom will sign the transaction
+            and the app will submit it to the backend broadcaster.
           </div>
         ) : null}
 
@@ -894,7 +670,9 @@ function SettlementPanel(props: SettlementPanelProps) {
         {submitResult ? (
           <details className={styles.details}>
             <summary>Latest settlement result</summary>
-            <pre className={styles.pre}>{JSON.stringify(submitResult, null, 2)}</pre>
+            <pre className={styles.pre}>
+              {JSON.stringify(submitResult, null, 2)}
+            </pre>
           </details>
         ) : null}
       </div>
@@ -908,38 +686,130 @@ type SyncPanelProps = {
   walletConnectionStatus: WalletConnectionStatus;
   walletPublicKey: string | null;
   setWalletActionStatus: (status: WalletActionStatus) => void;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<CharacterReadModel | null>;
 };
 
 function SyncPanel(props: SyncPanelProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [stepMessage, setStepMessage] = useState<string | null>(null);
 
-  const syncState = useMemo(() => resolveSyncPanelState(props.character), [props.character]);
-  const mismatchMessage = authorityMismatchMessage(props.character, props.walletPublicKey);
+  const syncState = useMemo(
+    () => resolveSyncPanelState(props.character),
+    [props.character],
+  );
+  const mismatchMessage = authorityMismatchMessage(
+    props.character,
+    props.walletPublicKey,
+  );
   const season = resolveEffectiveSeason(props.character);
   const canSync = syncState.syncMode !== null;
+  const statusDetail =
+    stepMessage ??
+    (props.character.syncPhase === "LOCAL_ONLY"
+      ? "Sync will create the on-chain character first. Battles stay disabled until that creation confirms."
+      : props.character.syncPhase === "CREATING_ON_CHAIN"
+        ? "Character creation is already in flight. Wait for confirmation before starting new battles."
+        : props.character.syncPhase === "INITIAL_SETTLEMENT_REQUIRED"
+          ? "Settle the first battle batch before new battles are allowed."
+          : props.character.syncPhase === "SETTLEMENT_PENDING"
+            ? "A later settlement batch is pending."
+            : props.character.syncPhase === "FAILED"
+              ? "The last sync attempt failed before confirmation. Retry the sync flow to continue."
+              : "Character and settlement cursor are in sync.");
 
   useEffect(() => {
     setError(null);
     setSuccess(null);
+    setStepMessage(null);
   }, [
     props.character.characterId,
+    props.character.syncPhase,
     props.character.chain?.chainCreationStatus,
     props.character.nextSettlementBatch?.settlementBatchId,
     props.character.latestBattle?.battleId,
     props.walletPublicKey,
   ]);
 
+  async function runSettlementSync(
+    provider: NonNullable<ReturnType<typeof getPhantomProvider>>,
+  ): Promise<void> {
+    const authorizeResponse = await apiRequest<SettlementPrepareResponse>(
+      "/api/solana/settlement/prepare",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
+        }),
+      },
+    );
+
+    if (authorizeResponse.phase !== "authorize") {
+      throw new Error(
+        "Unexpected settlement response: expected authorize phase.",
+      );
+    }
+
+    if (authorizeResponse.payload.signatureScheme !== 1) {
+      throw new Error(
+        "This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.",
+      );
+    }
+
+    props.setWalletActionStatus("signing_message");
+    const playerAuthorizationSignatureBase64 =
+      await signAuthorizationMessageUtf8(
+        provider,
+        authorizeResponse.playerAuthorizationMessageUtf8,
+      );
+
+    const preparedResponse = await apiRequest<SettlementPrepareResponse>(
+      "/api/solana/settlement/prepare",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          characterId: props.character.characterId,
+          authority: props.walletPublicKey,
+          feePayer: props.walletPublicKey,
+          playerAuthorizationSignatureBase64,
+        }),
+      },
+    );
+
+    if (preparedResponse.phase !== "sign_transaction") {
+      throw new Error(
+        "Unexpected settlement response: expected sign_transaction phase.",
+      );
+    }
+
+    props.setWalletActionStatus("signing_transaction");
+    const signed = await signPreparedPlayerOwnedTransaction(
+      provider,
+      preparedResponse.preparedTransaction,
+    );
+
+    await apiRequest<unknown>("/api/solana/settlement/submit", {
+      method: "POST",
+      body: JSON.stringify({
+        settlementBatchId: preparedResponse.settlementBatchId,
+        prepared: preparedResponse.preparedTransaction,
+        signedMessageBase64: signed.signedMessageBase64,
+        signedTransactionBase64: signed.signedTransactionBase64,
+      }),
+    });
+  }
+
   async function handleSync() {
     if (!canSync) {
-      setError('Nothing to sync right now.');
+      setError("Nothing to sync right now.");
       return;
     }
 
     if (!props.walletPublicKey) {
-      setError('Connect Phantom in the toolbar before syncing.');
+      setError("Connect Phantom in the toolbar before syncing.");
       return;
     }
 
@@ -950,152 +820,84 @@ function SyncPanel(props: SyncPanelProps) {
 
     const provider = getPhantomProvider();
     if (provider === null) {
-      setError('Phantom wallet is not installed.');
+      setError("Phantom wallet is not installed.");
       return;
     }
 
     setPending(true);
     setError(null);
     setSuccess(null);
+    setStepMessage(null);
 
     try {
-      if (syncState.syncMode === 'first_sync') {
-        const authorizeResponse = await apiRequest<FirstSyncPrepareResponse>(
-          '/api/solana/character/first-sync/prepare',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              characterId: props.character.characterId,
-              authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
-            }),
-          },
-        );
+      if (syncState.syncMode === "create_then_settle") {
+        const initialUnlockedZoneId =
+          props.character.provisionalProgress?.highestUnlockedZoneId ?? 1;
 
-        if (authorizeResponse.phase !== 'authorize') {
-          throw new Error('Unexpected first-sync response: expected authorize phase.');
-        }
-
-        if (authorizeResponse.payload.signatureScheme !== 1) {
-          throw new Error(
-            'This pending first-sync batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or prepare a fresh wallet-text batch.',
+        setStepMessage("Creating character on chain");
+        const prepareResponse =
+          await apiRequest<PrepareCharacterCreationRouteResponse>(
+            "/api/solana/character/create/prepare",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                userId: props.character.userId,
+                authority: props.walletPublicKey,
+                feePayer: props.walletPublicKey,
+                name: props.character.name,
+                initialUnlockedZoneId,
+              }),
+            },
           );
-        }
 
-        props.setWalletActionStatus('signing_message');
-        const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
-          provider,
-          authorizeResponse.playerAuthorizationMessageUtf8,
-        );
-
-        const preparedResponse = await apiRequest<FirstSyncPrepareResponse>(
-          '/api/solana/character/first-sync/prepare',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              characterId: props.character.characterId,
-              authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
-              playerAuthorizationSignatureBase64,
-            }),
-          },
-        );
-
-        if (preparedResponse.phase !== 'sign_transaction') {
-          throw new Error('Unexpected first-sync response: expected sign_transaction phase.');
-        }
-
-        props.setWalletActionStatus('signing_transaction');
+        props.setWalletActionStatus("signing_transaction");
         const signed = await signPreparedPlayerOwnedTransaction(
           provider,
-          preparedResponse.preparedTransaction,
+          prepareResponse.preparedTransaction,
         );
 
-        const response = await apiRequest<{
-          transactionSignature: string;
-          characterRootPubkey: string;
-        }>('/api/solana/character/first-sync/submit', {
-          method: 'POST',
-          body: JSON.stringify({
-            prepared: preparedResponse.preparedTransaction,
-            signedMessageBase64: signed.signedMessageBase64,
-            signedTransactionBase64: signed.signedTransactionBase64,
-          }),
-        });
+        setStepMessage("Waiting for confirmation");
+        const createResponse =
+          await apiRequest<SubmitCharacterCreationRouteResponse>(
+            "/api/solana/character/create/submit",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                prepared: prepareResponse.preparedTransaction,
+                signedMessageBase64: signed.signedMessageBase64,
+                signedTransactionBase64: signed.signedTransactionBase64,
+              }),
+            },
+          );
+
+        const refreshedCharacter = await props.onRefresh();
+        if (
+          refreshedCharacter?.syncPhase === "INITIAL_SETTLEMENT_REQUIRED" ||
+          refreshedCharacter?.syncPhase === "SETTLEMENT_PENDING"
+        ) {
+          setStepMessage("Settling first battle batch");
+          await runSettlementSync(provider);
+          await props.onRefresh();
+        }
 
         setSuccess(
-          `Sync confirmed. Tx ${truncateMiddle(response.transactionSignature)} | Character ${truncateMiddle(response.characterRootPubkey)}`,
+          `Sync confirmed. Tx ${truncateMiddle(createResponse.transactionSignature)} | Character ${truncateMiddle(createResponse.characterRootPubkey)}`,
         );
       } else {
-        const authorizeResponse = await apiRequest<SettlementPrepareResponse>(
-          '/api/solana/settlement/prepare',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              characterId: props.character.characterId,
-              authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
-            }),
-          },
+        setStepMessage(
+          props.character.syncPhase === "INITIAL_SETTLEMENT_REQUIRED"
+            ? "Settling first battle batch"
+            : "Settling battle batch",
         );
-
-        if (authorizeResponse.phase !== 'authorize') {
-          throw new Error('Unexpected settlement response: expected authorize phase.');
-        }
-
-        if (authorizeResponse.payload.signatureScheme !== 1) {
-          throw new Error(
-            'This pending settlement batch uses the legacy manual signature scheme. Use the CLI fallback to complete it or reseal a fresh wallet-text batch.',
-          );
-        }
-
-        props.setWalletActionStatus('signing_message');
-        const playerAuthorizationSignatureBase64 = await signAuthorizationMessageUtf8(
-          provider,
-          authorizeResponse.playerAuthorizationMessageUtf8,
-        );
-
-        const preparedResponse = await apiRequest<SettlementPrepareResponse>(
-          '/api/solana/settlement/prepare',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              characterId: props.character.characterId,
-              authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
-              playerAuthorizationSignatureBase64,
-            }),
-          },
-        );
-
-        if (preparedResponse.phase !== 'sign_transaction') {
-          throw new Error('Unexpected settlement response: expected sign_transaction phase.');
-        }
-
-        props.setWalletActionStatus('signing_transaction');
-        const signed = await signPreparedPlayerOwnedTransaction(
-          provider,
-          preparedResponse.preparedTransaction,
-        );
-
-        await apiRequest<unknown>('/api/solana/settlement/submit', {
-          method: 'POST',
-          body: JSON.stringify({
-            settlementBatchId: preparedResponse.settlementBatchId,
-            prepared: preparedResponse.preparedTransaction,
-            signedMessageBase64: signed.signedMessageBase64,
-            signedTransactionBase64: signed.signedTransactionBase64,
-          }),
-        });
-
-        setSuccess('Sync confirmed.');
+        await runSettlementSync(provider);
+        await props.onRefresh();
+        setSuccess("Sync confirmed.");
       }
-
-      await props.onRefresh();
     } catch (nextError) {
       setError(normalizeWalletError(nextError));
     } finally {
-      props.setWalletActionStatus('idle');
+      props.setWalletActionStatus("idle");
+      setStepMessage(null);
       setPending(false);
     }
   }
@@ -1106,31 +908,43 @@ function SyncPanel(props: SyncPanelProps) {
         <div className={styles.keyValueGrid}>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>Season</span>
-            <span className={styles.keyValue}>{season ?? 'Not available'}</span>
+            <span className={styles.keyValue}>{season ?? "Not available"}</span>
           </div>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>On-chain sync</span>
             <span className={styles.keyValue}>
-              <StatusBadge label={syncState.statusLabel} tone={syncState.statusTone} />
+              <StatusBadge
+                label={syncState.statusLabel}
+                tone={syncState.statusTone}
+              />
             </span>
           </div>
         </div>
 
         <p className={styles.noteText}>
-          <em>Note: Unsynced progress after the new season starts will be deleted.</em>
+          <em>
+            Note: Unsynced progress after the new season starts will be deleted.
+          </em>
         </p>
 
-        {props.walletAvailability === 'not_installed' ? (
+        <div className={styles.infoBox}>{statusDetail}</div>
+
+        {props.walletAvailability === "not_installed" ? (
           <div className={styles.infoBox}>
-            Phantom is required for sync. Install it, refresh the page, and connect your wallet.
+            Phantom is required for sync. Install it, refresh the page, and
+            connect your wallet.
           </div>
         ) : null}
 
-        {props.walletConnectionStatus !== 'connected' ? (
-          <div className={styles.infoBox}>Connect Phantom in the toolbar before syncing.</div>
+        {props.walletConnectionStatus !== "connected" ? (
+          <div className={styles.infoBox}>
+            Connect Phantom in the toolbar before syncing.
+          </div>
         ) : null}
 
-        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+        {mismatchMessage ? (
+          <div className={styles.errorBox}>{mismatchMessage}</div>
+        ) : null}
         {error ? <div className={styles.errorBox}>{error}</div> : null}
         {success ? <div className={styles.successBox}>{success}</div> : null}
 
@@ -1141,12 +955,12 @@ function SyncPanel(props: SyncPanelProps) {
             onClick={() => void handleSync()}
             disabled={
               pending ||
-              props.walletConnectionStatus !== 'connected' ||
+              props.walletConnectionStatus !== "connected" ||
               !canSync ||
               Boolean(mismatchMessage)
             }
           >
-            {pending ? 'Syncing...' : 'Sync'}
+            {pending ? "Syncing..." : "Sync"}
           </button>
         </div>
       </div>
@@ -1155,37 +969,44 @@ function SyncPanel(props: SyncPanelProps) {
 }
 
 export default function GameClient() {
-  const [appPhase, setAppPhase] = useState<AppPhase>('bootstrapping_user');
+  const [appPhase, setAppPhase] = useState<AppPhase>("bootstrapping_user");
   const [userId, setUserId] = useState<string | null>(null);
   const [character, setCharacter] = useState<CharacterReadModel | null>(null);
   const [fatalError, setFatalError] = useState<string | null>(null);
-  const [createName, setCreateName] = useState('Rookie');
+  const [createName, setCreateName] = useState("Rookie");
   const [selectedZoneId, setSelectedZoneId] = useState(1);
   const [createPending, setCreatePending] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [battlePending, setBattlePending] = useState(false);
   const [battleError, setBattleError] = useState<string | null>(null);
   const [refreshPending, setRefreshPending] = useState(false);
-  const [latestEncounter, setLatestEncounter] = useState<EncounterResponse | null>(null);
-  const [walletAvailability, setWalletAvailability] = useState<WalletAvailability>('unknown');
-  const [walletConnectionStatus, setWalletConnectionStatus] = useState<WalletConnectionStatus>('checking_trusted');
-  const [walletActionStatus, setWalletActionStatus] = useState<WalletActionStatus>('idle');
+  const [latestEncounter, setLatestEncounter] =
+    useState<EncounterResponse | null>(null);
+  const [walletAvailability, setWalletAvailability] =
+    useState<WalletAvailability>("unknown");
+  const [walletConnectionStatus, setWalletConnectionStatus] =
+    useState<WalletConnectionStatus>("checking_trusted");
+  const [walletActionStatus, setWalletActionStatus] =
+    useState<WalletActionStatus>("idle");
   const [walletPublicKey, setWalletPublicKey] = useState<string | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
 
-  const walletPending = walletConnectionStatus === 'connecting' || walletActionStatus !== 'idle';
+  const walletPending =
+    walletConnectionStatus === "connecting" || walletActionStatus !== "idle";
   const activeSkillNames = useMemo(
-    () => (character ? resolveSkillNames(character.activeSkills).join(', ') : ''),
+    () =>
+      character ? resolveSkillNames(character.activeSkills).join(", ") : "",
     [character],
   );
   const passiveSkillNames = useMemo(
-    () => (character ? resolvePassiveNames(character.passiveSkills).join(', ') : ''),
+    () =>
+      character ? resolvePassiveNames(character.passiveSkills).join(", ") : "",
     [character],
   );
 
   async function issueAnonymousUser(): Promise<string> {
-    const created = await apiRequest<AnonymousUserResponse>('/api/auth/anon', {
-      method: 'POST',
+    const created = await apiRequest<AnonymousUserResponse>("/api/auth/anon", {
+      method: "POST",
       body: JSON.stringify({}),
     });
 
@@ -1194,11 +1015,13 @@ export default function GameClient() {
     return created.userId;
   }
 
-  async function refreshCharacter(nextUserId?: string) {
+  async function refreshCharacter(
+    nextUserId?: string,
+  ): Promise<CharacterReadModel | null> {
     const resolvedUserId = nextUserId ?? userId;
 
     if (!resolvedUserId) {
-      throw new Error('No user id is available yet.');
+      throw new Error("No user id is available yet.");
     }
 
     setRefreshPending(true);
@@ -1206,10 +1029,11 @@ export default function GameClient() {
     try {
       const response = await apiRequest<CharacterQueryResponse>(
         `/api/character?userId=${encodeURIComponent(resolvedUserId)}`,
-        { method: 'GET', headers: undefined },
+        { method: "GET", headers: undefined },
       );
       setCharacter(response.character);
-      setAppPhase('ready');
+      setAppPhase("ready");
+      return response.character;
     } finally {
       setRefreshPending(false);
     }
@@ -1232,11 +1056,11 @@ export default function GameClient() {
         }
 
         setUserId(resolvedUserId);
-        setAppPhase('loading_character');
+        setAppPhase("loading_character");
 
         const response = await apiRequest<CharacterQueryResponse>(
           `/api/character?userId=${encodeURIComponent(resolvedUserId)}`,
-          { method: 'GET', headers: undefined },
+          { method: "GET", headers: undefined },
         );
 
         if (cancelled) {
@@ -1244,13 +1068,17 @@ export default function GameClient() {
         }
 
         setCharacter(response.character);
-        setAppPhase('ready');
+        setAppPhase("ready");
       } catch (error) {
         if (cancelled) {
           return;
         }
-        setFatalError(error instanceof Error ? error.message : 'Failed to bootstrap the app.');
-        setAppPhase('fatal_error');
+        setFatalError(
+          error instanceof Error
+            ? error.message
+            : "Failed to bootstrap the app.",
+        );
+        setAppPhase("fatal_error");
       }
     }
 
@@ -1265,14 +1093,14 @@ export default function GameClient() {
     const availability = getWalletAvailability();
     setWalletAvailability(availability);
 
-    if (availability !== 'installed') {
-      setWalletConnectionStatus('disconnected');
+    if (availability !== "installed") {
+      setWalletConnectionStatus("disconnected");
       setWalletPublicKey(null);
       return;
     }
 
     let cancelled = false;
-    setWalletConnectionStatus('checking_trusted');
+    setWalletConnectionStatus("checking_trusted");
 
     void connectPhantom({ onlyIfTrusted: true })
       .then(({ publicKey }) => {
@@ -1280,7 +1108,7 @@ export default function GameClient() {
           return;
         }
         setWalletPublicKey(publicKey);
-        setWalletConnectionStatus('connected');
+        setWalletConnectionStatus("connected");
         setWalletError(null);
       })
       .catch(() => {
@@ -1288,7 +1116,7 @@ export default function GameClient() {
           return;
         }
         setWalletPublicKey(null);
-        setWalletConnectionStatus('disconnected');
+        setWalletConnectionStatus("disconnected");
       });
 
     return () => {
@@ -1298,46 +1126,52 @@ export default function GameClient() {
 
   useEffect(() => {
     const provider = getPhantomProvider();
-    if (provider === null || typeof provider.on !== 'function' || typeof provider.removeListener !== 'function') {
+    if (
+      provider === null ||
+      typeof provider.on !== "function" ||
+      typeof provider.removeListener !== "function"
+    ) {
       return;
     }
 
     const handleConnect = () => {
       const publicKey = provider.publicKey?.toBase58() ?? null;
       setWalletPublicKey(publicKey);
-      setWalletConnectionStatus(publicKey ? 'connected' : 'disconnected');
+      setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
     };
 
     const handleDisconnect = () => {
       setWalletPublicKey(null);
-      setWalletConnectionStatus('disconnected');
+      setWalletConnectionStatus("disconnected");
     };
 
     const handleAccountChanged = (...args: unknown[]) => {
       const [nextPublicKey] = args;
       if (
         nextPublicKey !== null &&
-        typeof nextPublicKey === 'object' &&
+        typeof nextPublicKey === "object" &&
         nextPublicKey !== undefined &&
-        'toBase58' in nextPublicKey &&
-        typeof (nextPublicKey as { toBase58?: unknown }).toBase58 === 'function'
+        "toBase58" in nextPublicKey &&
+        typeof (nextPublicKey as { toBase58?: unknown }).toBase58 === "function"
       ) {
-        setWalletPublicKey((nextPublicKey as { toBase58(): string }).toBase58());
-        setWalletConnectionStatus('connected');
+        setWalletPublicKey(
+          (nextPublicKey as { toBase58(): string }).toBase58(),
+        );
+        setWalletConnectionStatus("connected");
         return;
       }
 
       handleDisconnect();
     };
 
-    provider.on('connect', handleConnect);
-    provider.on('disconnect', handleDisconnect);
-    provider.on('accountChanged', handleAccountChanged);
+    provider.on("connect", handleConnect);
+    provider.on("disconnect", handleDisconnect);
+    provider.on("accountChanged", handleAccountChanged);
 
     return () => {
-      provider.removeListener?.('connect', handleConnect);
-      provider.removeListener?.('disconnect', handleDisconnect);
-      provider.removeListener?.('accountChanged', handleAccountChanged);
+      provider.removeListener?.("connect", handleConnect);
+      provider.removeListener?.("disconnect", handleDisconnect);
+      provider.removeListener?.("accountChanged", handleAccountChanged);
     };
   }, []);
 
@@ -1349,16 +1183,16 @@ export default function GameClient() {
   }, [character, selectedZoneId]);
 
   async function handleConnectWallet() {
-    setWalletConnectionStatus('connecting');
+    setWalletConnectionStatus("connecting");
     setWalletError(null);
 
     try {
       const { publicKey } = await connectPhantom();
       setWalletPublicKey(publicKey);
-      setWalletConnectionStatus('connected');
+      setWalletConnectionStatus("connected");
     } catch (error) {
       setWalletPublicKey(null);
-      setWalletConnectionStatus('disconnected');
+      setWalletConnectionStatus("disconnected");
       setWalletError(normalizeWalletError(error));
     }
   }
@@ -1372,14 +1206,16 @@ export default function GameClient() {
       setWalletError(normalizeWalletError(error));
     } finally {
       setWalletPublicKey(null);
-      setWalletConnectionStatus('disconnected');
-      setWalletActionStatus('idle');
+      setWalletConnectionStatus("disconnected");
+      setWalletActionStatus("idle");
     }
   }
 
   async function handleCreateCharacter() {
     if (!userId) {
-      setCreateError('Cannot create a character before user bootstrap finishes.');
+      setCreateError(
+        "Cannot create a character before user bootstrap finishes.",
+      );
       return;
     }
 
@@ -1390,23 +1226,23 @@ export default function GameClient() {
       let activeUserId = userId;
 
       try {
-        await apiRequest<CreateCharacterResponse>('/api/character/create', {
-          method: 'POST',
+        await apiRequest<CreateCharacterResponse>("/api/character/create", {
+          method: "POST",
           body: JSON.stringify({
             userId: activeUserId,
             name: createName,
           }),
         });
       } catch (error) {
-        if (!(error instanceof Error) || error.message !== 'User not found.') {
+        if (!(error instanceof Error) || error.message !== "User not found.") {
           throw error;
         }
 
         window.localStorage.removeItem(USER_STORAGE_KEY);
         activeUserId = await issueAnonymousUser();
 
-        await apiRequest<CreateCharacterResponse>('/api/character/create', {
-          method: 'POST',
+        await apiRequest<CreateCharacterResponse>("/api/character/create", {
+          method: "POST",
           body: JSON.stringify({
             userId: activeUserId,
             name: createName,
@@ -1416,7 +1252,9 @@ export default function GameClient() {
 
       await refreshCharacter(activeUserId);
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : 'Failed to create character.');
+      setCreateError(
+        error instanceof Error ? error.message : "Failed to create character.",
+      );
     } finally {
       setCreatePending(false);
     }
@@ -1424,7 +1262,13 @@ export default function GameClient() {
 
   async function handleBattle() {
     if (!character) {
-      setBattleError('Create a character before starting a battle.');
+      setBattleError("Create a character before starting a battle.");
+      return;
+    }
+    if (!character.battleEligible) {
+      setBattleError(
+        "Initial settlement is required before new battles can start.",
+      );
       return;
     }
 
@@ -1432,24 +1276,29 @@ export default function GameClient() {
     setBattleError(null);
 
     try {
-      const response = await apiRequest<EncounterResponse>('/api/combat/encounter', {
-        method: 'POST',
-        body: JSON.stringify({
-          characterId: character.characterId,
-          zoneId: selectedZoneId,
-        }),
-      });
+      const response = await apiRequest<EncounterResponse>(
+        "/api/combat/encounter",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            characterId: character.characterId,
+            zoneId: selectedZoneId,
+          }),
+        },
+      );
 
       setLatestEncounter(response);
       await refreshCharacter(character.userId);
     } catch (error) {
-      setBattleError(error instanceof Error ? error.message : 'Failed to run battle.');
+      setBattleError(
+        error instanceof Error ? error.message : "Failed to run battle.",
+      );
     } finally {
       setBattlePending(false);
     }
   }
 
-  if (appPhase === 'bootstrapping_user' || appPhase === 'loading_character') {
+  if (appPhase === "bootstrapping_user" || appPhase === "loading_character") {
     return (
       <main className={styles.page}>
         <div className={styles.shell}>
@@ -1471,7 +1320,7 @@ export default function GameClient() {
     );
   }
 
-  if (appPhase === 'fatal_error') {
+  if (appPhase === "fatal_error") {
     return (
       <main className={styles.page}>
         <div className={styles.shell}>
@@ -1480,7 +1329,9 @@ export default function GameClient() {
           </header>
 
           <section className={styles.panel}>
-            <div className={styles.errorBox}>{fatalError ?? 'Unknown error.'}</div>
+            <div className={styles.errorBox}>
+              {fatalError ?? "Unknown error."}
+            </div>
             <div className={styles.buttonRow}>
               <button
                 type="button"
@@ -1520,7 +1371,9 @@ export default function GameClient() {
                 }
               }}
             />
-            {refreshPending ? <StatusBadge label="Refreshing state" tone="info" /> : null}
+            {refreshPending ? (
+              <StatusBadge label="Refreshing state" tone="info" />
+            ) : null}
           </div>
         </header>
 
@@ -1560,7 +1413,8 @@ export default function GameClient() {
                   <div className={styles.keyValueItem}>
                     <span className={styles.keyLabel}>Atk / Def / Spd</span>
                     <span className={styles.keyValue}>
-                      {character.stats.atk} / {character.stats.def} / {character.stats.spd}
+                      {character.stats.atk} / {character.stats.def} /{" "}
+                      {character.stats.spd}
                     </span>
                   </div>
                   <div className={styles.keyValueItem}>
@@ -1582,7 +1436,9 @@ export default function GameClient() {
                   {character.latestBattle ? (
                     <StatusBadge
                       label={character.latestBattle.settlementStatus}
-                      tone={settlementTone(character.latestBattle.settlementStatus)}
+                      tone={settlementTone(
+                        character.latestBattle.settlementStatus,
+                      )}
                     />
                   ) : null}
                 </div>
@@ -1593,10 +1449,15 @@ export default function GameClient() {
                     <select
                       className={styles.select}
                       value={selectedZoneId}
-                      onChange={(event) => setSelectedZoneId(Number(event.target.value))}
-                      disabled={battlePending}
+                      onChange={(event) =>
+                        setSelectedZoneId(Number(event.target.value))
+                      }
+                      disabled={battlePending || !character.battleEligible}
                     >
-                      {Array.from({ length: maxUnlockedZone(character) }, (_, index) => index + 1).map((zoneId) => (
+                      {Array.from(
+                        { length: maxUnlockedZone(character) },
+                        (_, index) => index + 1,
+                      ).map((zoneId) => (
                         <option key={zoneId} value={zoneId}>
                           Zone {zoneId}
                         </option>
@@ -1609,26 +1470,37 @@ export default function GameClient() {
                       type="button"
                       className={`${styles.button} ${styles.buttonPrimary}`}
                       onClick={handleBattle}
-                      disabled={battlePending}
+                      disabled={battlePending || !character.battleEligible}
                     >
-                      {battlePending ? 'Running battle...' : 'Run battle'}
+                      {battlePending ? "Running battle..." : "Run battle"}
                     </button>
                   </div>
 
-                  {battleError ? <div className={styles.errorBox}>{battleError}</div> : null}
+                  {!character.battleEligible ? (
+                    <div className={styles.infoBox}>
+                      Finish the initial on-chain settlement before starting
+                      another battle.
+                    </div>
+                  ) : null}
+
+                  {battleError ? (
+                    <div className={styles.errorBox}>{battleError}</div>
+                  ) : null}
 
                   {latestEncounter ? (
                     <div className={styles.stack}>
                       <div className={styles.successBox}>
-                        Latest encounter persisted with seed {latestEncounter.seed} and settlement
-                        status {latestEncounter.settlementStatus}.
+                        Latest encounter persisted with seed{" "}
+                        {latestEncounter.seed} and settlement status{" "}
+                        {latestEncounter.settlementStatus}.
                       </div>
                       <BattleReplay result={latestEncounter.battleResult} />
                     </div>
                   ) : (
                     <div className={styles.infoBox}>
-                      No new encounter has been run in this session yet. The latest persisted ledger
-                      status is still visible in the dashboard panels.
+                      No new encounter has been run in this session yet. The
+                      latest persisted ledger status is still visible in the
+                      dashboard panels.
                     </div>
                   )}
                 </div>

@@ -1,10 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from "node:crypto";
 
-import { PublicKey, type Commitment, type Connection } from '@solana/web3.js';
+import { PublicKey, type Commitment, type Connection } from "@solana/web3.js";
 
-import { getPassiveDef } from '../../engine/battle/passiveRegistry';
-import { getSkillDef } from '../../engine/battle/skillRegistry';
-import { prisma } from '../prisma';
+import { getPassiveDef } from "../../engine/battle/passiveRegistry";
+import { getSkillDef } from "../../engine/battle/skillRegistry";
+import { prisma } from "../prisma";
 import {
   accountCharacterIdHex,
   fetchCharacterRootAccount,
@@ -14,33 +14,33 @@ import {
   fetchZoneEnemySetAccount,
   fetchZoneRegistryAccount,
   accountStateHashHex,
-} from './runanaAccounts';
+} from "./runanaAccounts";
 import {
   acceptSignedPlayerOwnedTransaction,
   prepareCharacterCreationTransaction,
-} from './playerOwnedTransactions';
+} from "./playerOwnedTransactions";
 import {
   buildPreparedVersionedTransaction,
   deserializeVersionedTransactionBase64,
   serializeVersionedTransactionMessageBase64,
-} from './playerOwnedV0Transactions';
-import { buildCreateCharacterInstruction } from './runanaCharacterInstructions';
+} from "./playerOwnedV0Transactions";
+import { buildCreateCharacterInstruction } from "./runanaCharacterInstructions";
 import {
   createRunanaConnection,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
-} from './runanaClient';
+} from "./runanaClient";
 import {
   deriveCharacterBatchCursorPda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
   deriveZoneEnemySetPda,
   deriveZoneRegistryPda,
-} from './runanaProgram';
+} from "./runanaProgram";
 
-const STARTER_ACTIVE_SKILLS = ['1001', '1002'];
-const STARTER_PASSIVES = ['2001', '2002'];
-const DEFAULT_CHARACTER_NAME = 'Rookie';
+const STARTER_ACTIVE_SKILLS = ["1001", "1002"];
+const STARTER_PASSIVES = ["2001", "2002"];
+const DEFAULT_CHARACTER_NAME = "Rookie";
 const MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS = 5;
 
 interface CreatedCharacterRecord {
@@ -63,12 +63,13 @@ export interface PrepareSolanaCharacterCreationInput {
   authority: string;
   feePayer?: string;
   name?: string;
-  seasonIdAtCreation: number;
   initialUnlockedZoneId: number;
 }
 
 export interface SubmitSolanaCharacterCreationInput {
-  prepared: Parameters<typeof acceptSignedPlayerOwnedTransaction>[0]['prepared'];
+  prepared: Parameters<
+    typeof acceptSignedPlayerOwnedTransaction
+  >[0]["prepared"];
   signedMessageBase64: string;
   signedTransactionBase64: string;
 }
@@ -95,11 +96,11 @@ export interface SolanaCharacterSummary {
     playerAuthorityPubkey: string;
     chainCharacterIdHex: string;
     characterRootPubkey: string;
-    chainCreationStatus: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+    chainCreationStatus: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
     chainCreationTxSignature: string | null;
     chainCreatedAt: string | null;
-    chainCreationTs: number;
-    chainCreationSeasonId: number;
+    chainCreationTs: number | null;
+    chainCreationSeasonId: number | null;
   };
 }
 
@@ -110,7 +111,7 @@ export interface PreparedSolanaCharacterCreationResult {
 
 export interface SubmittedSolanaCharacterCreationResult {
   characterId: string;
-  chainCreationStatus: 'CONFIRMED';
+  chainCreationStatus: "CONFIRMED";
   transactionSignature: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
@@ -126,8 +127,16 @@ export interface SubmittedSolanaCharacterCreationResult {
 
 type CharacterCreationConnection = Pick<
   Connection,
-  'getAccountInfo' | 'getLatestBlockhash' | 'sendRawTransaction' | 'confirmTransaction'
+  | "getAccountInfo"
+  | "getLatestBlockhash"
+  | "sendRawTransaction"
+  | "confirmTransaction"
 >;
+
+type CharacterCreationEnv = {
+  RUNANA_ACTIVE_SEASON_ID?: string;
+  RUNANA_SEASON_ID?: string;
+};
 
 export interface CharacterCreationServiceDependencies {
   connection?: CharacterCreationConnection;
@@ -135,10 +144,13 @@ export interface CharacterCreationServiceDependencies {
   programId?: PublicKey;
   now?: () => Date;
   generateCharacterIdHex?: () => string;
+  env?: CharacterCreationEnv;
 }
 
 function normalizeName(name?: string): string {
-  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : DEFAULT_CHARACTER_NAME;
+  return typeof name === "string" && name.trim().length > 0
+    ? name.trim()
+    : DEFAULT_CHARACTER_NAME;
 }
 
 function assertNonEmptyString(value: string, field: string): void {
@@ -149,7 +161,9 @@ function assertNonEmptyString(value: string, field: string): void {
 
 function assertInteger(value: number, field: string, minimum = 0): void {
   if (!Number.isInteger(value) || value < minimum) {
-    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be an integer >= ${minimum}`);
+    throw new Error(
+      `ERR_INVALID_${field.toUpperCase()}: ${field} must be an integer >= ${minimum}`,
+    );
   }
 }
 
@@ -157,20 +171,18 @@ function toPublicKey(value: string, field: string): PublicKey {
   try {
     return new PublicKey(value);
   } catch {
-    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be a valid public key`);
+    throw new Error(
+      `ERR_INVALID_${field.toUpperCase()}: ${field} must be a valid public key`,
+    );
   }
 }
 
 function defaultCharacterIdHex(): string {
-  return randomBytes(16).toString('hex');
-}
-
-function toUnixTimestampSeconds(now: Date): number {
-  return Math.floor(now.getTime() / 1000);
+  return randomBytes(16).toString("hex");
 }
 
 function isRetryableCharacterIdentityCollision(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
+  if (typeof error !== "object" || error === null) {
     return false;
   }
 
@@ -180,19 +192,23 @@ function isRetryableCharacterIdentityCollision(error: unknown): boolean {
     message?: unknown;
   };
   const constraint =
-    typeof maybePgError.constraint === 'string' ? maybePgError.constraint : '';
-  const message = typeof maybePgError.message === 'string' ? maybePgError.message : '';
+    typeof maybePgError.constraint === "string" ? maybePgError.constraint : "";
+  const message =
+    typeof maybePgError.message === "string" ? maybePgError.message : "";
 
   return (
-    maybePgError.code === '23505' &&
-    (constraint === 'Character_chainCharacterIdHex_key' ||
-      constraint === 'Character_characterRootPubkey_key' ||
-      message.includes('chainCharacterIdHex') ||
-      message.includes('characterRootPubkey'))
+    maybePgError.code === "23505" &&
+    (constraint === "Character_chainCharacterIdHex_key" ||
+      constraint === "Character_characterRootPubkey_key" ||
+      message.includes("chainCharacterIdHex") ||
+      message.includes("characterRootPubkey"))
   );
 }
 
-function createStarterCharacter(userId: string, name: string): Promise<CreatedCharacterRecord> {
+function createStarterCharacter(
+  userId: string,
+  name: string,
+): Promise<CreatedCharacterRecord> {
   STARTER_ACTIVE_SKILLS.forEach((skillId) => getSkillDef(skillId));
   STARTER_PASSIVES.forEach((passiveId) => getPassiveDef(passiveId));
 
@@ -211,16 +227,43 @@ function createStarterCharacter(userId: string, name: string): Promise<CreatedCh
   });
 }
 
+function sha256HexFromBase64(base64Value: string): string {
+  return createHash("sha256")
+    .update(Buffer.from(base64Value, "base64"))
+    .digest("hex");
+}
+
+function resolveConfiguredActiveSeasonId(
+  env: CharacterCreationEnv,
+): number {
+  const configured =
+    env.RUNANA_ACTIVE_SEASON_ID?.trim() ??
+    env.RUNANA_SEASON_ID?.trim() ??
+    undefined;
+  const candidate =
+    configured === undefined || configured.length === 0
+      ? Number.NaN
+      : Number(configured);
+
+  if (!Number.isInteger(candidate) || candidate < 0) {
+    throw new Error(
+      "ERR_ACTIVE_SEASON_UNRESOLVED: configure RUNANA_ACTIVE_SEASON_ID before preparing character creation",
+    );
+  }
+
+  return candidate;
+}
+
 function buildCharacterSummary(args: {
   character: CreatedCharacterRecord;
   playerAuthorityPubkey: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
-  chainCreationStatus: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+  chainCreationStatus: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
   chainCreationTxSignature: string | null;
   chainCreatedAt: Date | null;
-  chainCreationTs: number;
-  chainCreationSeasonId: number;
+  chainCreationTs: number | null;
+  chainCreationSeasonId: number | null;
 }): SolanaCharacterSummary {
   return {
     characterId: args.character.id,
@@ -257,15 +300,25 @@ async function validateBootstrapPreconditions(args: {
   connection: CharacterCreationConnection;
   commitment?: Commitment;
   programId: PublicKey;
-  seasonIdAtCreation: number;
+  activeSeasonId: number;
   initialUnlockedZoneId: number;
 }): Promise<void> {
-  const { connection, commitment, programId, seasonIdAtCreation, initialUnlockedZoneId } = args;
+  const {
+    connection,
+    commitment,
+    programId,
+    activeSeasonId,
+    initialUnlockedZoneId,
+  } = args;
 
-  await fetchProgramConfigAccount(connection as Connection, deriveProgramConfigPda(programId), commitment);
+  await fetchProgramConfigAccount(
+    connection as Connection,
+    deriveProgramConfigPda(programId),
+    commitment,
+  );
   await fetchSeasonPolicyAccount(
     connection as Connection,
-    deriveSeasonPolicyPda(seasonIdAtCreation, programId),
+    deriveSeasonPolicyPda(activeSeasonId, programId),
     commitment,
   );
   await fetchZoneRegistryAccount(
@@ -285,11 +338,11 @@ async function updateCharacterChainState(args: {
   playerAuthorityPubkey: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
-  chainCreationStatus: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+  chainCreationStatus: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
   chainCreationTxSignature?: string | null;
   chainCreatedAt?: Date | null;
-  chainCreationTs: number;
-  chainCreationSeasonId: number;
+  chainCreationTs?: number | null;
+  chainCreationSeasonId?: number | null;
 }) {
   return prisma.character.updateChainIdentity(args.characterId, {
     playerAuthorityPubkey: args.playerAuthorityPubkey,
@@ -298,8 +351,8 @@ async function updateCharacterChainState(args: {
     chainCreationStatus: args.chainCreationStatus,
     chainCreationTxSignature: args.chainCreationTxSignature ?? null,
     chainCreatedAt: args.chainCreatedAt ?? null,
-    chainCreationTs: args.chainCreationTs,
-    chainCreationSeasonId: args.chainCreationSeasonId,
+    chainCreationTs: args.chainCreationTs ?? null,
+    chainCreationSeasonId: args.chainCreationSeasonId ?? null,
   });
 }
 
@@ -307,44 +360,54 @@ export async function prepareSolanaCharacterCreation(
   input: PrepareSolanaCharacterCreationInput,
   deps: CharacterCreationServiceDependencies = {},
 ): Promise<PreparedSolanaCharacterCreationResult> {
-  assertNonEmptyString(input.userId, 'userId');
-  assertNonEmptyString(input.authority, 'authority');
-  assertInteger(input.seasonIdAtCreation, 'seasonIdAtCreation', 0);
-  assertInteger(input.initialUnlockedZoneId, 'initialUnlockedZoneId', 0);
+  assertNonEmptyString(input.userId, "userId");
+  assertNonEmptyString(input.authority, "authority");
+  assertInteger(input.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
 
-  const authority = toPublicKey(input.authority, 'authority');
-  const feePayer = toPublicKey(input.feePayer ?? input.authority, 'feePayer');
+  const authority = toPublicKey(input.authority, "authority");
+  const feePayer = toPublicKey(input.feePayer ?? input.authority, "feePayer");
   if (!authority.equals(feePayer)) {
-    throw new Error('ERR_PLAYER_MUST_PAY: character_create requires feePayer to match authority');
+    throw new Error(
+      "ERR_PLAYER_MUST_PAY: character_create requires feePayer to match authority",
+    );
   }
   const name = normalizeName(input.name);
   const user = await prisma.user.findUnique(input.userId);
 
   if (user === null) {
-    throw new Error('ERR_USER_NOT_FOUND: user was not found');
+    throw new Error("ERR_USER_NOT_FOUND: user was not found");
   }
 
   const connection = deps.connection ?? createRunanaConnection();
   const commitment = deps.commitment ?? resolveRunanaCommitment();
   const programId = deps.programId ?? resolveRunanaProgramId();
-  const now = (deps.now ?? (() => new Date()))();
-  const characterCreationTs = toUnixTimestampSeconds(now);
+  const env: CharacterCreationEnv = {
+    RUNANA_ACTIVE_SEASON_ID:
+      deps.env?.RUNANA_ACTIVE_SEASON_ID ?? process.env.RUNANA_ACTIVE_SEASON_ID,
+    RUNANA_SEASON_ID:
+      deps.env?.RUNANA_SEASON_ID ?? process.env.RUNANA_SEASON_ID,
+  };
+  const activeSeasonId = resolveConfiguredActiveSeasonId(env);
 
   await validateBootstrapPreconditions({
     connection,
     commitment,
     programId,
-    seasonIdAtCreation: input.seasonIdAtCreation,
+    activeSeasonId,
     initialUnlockedZoneId: input.initialUnlockedZoneId,
   });
 
   const character = await createStarterCharacter(input.userId, name);
-  const generateCharacterIdHex = deps.generateCharacterIdHex ?? defaultCharacterIdHex;
+  const generateCharacterIdHex =
+    deps.generateCharacterIdHex ?? defaultCharacterIdHex;
 
-  let chainCharacterIdHex = '';
-  let createInstruction: ReturnType<typeof buildCreateCharacterInstruction> | null = null;
-  let preparedTransactionBytes: Awaited<ReturnType<typeof buildPreparedVersionedTransaction>> | null =
-    null;
+  let chainCharacterIdHex = "";
+  let createInstruction: ReturnType<
+    typeof buildCreateCharacterInstruction
+  > | null = null;
+  let preparedTransactionBytes: Awaited<
+    ReturnType<typeof buildPreparedVersionedTransaction>
+  > | null = null;
 
   for (
     let attempt = 1;
@@ -355,10 +418,9 @@ export async function prepareSolanaCharacterCreation(
     createInstruction = buildCreateCharacterInstruction({
       payer: feePayer,
       authority,
+      seasonId: activeSeasonId,
       programId,
       characterIdHex: chainCharacterIdHex,
-      characterCreationTs,
-      seasonIdAtCreation: input.seasonIdAtCreation,
       initialUnlockedZoneId: input.initialUnlockedZoneId,
     });
 
@@ -375,9 +437,7 @@ export async function prepareSolanaCharacterCreation(
         playerAuthorityPubkey: authority.toBase58(),
         chainCharacterIdHex,
         characterRootPubkey: createInstruction.characterRoot.toBase58(),
-        chainCreationStatus: 'PENDING',
-        chainCreationTs: characterCreationTs,
-        chainCreationSeasonId: input.seasonIdAtCreation,
+        chainCreationStatus: "PENDING",
       });
       break;
     } catch (error) {
@@ -388,9 +448,12 @@ export async function prepareSolanaCharacterCreation(
         continue;
       }
 
-      if (attempt >= MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS && isRetryableCharacterIdentityCollision(error)) {
+      if (
+        attempt >= MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS &&
+        isRetryableCharacterIdentityCollision(error)
+      ) {
         throw new Error(
-          'ERR_CHARACTER_ID_COLLISION_EXHAUSTED: could not assign a unique character identity after repeated collisions',
+          "ERR_CHARACTER_ID_COLLISION_EXHAUSTED: could not assign a unique character identity after repeated collisions",
         );
       }
 
@@ -398,9 +461,13 @@ export async function prepareSolanaCharacterCreation(
     }
   }
 
-  if (createInstruction === null || preparedTransactionBytes === null || chainCharacterIdHex.length === 0) {
+  if (
+    createInstruction === null ||
+    preparedTransactionBytes === null ||
+    chainCharacterIdHex.length === 0
+  ) {
     throw new Error(
-      'ERR_CHARACTER_PREPARE_INTERNAL: character creation prepare did not produce a chain identity',
+      "ERR_CHARACTER_PREPARE_INTERNAL: character creation prepare did not produce a chain identity",
     );
   }
 
@@ -408,12 +475,11 @@ export async function prepareSolanaCharacterCreation(
     authority: authority.toBase58(),
     feePayer: feePayer.toBase58(),
     serializedMessageBase64: preparedTransactionBytes.serializedMessageBase64,
-    serializedTransactionBase64: preparedTransactionBytes.serializedTransactionBase64,
+    serializedTransactionBase64:
+      preparedTransactionBytes.serializedTransactionBase64,
     localCharacterId: character.id,
     chainCharacterIdHex,
     characterRootPubkey: createInstruction.characterRoot.toBase58(),
-    characterCreationTs,
-    seasonIdAtCreation: input.seasonIdAtCreation,
     initialUnlockedZoneId: input.initialUnlockedZoneId,
     recentBlockhash: preparedTransactionBytes.recentBlockhash,
     lastValidBlockHeight: preparedTransactionBytes.lastValidBlockHeight,
@@ -425,11 +491,11 @@ export async function prepareSolanaCharacterCreation(
       playerAuthorityPubkey: authority.toBase58(),
       chainCharacterIdHex,
       characterRootPubkey: createInstruction.characterRoot.toBase58(),
-      chainCreationStatus: 'PENDING',
+      chainCreationStatus: "PENDING",
       chainCreationTxSignature: null,
       chainCreatedAt: null,
-      chainCreationTs: characterCreationTs,
-      chainCreationSeasonId: input.seasonIdAtCreation,
+      chainCreationTs: null,
+      chainCreationSeasonId: null,
     }),
     preparedTransaction,
   };
@@ -441,8 +507,13 @@ export async function submitSolanaCharacterCreation(
 ): Promise<SubmittedSolanaCharacterCreationResult> {
   const accepted = acceptSignedPlayerOwnedTransaction(input);
 
-  if (accepted.kind !== 'character_create' || accepted.characterCreationRelay === undefined) {
-    throw new Error('ERR_INVALID_CHARACTER_CREATE_SUBMISSION: missing character creation relay metadata');
+  if (
+    accepted.kind !== "character_create" ||
+    accepted.characterCreationRelay === undefined
+  ) {
+    throw new Error(
+      "ERR_INVALID_CHARACTER_CREATE_SUBMISSION: missing character creation relay metadata",
+    );
   }
 
   const relay = accepted.characterCreationRelay;
@@ -450,55 +521,96 @@ export async function submitSolanaCharacterCreation(
   const commitment = deps.commitment ?? resolveRunanaCommitment();
   const programId = deps.programId ?? resolveRunanaProgramId();
 
-  const rawTransaction = Buffer.from(accepted.signedTransactionBase64, 'base64');
-  const deserializedTransaction = deserializeVersionedTransactionBase64(accepted.signedTransactionBase64);
-  const signedMessageBase64 = serializeVersionedTransactionMessageBase64(deserializedTransaction);
+  const rawTransaction = Buffer.from(
+    accepted.signedTransactionBase64,
+    "base64",
+  );
+  let deserializedTransaction;
+  try {
+    deserializedTransaction = deserializeVersionedTransactionBase64(
+      accepted.signedTransactionBase64,
+    );
+  } catch {
+    throw new Error(
+      "ERR_INVALID_SIGNED_TRANSACTION: character creation requires a versioned transaction payload",
+    );
+  }
+  const signedMessageBase64 = serializeVersionedTransactionMessageBase64(
+    deserializedTransaction,
+  );
 
   if (signedMessageBase64 !== input.prepared.serializedMessageBase64) {
     throw new Error(
-      'ERR_SIGNED_TRANSACTION_MESSAGE_MISMATCH: signed transaction bytes do not match the prepared message',
+      `ERR_SIGNED_TRANSACTION_MESSAGE_MISMATCH: ${JSON.stringify({
+        preparedMessageSha256Hex: sha256HexFromBase64(
+          input.prepared.serializedMessageBase64,
+        ),
+        signedMessageSha256Hex: sha256HexFromBase64(signedMessageBase64),
+        transactionVersion: "v0",
+        localCharacterId: relay.localCharacterId,
+        characterRootPubkey: relay.characterRootPubkey,
+        walletAuthority: accepted.authority,
+      })}`,
     );
   }
 
-  const chainState = await prisma.character.findChainState(relay.localCharacterId);
+  const chainState = await prisma.character.findChainState(
+    relay.localCharacterId,
+  );
   if (chainState === null) {
-    throw new Error('ERR_CHARACTER_NOT_FOUND: local character for submission was not found');
+    throw new Error(
+      "ERR_CHARACTER_NOT_FOUND: local character for submission was not found",
+    );
   }
 
   if (chainState.playerAuthorityPubkey !== accepted.authority) {
-    throw new Error('ERR_CHARACTER_AUTHORITY_MISMATCH: prepared authority does not match persisted chain state');
+    throw new Error(
+      "ERR_CHARACTER_AUTHORITY_MISMATCH: prepared authority does not match persisted chain state",
+    );
   }
   if (chainState.chainCharacterIdHex !== relay.chainCharacterIdHex) {
-    throw new Error('ERR_CHARACTER_CHAIN_ID_MISMATCH: prepared chain character id does not match persisted state');
+    throw new Error(
+      "ERR_CHARACTER_CHAIN_ID_MISMATCH: prepared chain character id does not match persisted state",
+    );
   }
   if (chainState.characterRootPubkey !== relay.characterRootPubkey) {
-    throw new Error('ERR_CHARACTER_ROOT_MISMATCH: prepared character root does not match persisted state');
+    throw new Error(
+      "ERR_CHARACTER_ROOT_MISMATCH: prepared character root does not match persisted state",
+    );
   }
-  if (chainState.chainCreationStatus === 'CONFIRMED') {
-    throw new Error('ERR_CHARACTER_ALREADY_CONFIRMED: character is already confirmed on chain');
+  if (chainState.chainCreationStatus === "CONFIRMED") {
+    throw new Error(
+      "ERR_CHARACTER_ALREADY_CONFIRMED: character is already confirmed on chain",
+    );
   }
-  if (chainState.chainCreationStatus !== 'PENDING' && chainState.chainCreationStatus !== 'FAILED') {
-    throw new Error('ERR_CHARACTER_SUBMISSION_STATE: character creation submission requires PENDING or FAILED state');
+  if (
+    chainState.chainCreationStatus !== "PENDING" &&
+    chainState.chainCreationStatus !== "FAILED"
+  ) {
+    throw new Error(
+      "ERR_CHARACTER_SUBMISSION_STATE: character creation submission requires PENDING or FAILED state",
+    );
   }
 
   let transactionSignature: string | null = null;
 
   try {
-    transactionSignature = await (connection as Connection).sendRawTransaction(rawTransaction, {
-      preflightCommitment: commitment,
-      skipPreflight: false,
-      maxRetries: 3,
-    });
+    transactionSignature = await (connection as Connection).sendRawTransaction(
+      rawTransaction,
+      {
+        preflightCommitment: commitment,
+        skipPreflight: false,
+        maxRetries: 3,
+      },
+    );
 
     await updateCharacterChainState({
       characterId: relay.localCharacterId,
       playerAuthorityPubkey: accepted.authority,
       chainCharacterIdHex: relay.chainCharacterIdHex,
       characterRootPubkey: relay.characterRootPubkey,
-      chainCreationStatus: 'SUBMITTED',
+      chainCreationStatus: "SUBMITTED",
       chainCreationTxSignature: transactionSignature,
-      chainCreationTs: relay.characterCreationTs,
-      chainCreationSeasonId: relay.seasonIdAtCreation,
     });
 
     const confirmation = await (connection as Connection).confirmTransaction(
@@ -511,22 +623,37 @@ export async function submitSolanaCharacterCreation(
     );
 
     if (confirmation.value.err !== null) {
-      throw new Error(`ERR_CHARACTER_CREATE_CONFIRMATION_FAILED: ${JSON.stringify(confirmation.value.err)}`);
+      throw new Error(
+        `ERR_CHARACTER_CREATE_CONFIRMATION_FAILED: ${JSON.stringify(confirmation.value.err)}`,
+      );
     }
 
     const characterRootPubkey = new PublicKey(relay.characterRootPubkey);
-    const characterRoot = await fetchCharacterRootAccount(connection as Connection, characterRootPubkey, commitment);
+    const characterRoot = await fetchCharacterRootAccount(
+      connection as Connection,
+      characterRootPubkey,
+      commitment,
+    );
     const cursor = await fetchCharacterSettlementBatchCursorAccount(
       connection as Connection,
       deriveCharacterBatchCursorPda(characterRootPubkey, programId),
       commitment,
     );
+    const chainCreationTs = Number(characterRoot.characterCreationTs);
+    const chainCreationSeasonId = cursor.lastCommittedSeasonId;
 
     if (!characterRoot.authority.equals(new PublicKey(accepted.authority))) {
-      throw new Error('ERR_CHARACTER_ROOT_CONFIRMATION_MISMATCH: confirmed character root authority mismatch');
+      throw new Error(
+        "ERR_CHARACTER_ROOT_CONFIRMATION_MISMATCH: confirmed character root authority mismatch",
+      );
     }
-    if (accountCharacterIdHex(characterRoot.characterId) !== relay.chainCharacterIdHex.toLowerCase()) {
-      throw new Error('ERR_CHARACTER_ID_CONFIRMATION_MISMATCH: confirmed character id did not match prepared relay metadata');
+    if (
+      accountCharacterIdHex(characterRoot.characterId) !==
+      relay.chainCharacterIdHex.toLowerCase()
+    ) {
+      throw new Error(
+        "ERR_CHARACTER_ID_CONFIRMATION_MISMATCH: confirmed character id did not match prepared relay metadata",
+      );
     }
 
     const chainCreatedAt = (deps.now ?? (() => new Date()))();
@@ -535,15 +662,17 @@ export async function submitSolanaCharacterCreation(
       playerAuthorityPubkey: accepted.authority,
       chainCharacterIdHex: relay.chainCharacterIdHex,
       characterRootPubkey: relay.characterRootPubkey,
-      chainCreationStatus: 'CONFIRMED',
+      chainCreationStatus: "CONFIRMED",
       chainCreationTxSignature: transactionSignature,
       chainCreatedAt,
-      chainCreationTs: relay.characterCreationTs,
-      chainCreationSeasonId: relay.seasonIdAtCreation,
+      chainCreationTs,
+      chainCreationSeasonId,
     });
     await prisma.character.updateCursorSnapshot(relay.localCharacterId, {
       lastReconciledEndNonce: Number(cursor.lastCommittedEndNonce),
-      lastReconciledStateHash: accountStateHashHex(cursor.lastCommittedStateHash),
+      lastReconciledStateHash: accountStateHashHex(
+        cursor.lastCommittedStateHash,
+      ),
       lastReconciledBatchId: Number(cursor.lastCommittedBatchId),
       lastReconciledBattleTs: Number(cursor.lastCommittedBattleTs),
       lastReconciledSeasonId: cursor.lastCommittedSeasonId,
@@ -552,14 +681,16 @@ export async function submitSolanaCharacterCreation(
 
     return {
       characterId: relay.localCharacterId,
-      chainCreationStatus: 'CONFIRMED',
+      chainCreationStatus: "CONFIRMED",
       transactionSignature,
       chainCharacterIdHex: relay.chainCharacterIdHex,
       characterRootPubkey: relay.characterRootPubkey,
       chainCreatedAt: chainCreatedAt.toISOString(),
       cursor: {
         lastCommittedEndNonce: Number(cursor.lastCommittedEndNonce),
-        lastCommittedStateHash: accountStateHashHex(cursor.lastCommittedStateHash),
+        lastCommittedStateHash: accountStateHashHex(
+          cursor.lastCommittedStateHash,
+        ),
         lastCommittedBatchId: Number(cursor.lastCommittedBatchId),
         lastCommittedBattleTs: Number(cursor.lastCommittedBattleTs),
         lastCommittedSeasonId: cursor.lastCommittedSeasonId,
@@ -571,10 +702,8 @@ export async function submitSolanaCharacterCreation(
       playerAuthorityPubkey: accepted.authority,
       chainCharacterIdHex: relay.chainCharacterIdHex,
       characterRootPubkey: relay.characterRootPubkey,
-      chainCreationStatus: 'FAILED',
+      chainCreationStatus: "FAILED",
       chainCreationTxSignature: transactionSignature,
-      chainCreationTs: relay.characterCreationTs,
-      chainCreationSeasonId: relay.seasonIdAtCreation,
     });
     throw error;
   }

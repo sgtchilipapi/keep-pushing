@@ -24,8 +24,11 @@ function statusForError(message: string): number {
   if (
     message.startsWith('ERR_CHARACTER_CHAIN_IDENTITY_MISSING') ||
     message.startsWith('ERR_CHARACTER_AUTHORITY_MISMATCH') ||
+    message.startsWith('ERR_CHARACTER_CURSOR_UNAVAILABLE') ||
     message.startsWith('ERR_SETTLEMENT_ALREADY_SUBMITTED') ||
-    message.startsWith('ERR_SETTLEMENT_NOT_RETRYABLE')
+    message.startsWith('ERR_SETTLEMENT_NOT_RETRYABLE') ||
+    message.startsWith('ERR_NO_PENDING_BATTLES') ||
+    message.startsWith('ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES')
   ) {
     return 409;
   }

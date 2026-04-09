@@ -1,26 +1,34 @@
-import type { PrepareFirstSyncRouteResponse, PrepareSettlementRouteResponse } from './solana';
-import type { BattleResult } from '../battle';
+import type { PrepareSettlementRouteResponse } from "./solana";
+import type { BattleResult } from "../battle";
 
 export type ChainCreationStatus =
-  | 'NOT_STARTED'
-  | 'PENDING'
-  | 'SUBMITTED'
-  | 'CONFIRMED'
-  | 'FAILED';
+  | "NOT_STARTED"
+  | "PENDING"
+  | "SUBMITTED"
+  | "CONFIRMED"
+  | "FAILED";
+
+export type CharacterSyncPhase =
+  | "LOCAL_ONLY"
+  | "CREATING_ON_CHAIN"
+  | "INITIAL_SETTLEMENT_REQUIRED"
+  | "SYNCED"
+  | "SETTLEMENT_PENDING"
+  | "FAILED";
 
 export type BattleSettlementStatus =
-  | 'AWAITING_FIRST_SYNC'
-  | 'LOCAL_ONLY_ARCHIVED'
-  | 'PENDING'
-  | 'SEALED'
-  | 'COMMITTED';
+  | "AWAITING_FIRST_SYNC"
+  | "LOCAL_ONLY_ARCHIVED"
+  | "PENDING"
+  | "SEALED"
+  | "COMMITTED";
 
 export type SettlementBatchStatus =
-  | 'SEALED'
-  | 'PREPARED'
-  | 'SUBMITTED'
-  | 'CONFIRMED'
-  | 'FAILED';
+  | "SEALED"
+  | "PREPARED"
+  | "SUBMITTED"
+  | "CONFIRMED"
+  | "FAILED";
 
 export interface CharacterReadModel {
   characterId: string;
@@ -28,6 +36,8 @@ export interface CharacterReadModel {
   name: string;
   level: number;
   exp: number;
+  syncPhase: CharacterSyncPhase;
+  battleEligible: boolean;
   stats: {
     hp: number;
     hpMax: number;
@@ -105,7 +115,7 @@ export interface CreateCharacterResponse {
   userId: string;
   name: string;
   level: number;
-  stats: CharacterReadModel['stats'];
+  stats: CharacterReadModel["stats"];
   activeSkills: string[];
   passiveSkills: string[];
   unlockedSkillIds: string[];
@@ -120,9 +130,8 @@ export interface EncounterResponse {
   battleNonce: number;
   seasonId: number;
   battleTs: number;
-  settlementStatus: 'PENDING' | 'AWAITING_FIRST_SYNC';
+  settlementStatus: "PENDING" | "AWAITING_FIRST_SYNC";
   battleResult: BattleResult;
 }
 
-export type FirstSyncPrepareResponse = PrepareFirstSyncRouteResponse;
 export type SettlementPrepareResponse = PrepareSettlementRouteResponse;

@@ -41,6 +41,23 @@ The program artifacts must already exist:
 - `/home/paps/projects/runana-program/target/deploy/runana_program.so`
 - `/home/paps/projects/runana-program/target/deploy/runana_program-keypair.json`
 
+## Disk Usage Warning
+
+This workflow is not primarily Docker-heavy.
+
+The main WSL growth points are:
+- `keep-pushing/.tmp/manual-character-test`
+- `runana-program/target`
+- `runana-program/test-ledger`
+- `runana-program/.tmp/test-ledger`
+
+Use this cleanup command when you need space back quickly:
+
+```bash
+cd /home/paps/projects/keep-pushing
+npm run app:local:clean-space
+```
+
 If Docker socket access fails, make sure your user is in the `docker` group:
 
 ```bash
@@ -56,7 +73,13 @@ From [keep-pushing](/home/paps/projects/keep-pushing):
 ```bash
 cd /home/paps/projects/keep-pushing
 cp .env.docker.example .env.docker
-docker compose --env-file .env.docker up --build
+docker compose --env-file .env.docker up -d postgres app
+```
+
+Add `--build` only when `Dockerfile`, `package.json`, or app source changes require a fresh image:
+
+```bash
+docker compose --env-file .env.docker up -d --build postgres app
 ```
 
 This starts:
@@ -127,6 +150,11 @@ What this does:
   - enemy archetype registry
 - creates an anon backend user
 - writes local test artifacts under `.tmp/manual-character-test/<timestamp>`
+
+The helper now reuses one validator ledger path instead of creating a new multi-GB ledger inside every timestamped artifact directory:
+- `.tmp/manual-character-test/validator-ledger-current`
+
+It also prunes older timestamped artifact bundles automatically.
 
 `RUNANA_SKIP_SERVER_START=1` is important when the backend is already running in Docker. It prevents the helper from trying to start a second backend process on port `3000`.
 

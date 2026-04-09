@@ -448,10 +448,9 @@ export async function prepareSolanaFirstSync(
   const createInstruction = buildCreateCharacterInstruction({
     payer: feePayer,
     authority,
+    seasonId: seasonIdAtCreation,
     programId,
     characterIdHex: chainCharacterIdHex,
-    characterCreationTs,
-    seasonIdAtCreation,
     initialUnlockedZoneId,
   });
   const settlementInstructionAccounts = buildCanonicalSettlementInstructionAccounts({

@@ -1,4 +1,4 @@
-import { createPrivateKey, randomBytes, sign as signBytes } from 'node:crypto';
+import { createPrivateKey, randomBytes, sign as signBytes } from "node:crypto";
 
 import {
   AddressLookupTableAccount,
@@ -12,7 +12,7 @@ import {
   type Commitment,
   type Connection,
   type TransactionInstruction,
-} from '@solana/web3.js';
+} from "@solana/web3.js";
 
 import {
   accountCharacterIdHex,
@@ -27,7 +27,7 @@ import {
   fetchSeasonPolicyAccount,
   fetchZoneEnemySetAccount,
   fetchZoneRegistryAccount,
-} from '../lib/solana/runanaAccounts';
+} from "../lib/solana/runanaAccounts";
 import {
   buildInitializeEnemyArchetypeRegistryInstruction,
   buildInitializeProgramConfigInstruction,
@@ -35,21 +35,19 @@ import {
   buildInitializeZoneEnemySetInstruction,
   buildInitializeZoneRegistryInstruction,
   buildUpdateZoneEnemySetInstruction,
-} from '../lib/solana/runanaAdminInstructions';
-import { buildPreparedVersionedTransaction } from '../lib/solana/playerOwnedV0Transactions';
-import { buildCreateCharacterInstruction } from '../lib/solana/runanaCharacterInstructions';
-import {
-  buildCanonicalSettlementMessages,
-} from '../lib/solana/runanaSettlementInstructions';
-import { buildPreparedSettlementVersionedTransaction } from '../lib/solana/settlementTransactionAssembly';
-import { loadSettlementInstructionAccountEnvelope } from '../lib/solana/runanaSettlementEnvelope';
+} from "../lib/solana/runanaAdminInstructions";
+import { buildPreparedVersionedTransaction } from "../lib/solana/playerOwnedV0Transactions";
+import { buildCreateCharacterInstruction } from "../lib/solana/runanaCharacterInstructions";
+import { buildCanonicalSettlementMessages } from "../lib/solana/runanaSettlementInstructions";
+import { buildPreparedSettlementVersionedTransaction } from "../lib/solana/settlementTransactionAssembly";
+import { loadSettlementInstructionAccountEnvelope } from "../lib/solana/runanaSettlementEnvelope";
 import {
   createRunanaConnection,
   loadRunanaBootstrapAuthorities,
   loadRunanaTrustedServerSigner,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
-} from '../lib/solana/runanaClient';
+} from "../lib/solana/runanaClient";
 import {
   RUNANA_CLUSTER_ID_LOCALNET,
   deriveEnemyArchetypeRegistryPda,
@@ -57,17 +55,17 @@ import {
   deriveSeasonPolicyPda,
   deriveZoneEnemySetPda,
   deriveZoneRegistryPda,
-} from '../lib/solana/runanaProgram';
+} from "../lib/solana/runanaProgram";
 import {
   computeCanonicalEndStateHashHex,
   computeSettlementBatchHashHex,
-} from '../lib/solana/settlementCanonical';
-import type { SettlementBatchPayloadV2 } from '../types/settlement';
+} from "../lib/solana/settlementCanonical";
+import type { SettlementBatchPayloadV2 } from "../types/settlement";
 
 jest.setTimeout(120_000);
 
 const describeLocalnet =
-  process.env.RUNANA_ENABLE_LOCALNET_TESTS === '1' ? describe : describe.skip;
+  process.env.RUNANA_ENABLE_LOCALNET_TESTS === "1" ? describe : describe.skip;
 
 interface TestBootstrapContext {
   connection: Connection;
@@ -95,28 +93,33 @@ function dedupeKeypairs(signers: Keypair[]): Keypair[] {
 
 function base64Url(bytes: Uint8Array): string {
   return Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function signDetachedEd25519(message: Uint8Array, signer: Keypair): Uint8Array {
-  const jwk: import('node:crypto').JsonWebKey = {
-    kty: 'OKP',
-    crv: 'Ed25519',
+  const jwk: import("node:crypto").JsonWebKey = {
+    kty: "OKP",
+    crv: "Ed25519",
     d: base64Url(signer.secretKey.subarray(0, 32)),
     x: base64Url(signer.publicKey.toBytes()),
   };
 
   return new Uint8Array(
-    signBytes(null, Buffer.from(message), createPrivateKey({ key: jwk, format: 'jwk' })),
+    signBytes(
+      null,
+      Buffer.from(message),
+      createPrivateKey({ key: jwk, format: "jwk" }),
+    ),
   );
 }
 
-function resolveOptionalBootstrapAuthorities():
-  | { admin: Keypair; payer: Keypair }
-  | null {
+function resolveOptionalBootstrapAuthorities(): {
+  admin: Keypair;
+  payer: Keypair;
+} | null {
   try {
     const authorities = loadRunanaBootstrapAuthorities();
     return {
@@ -124,7 +127,10 @@ function resolveOptionalBootstrapAuthorities():
       payer: authorities.payer,
     };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('ERR_MISSING_ADMIN_KEYPAIR_PATH')) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith("ERR_MISSING_ADMIN_KEYPAIR_PATH")
+    ) {
       return null;
     }
     throw error;
@@ -137,7 +143,7 @@ function resolveOptionalServerSigner(): Keypair | null {
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.startsWith('ERR_MISSING_SERVER_SIGNER_KEYPAIR_PATH')
+      error.message.startsWith("ERR_MISSING_SERVER_SIGNER_KEYPAIR_PATH")
     ) {
       return null;
     }
@@ -165,7 +171,10 @@ async function airdropIfNeeded(
     return;
   }
 
-  const signature = await connection.requestAirdrop(recipient, minimumLamports * 2);
+  const signature = await connection.requestAirdrop(
+    recipient,
+    minimumLamports * 2,
+  );
   const latestBlockhash = await connection.getLatestBlockhash(commitment);
   const confirmation = await connection.confirmTransaction(
     {
@@ -177,7 +186,9 @@ async function airdropIfNeeded(
   );
 
   if (confirmation.value.err !== null) {
-    throw new Error(`ERR_AIRDROP_FAILED: ${JSON.stringify(confirmation.value.err)}`);
+    throw new Error(
+      `ERR_AIRDROP_FAILED: ${JSON.stringify(confirmation.value.err)}`,
+    );
   }
 }
 
@@ -209,28 +220,38 @@ async function sendPreparedVersionedTransaction(args: {
   recentBlockhash: string;
   lastValidBlockHeight: number;
 }): Promise<string> {
-  const signature = await args.connection.sendRawTransaction(Buffer.from(args.transaction.serialize()), {
-    preflightCommitment: args.commitment,
-    skipPreflight: false,
-    maxRetries: 3,
-  });
+  const signature = await args.connection.sendRawTransaction(
+    Buffer.from(args.transaction.serialize()),
+    {
+      preflightCommitment: args.commitment,
+      skipPreflight: false,
+      maxRetries: 3,
+    },
+  );
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const statuses = await args.connection.getSignatureStatuses([signature]);
     const status = statuses.value[0];
 
     if (status?.err !== null && status?.err !== undefined) {
-      throw new Error(`ERR_TRANSACTION_CONFIRMATION_FAILED: ${JSON.stringify(status.err)}`);
+      throw new Error(
+        `ERR_TRANSACTION_CONFIRMATION_FAILED: ${JSON.stringify(status.err)}`,
+      );
     }
 
-    if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
+    if (
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
       return signature;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
-  throw new Error(`ERR_TRANSACTION_CONFIRMATION_TIMEOUT: ${signature} was not confirmed`);
+  throw new Error(
+    `ERR_TRANSACTION_CONFIRMATION_TIMEOUT: ${signature} was not confirmed`,
+  );
 }
 
 async function waitForSlotAdvance(
@@ -238,14 +259,16 @@ async function waitForSlotAdvance(
   priorSlot: number,
 ): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const currentSlot = await connection.getSlot('processed');
+    const currentSlot = await connection.getSlot("processed");
     if (currentSlot > priorSlot) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error('ERR_LOOKUP_TABLE_NOT_WARMED: address lookup table did not warm up on localnet');
+  throw new Error(
+    "ERR_LOOKUP_TABLE_NOT_WARMED: address lookup table did not warm up on localnet",
+  );
 }
 
 async function createSettlementLookupTable(args: {
@@ -254,24 +277,25 @@ async function createSettlementLookupTable(args: {
   authority: Keypair;
   addresses: PublicKey[];
 }): Promise<AddressLookupTableAccount> {
-  const currentSlot = await args.connection.getSlot('processed');
+  const currentSlot = await args.connection.getSlot("processed");
   const recentSlot = Math.max(currentSlot - 1, 0);
-  const [createInstruction, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
-    authority: args.authority.publicKey,
-    payer: args.payer.publicKey,
-    recentSlot,
-  });
+  const [createInstruction, lookupTableAddress] =
+    AddressLookupTableProgram.createLookupTable({
+      authority: args.authority.publicKey,
+      payer: args.payer.publicKey,
+      recentSlot,
+    });
 
   await sendAdminInstruction({
     connection: args.connection,
-    commitment: 'processed',
+    commitment: "processed",
     payer: args.payer,
     signers: [args.authority],
     instruction: createInstruction,
   });
   await sendAdminInstruction({
     connection: args.connection,
-    commitment: 'processed',
+    commitment: "processed",
     payer: args.payer,
     signers: [args.authority],
     instruction: AddressLookupTableProgram.extendLookupTable({
@@ -281,10 +305,11 @@ async function createSettlementLookupTable(args: {
       addresses: args.addresses,
     }),
   });
-  const extendSlot = await args.connection.getSlot('processed');
+  const extendSlot = await args.connection.getSlot("processed");
   await waitForSlotAdvance(args.connection, extendSlot);
 
-  const lookupTable = await args.connection.getAddressLookupTable(lookupTableAddress);
+  const lookupTable =
+    await args.connection.getAddressLookupTable(lookupTableAddress);
   if (lookupTable.value === null) {
     throw new Error(
       `ERR_LOOKUP_TABLE_NOT_FOUND: lookup table ${lookupTableAddress.toBase58()} was not found after creation`,
@@ -294,7 +319,9 @@ async function createSettlementLookupTable(args: {
   return lookupTable.value;
 }
 
-async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<void> {
+async function ensureProgramBootstrap(
+  context: TestBootstrapContext,
+): Promise<void> {
   const {
     connection,
     commitment,
@@ -312,7 +339,10 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
   } = context;
 
   const programConfigPubkey = deriveProgramConfigPda(programId);
-  const existingProgramConfig = await connection.getAccountInfo(programConfigPubkey, commitment);
+  const existingProgramConfig = await connection.getAccountInfo(
+    programConfigPubkey,
+    commitment,
+  );
 
   if (existingProgramConfig === null) {
     await sendAdminInstruction({
@@ -331,7 +361,11 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
       }),
     });
   } else {
-    const decoded = await fetchProgramConfigAccount(connection, programConfigPubkey, commitment);
+    const decoded = await fetchProgramConfigAccount(
+      connection,
+      programConfigPubkey,
+      commitment,
+    );
     if (!decoded.adminAuthority.equals(admin.publicKey)) {
       throw new Error(
         `ERR_PROGRAM_CONFIG_ADMIN_MISMATCH: localnet program config admin ${decoded.adminAuthority.toBase58()} does not match the test admin ${admin.publicKey.toBase58()}`,
@@ -343,12 +377,16 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
       );
     }
     if (decoded.settlementPaused) {
-      throw new Error('ERR_PROGRAM_CONFIG_SETTLEMENT_PAUSED: localnet settlement must be unpaused for integration coverage');
+      throw new Error(
+        "ERR_PROGRAM_CONFIG_SETTLEMENT_PAUSED: localnet settlement must be unpaused for integration coverage",
+      );
     }
   }
 
   const seasonPolicyPubkey = deriveSeasonPolicyPda(seasonId, programId);
-  if ((await connection.getAccountInfo(seasonPolicyPubkey, commitment)) === null) {
+  if (
+    (await connection.getAccountInfo(seasonPolicyPubkey, commitment)) === null
+  ) {
     await sendAdminInstruction({
       connection,
       commitment,
@@ -367,7 +405,9 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
   }
 
   const zoneRegistryPubkey = deriveZoneRegistryPda(zoneId, programId);
-  if ((await connection.getAccountInfo(zoneRegistryPubkey, commitment)) === null) {
+  if (
+    (await connection.getAccountInfo(zoneRegistryPubkey, commitment)) === null
+  ) {
     await sendAdminInstruction({
       connection,
       commitment,
@@ -384,8 +424,13 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
     });
   }
 
-  const enemyArchetypePubkey = deriveEnemyArchetypeRegistryPda(enemyArchetypeId, programId);
-  if ((await connection.getAccountInfo(enemyArchetypePubkey, commitment)) === null) {
+  const enemyArchetypePubkey = deriveEnemyArchetypeRegistryPda(
+    enemyArchetypeId,
+    programId,
+  );
+  if (
+    (await connection.getAccountInfo(enemyArchetypePubkey, commitment)) === null
+  ) {
     await sendAdminInstruction({
       connection,
       commitment,
@@ -402,7 +447,10 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
   }
 
   const zoneEnemySetPubkey = deriveZoneEnemySetPda(zoneId, programId);
-  const zoneEnemySetInfo = await connection.getAccountInfo(zoneEnemySetPubkey, commitment);
+  const zoneEnemySetInfo = await connection.getAccountInfo(
+    zoneEnemySetPubkey,
+    commitment,
+  );
   if (zoneEnemySetInfo === null) {
     await sendAdminInstruction({
       connection,
@@ -418,8 +466,15 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
       }),
     });
   } else {
-    const decoded = await fetchZoneEnemySetAccount(connection, zoneEnemySetPubkey, commitment);
-    if (decoded.allowedEnemyArchetypeIds.length !== 1 || decoded.allowedEnemyArchetypeIds[0] !== enemyArchetypeId) {
+    const decoded = await fetchZoneEnemySetAccount(
+      connection,
+      zoneEnemySetPubkey,
+      commitment,
+    );
+    if (
+      decoded.allowedEnemyArchetypeIds.length !== 1 ||
+      decoded.allowedEnemyArchetypeIds[0] !== enemyArchetypeId
+    ) {
       await sendAdminInstruction({
         connection,
         commitment,
@@ -436,7 +491,7 @@ async function ensureProgramBootstrap(context: TestBootstrapContext): Promise<vo
   }
 }
 
-describeLocalnet('runana localnet integration', () => {
+describeLocalnet("runana localnet integration", () => {
   let context: TestBootstrapContext;
 
   beforeAll(async () => {
@@ -489,7 +544,7 @@ describeLocalnet('runana localnet integration', () => {
     maybeRpcWebSocket?.close();
   });
 
-  it('bootstraps admin state with backend instructions on localnet', async () => {
+  it("bootstraps admin state with backend instructions on localnet", async () => {
     const programConfig = await fetchProgramConfigAccount(
       context.connection,
       deriveProgramConfigPda(context.programId),
@@ -512,11 +567,16 @@ describeLocalnet('runana localnet integration', () => {
     );
     const enemyArchetype = await fetchEnemyArchetypeRegistryAccount(
       context.connection,
-      deriveEnemyArchetypeRegistryPda(context.enemyArchetypeId, context.programId),
+      deriveEnemyArchetypeRegistryPda(
+        context.enemyArchetypeId,
+        context.programId,
+      ),
       context.commitment,
     );
 
-    expect(programConfig.adminAuthority.toBase58()).toBe(context.admin.publicKey.toBase58());
+    expect(programConfig.adminAuthority.toBase58()).toBe(
+      context.admin.publicKey.toBase58(),
+    );
     expect(programConfig.trustedServerSigner.toBase58()).toBe(
       context.serverSigner.publicKey.toBase58(),
     );
@@ -524,26 +584,32 @@ describeLocalnet('runana localnet integration', () => {
     expect(seasonPolicy.seasonId).toBe(context.seasonId);
     expect(Number(seasonPolicy.seasonStartTs)).toBe(context.seasonStartTs);
     expect(Number(seasonPolicy.seasonEndTs)).toBe(context.seasonEndTs);
-    expect(Number(seasonPolicy.commitGraceEndTs)).toBe(context.commitGraceEndTs);
+    expect(Number(seasonPolicy.commitGraceEndTs)).toBe(
+      context.commitGraceEndTs,
+    );
     expect(zoneRegistry.zoneId).toBe(context.zoneId);
     expect(zoneRegistry.expMultiplierNum).toBe(1);
     expect(zoneRegistry.expMultiplierDen).toBe(1);
-    expect(zoneEnemySet.allowedEnemyArchetypeIds).toEqual([context.enemyArchetypeId]);
+    expect(zoneEnemySet.allowedEnemyArchetypeIds).toEqual([
+      context.enemyArchetypeId,
+    ]);
     expect(enemyArchetype.expRewardBase).toBe(context.expRewardBase);
   });
 
-  it('creates a character and simulates a settlement batch with backend transaction assembly on localnet', async () => {
+  it("creates a character and simulates a settlement batch with backend transaction assembly on localnet", async () => {
     const player = Keypair.generate();
-    await airdropIfNeeded(context.connection, context.commitment, player.publicKey);
+    await airdropIfNeeded(
+      context.connection,
+      context.commitment,
+      player.publicKey,
+    );
 
-    const characterCreationTs = Math.max(Math.floor(Date.now() / 1000), context.seasonStartTs + 1);
-    const characterIdHex = randomBytes(16).toString('hex');
+    const characterIdHex = randomBytes(16).toString("hex");
     const createCharacter = buildCreateCharacterInstruction({
       payer: player.publicKey,
       authority: player.publicKey,
+      seasonId: context.seasonId,
       characterIdHex,
-      characterCreationTs,
-      seasonIdAtCreation: context.seasonId,
       initialUnlockedZoneId: context.zoneId,
       programId: context.programId,
     });
@@ -554,7 +620,7 @@ describeLocalnet('runana localnet integration', () => {
       commitment: context.commitment,
     });
     const createTransaction = VersionedTransaction.deserialize(
-      Buffer.from(preparedCreate.serializedTransactionBase64, 'base64'),
+      Buffer.from(preparedCreate.serializedTransactionBase64, "base64"),
     );
     createTransaction.sign([player]);
 
@@ -581,30 +647,52 @@ describeLocalnet('runana localnet integration', () => {
       createCharacter.characterWorldProgress,
       context.commitment,
     );
-    const characterZoneProgressPage = await fetchCharacterZoneProgressPageAccount(
-      context.connection,
-      createCharacter.characterZoneProgressPage,
-      context.commitment,
-    );
+    const characterZoneProgressPage =
+      await fetchCharacterZoneProgressPageAccount(
+        context.connection,
+        createCharacter.characterZoneProgressPage,
+        context.commitment,
+      );
     const initialCursor = await fetchCharacterSettlementBatchCursorAccount(
       context.connection,
       createCharacter.characterBatchCursor,
       context.commitment,
     );
 
-    expect(characterRoot.authority.toBase58()).toBe(player.publicKey.toBase58());
-    expect(accountCharacterIdHex(characterRoot.characterId)).toBe(characterIdHex);
+    expect(characterRoot.authority.toBase58()).toBe(
+      player.publicKey.toBase58(),
+    );
+    expect(accountCharacterIdHex(characterRoot.characterId)).toBe(
+      characterIdHex,
+    );
     expect(characterStats.level).toBe(1);
     expect(Number(characterStats.totalExp)).toBe(0);
     expect(characterWorldProgress.highestUnlockedZoneId).toBe(context.zoneId);
     expect(characterWorldProgress.highestClearedZoneId).toBe(0);
-    expect(characterZoneProgressPage.pageIndex).toBe(Math.floor(context.zoneId / 256));
+    expect(characterZoneProgressPage.pageIndex).toBe(
+      Math.floor(context.zoneId / 256),
+    );
     expect(characterZoneProgressPage.zoneStates[context.zoneId % 256]).toBe(1);
     expect(Number(initialCursor.lastCommittedEndNonce)).toBe(0);
     expect(Number(initialCursor.lastCommittedBatchId)).toBe(0);
-    expect(accountStateHashHex(initialCursor.lastCommittedStateHash)).toHaveLength(64);
+    expect(Number(characterRoot.characterCreationTs)).toBeGreaterThanOrEqual(
+      context.seasonStartTs,
+    );
+    expect(Number(characterRoot.characterCreationTs)).toBeLessThanOrEqual(
+      context.seasonEndTs,
+    );
+    expect(Number(initialCursor.lastCommittedBattleTs)).toBe(
+      Number(characterRoot.characterCreationTs),
+    );
+    expect(initialCursor.lastCommittedSeasonId).toBe(context.seasonId);
+    expect(
+      accountStateHashHex(initialCursor.lastCommittedStateHash),
+    ).toHaveLength(64);
 
-    const settlementStartStateHash = accountStateHashHex(initialCursor.lastCommittedStateHash);
+    const onChainCreationTs = Number(characterRoot.characterCreationTs);
+    const settlementStartStateHash = accountStateHashHex(
+      initialCursor.lastCommittedStateHash,
+    );
     const settlementPreimage = {
       characterId: characterIdHex,
       batchId: 1,
@@ -620,8 +708,8 @@ describeLocalnet('runana localnet integration', () => {
           count: 1,
         },
       ],
-      firstBattleTs: characterCreationTs + 1,
-      lastBattleTs: characterCreationTs + 1,
+      firstBattleTs: onChainCreationTs + 1,
+      lastBattleTs: onChainCreationTs + 1,
       seasonId: context.seasonId,
       schemaVersion: 2 as const,
       signatureScheme: 0 as const,
@@ -630,16 +718,16 @@ describeLocalnet('runana localnet integration', () => {
       ...settlementPreimage,
       endStateHash: computeCanonicalEndStateHashHex({
         ...settlementPreimage,
-        characterId: Buffer.from(settlementPreimage.characterId, 'hex'),
-        startStateHash: Buffer.from(settlementPreimage.startStateHash, 'hex'),
+        characterId: Buffer.from(settlementPreimage.characterId, "hex"),
+        startStateHash: Buffer.from(settlementPreimage.startStateHash, "hex"),
       }),
-      batchHash: '',
+      batchHash: "",
     };
     settlementPayload.batchHash = computeSettlementBatchHashHex({
       ...settlementPreimage,
-      characterId: Buffer.from(settlementPreimage.characterId, 'hex'),
-      startStateHash: Buffer.from(settlementPreimage.startStateHash, 'hex'),
-      endStateHash: Buffer.from(settlementPayload.endStateHash, 'hex'),
+      characterId: Buffer.from(settlementPreimage.characterId, "hex"),
+      startStateHash: Buffer.from(settlementPreimage.startStateHash, "hex"),
+      endStateHash: Buffer.from(settlementPayload.endStateHash, "hex"),
     });
 
     const settlementEnvelope = await loadSettlementInstructionAccountEnvelope({
@@ -665,21 +753,24 @@ describeLocalnet('runana localnet integration', () => {
       connection: context.connection,
       payer: player,
       authority: player,
-      addresses: settlementEnvelope.instructionAccounts.slice(1).map((account) => account.pubkey),
+      addresses: settlementEnvelope.instructionAccounts
+        .slice(1)
+        .map((account) => account.pubkey),
     });
-    const preparedSettlement = await buildPreparedSettlementVersionedTransaction({
-      connection: context.connection,
-      envelope: settlementEnvelope,
-      payload: settlementPayload,
-      feePayer: player.publicKey,
-      playerAuthorizationSignature,
-      serverSigner: context.serverSigner,
-      addressLookupTableAccounts: [lookupTable],
-      commitment: context.commitment,
-      clusterId: RUNANA_CLUSTER_ID_LOCALNET,
-    });
+    const preparedSettlement =
+      await buildPreparedSettlementVersionedTransaction({
+        connection: context.connection,
+        envelope: settlementEnvelope,
+        payload: settlementPayload,
+        feePayer: player.publicKey,
+        playerAuthorizationSignature,
+        serverSigner: context.serverSigner,
+        addressLookupTableAccounts: [lookupTable],
+        commitment: context.commitment,
+        clusterId: RUNANA_CLUSTER_ID_LOCALNET,
+      });
     const settlementTransaction = VersionedTransaction.deserialize(
-      Buffer.from(preparedSettlement.serializedTransactionBase64, 'base64'),
+      Buffer.from(preparedSettlement.serializedTransactionBase64, "base64"),
     );
     settlementTransaction.sign([player]);
     const settlementSimulation = await context.connection.simulateTransaction(
@@ -689,10 +780,12 @@ describeLocalnet('runana localnet integration', () => {
       },
     );
 
-    expect(preparedSettlement.serverSignerPubkey).toBe(context.serverSigner.publicKey.toBase58());
+    expect(preparedSettlement.serverSignerPubkey).toBe(
+      context.serverSigner.publicKey.toBase58(),
+    );
     expect(settlementSimulation.value.err).toBeNull();
-    expect(settlementSimulation.value.logs?.join('\n')).toContain(
-      'Program CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm success',
+    expect(settlementSimulation.value.logs?.join("\n")).toContain(
+      "Program CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm success",
     );
   });
 });

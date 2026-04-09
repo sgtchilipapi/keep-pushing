@@ -6,6 +6,8 @@ RUNANA_PROGRAM_ROOT="${RUNANA_PROGRAM_ROOT:-$(cd "$KEEP_PUSHING_ROOT/../runana-p
 ARTIFACT_PARENT="${RUNANA_MANUAL_TEST_ROOT:-$KEEP_PUSHING_ROOT/.tmp/manual-character-test}"
 RUN_ID="${RUNANA_MANUAL_TEST_RUN_ID:-$(date '+%Y%m%d-%H%M%S')}"
 ARTIFACT_DIR="${RUNANA_MANUAL_TEST_DIR:-$ARTIFACT_PARENT/$RUN_ID}"
+VALIDATOR_LEDGER_PATH="${RUNANA_VALIDATOR_LEDGER_PATH:-$ARTIFACT_PARENT/validator-ledger-current}"
+MAX_ARTIFACT_DIRS="${RUNANA_MANUAL_TEST_MAX_ARTIFACT_DIRS:-5}"
 LOG_DIR="$ARTIFACT_DIR/logs"
 KEYPAIR_DIR="$ARTIFACT_DIR/keypairs"
 
@@ -45,6 +47,7 @@ PREPARE_REQUEST_PATH="$ARTIFACT_DIR/character-create-prepare.request.json"
 STOP_SCRIPT_PATH="$ARTIFACT_DIR/stop-stack.sh"
 
 mkdir -p "$LOG_DIR" "$KEYPAIR_DIR"
+mkdir -p "$ARTIFACT_PARENT"
 
 function note() {
   printf '[setup] %s\n' "$*"
@@ -57,6 +60,33 @@ function fail() {
 
 function require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+function prune_old_artifact_dirs() {
+  [[ "$MAX_ARTIFACT_DIRS" =~ ^[0-9]+$ ]] || fail "RUNANA_MANUAL_TEST_MAX_ARTIFACT_DIRS must be a non-negative integer"
+
+  if (( MAX_ARTIFACT_DIRS == 0 )); then
+    note "Skipping artifact pruning because RUNANA_MANUAL_TEST_MAX_ARTIFACT_DIRS=0"
+    return
+  fi
+
+  local keep_older_count=$((MAX_ARTIFACT_DIRS - 1))
+  mapfile -t artifact_dirs < <(
+    find "$ARTIFACT_PARENT" -mindepth 1 -maxdepth 1 -type d \
+      ! -path "$ARTIFACT_DIR" \
+      ! -path "$VALIDATOR_LEDGER_PATH" \
+      -printf '%P\n' | sort -r
+  )
+
+  if (( ${#artifact_dirs[@]} <= keep_older_count )); then
+    return
+  fi
+
+  local dir_name
+  for dir_name in "${artifact_dirs[@]:keep_older_count}"; do
+    note "Removing stale artifact bundle $ARTIFACT_PARENT/$dir_name"
+    rm -rf "$ARTIFACT_PARENT/$dir_name"
+  done
 }
 
 function create_keypair_if_missing() {
@@ -113,12 +143,12 @@ function start_validator_if_needed() {
     fail "RUNANA_SKIP_VALIDATOR_START=1 was set, but no validator is reachable at $RPC_URL"
   fi
 
-  note "Starting solana-test-validator at $RPC_URL"
+  note "Starting solana-test-validator at $RPC_URL using reusable ledger $VALIDATOR_LEDGER_PATH"
   nohup solana-test-validator \
     --reset \
     --bind-address "$VALIDATOR_HOST" \
     --rpc-port "$VALIDATOR_PORT" \
-    --ledger "$ARTIFACT_DIR/validator-ledger" >"$VALIDATOR_LOG_PATH" 2>&1 &
+    --ledger "$VALIDATOR_LEDGER_PATH" >"$VALIDATOR_LOG_PATH" 2>&1 &
   echo "$!" >"$VALIDATOR_PID_PATH"
   wait_for_rpc
 }
@@ -280,17 +310,16 @@ function write_prepare_request() {
   local user_id="$1"
   local player_pubkey="$2"
 
-  node - "$PREPARE_REQUEST_PATH" "$user_id" "$player_pubkey" "$SEASON_ID" "$ZONE_ID" <<'NODE'
+  node - "$PREPARE_REQUEST_PATH" "$user_id" "$player_pubkey" "$ZONE_ID" <<'NODE'
 const fs = require('node:fs');
 
-const [outputPath, userId, playerPubkey, seasonId, zoneId] = process.argv.slice(2);
+const [outputPath, userId, playerPubkey, zoneId] = process.argv.slice(2);
 
 const request = {
   userId,
   authority: playerPubkey,
   feePayer: playerPubkey,
   name: 'Manual Localnet',
-  seasonIdAtCreation: Number(seasonId),
   initialUnlockedZoneId: Number(zoneId),
 };
 
@@ -329,6 +358,8 @@ require_command anchor
 require_command solana
 require_command solana-keygen
 require_command solana-test-validator
+
+prune_old_artifact_dirs
 
 [[ -f "$PROGRAM_KEYPAIR_PATH" ]] || fail "program keypair not found at $PROGRAM_KEYPAIR_PATH"
 
@@ -374,6 +405,7 @@ printf 'Artifacts: %s\n' "$ARTIFACT_DIR"
 printf 'RPC URL: %s\n' "$RPC_URL"
 printf 'Server URL: %s\n' "$SERVER_URL"
 printf 'Program ID: %s\n' "$PROGRAM_ID"
+printf 'Validator ledger: %s\n' "$VALIDATOR_LEDGER_PATH"
 printf 'Anon user: %s\n' "$USER_ID"
 printf 'Player pubkey: %s\n' "$PLAYER_PUBKEY"
 printf 'Prepare request: %s\n' "$PREPARE_REQUEST_PATH"

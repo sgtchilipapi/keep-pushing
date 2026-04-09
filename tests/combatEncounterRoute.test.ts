@@ -70,7 +70,9 @@ describe('POST /api/combat/encounter', () => {
 
   it('maps service domain errors to conflict responses', async () => {
     (executeRealEncounter as jest.Mock).mockRejectedValue(
-      new Error('ERR_CHARACTER_NOT_CONFIRMED: character must be chain-confirmed before encounters'),
+      new Error(
+        'ERR_INITIAL_SETTLEMENT_REQUIRED: initial settlement required before new battles',
+      ),
     );
 
     const response = await postEncounter({
@@ -80,6 +82,6 @@ describe('POST /api/combat/encounter', () => {
     const json = await response.json();
 
     expect(response.status).toBe(409);
-    expect(json.error).toMatch(/ERR_CHARACTER_NOT_CONFIRMED/);
+    expect(json.error).toMatch(/ERR_INITIAL_SETTLEMENT_REQUIRED/);
   });
 });

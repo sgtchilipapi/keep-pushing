@@ -1,20 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
 
 import {
   prepareSolanaCharacterCreation,
   type PrepareSolanaCharacterCreationInput,
-} from '../../../../../../lib/solana/characterCreation';
+} from "../../../../../../lib/solana/characterCreation";
 
 function statusForError(message: string): number {
   if (
-    message.startsWith('ERR_INVALID_') ||
-    message.startsWith('ERR_EMPTY_') ||
-    message.startsWith('ERR_PLAYER_MUST_PAY')
+    message.startsWith("ERR_INVALID_") ||
+    message.startsWith("ERR_EMPTY_") ||
+    message.startsWith("ERR_PLAYER_MUST_PAY")
   ) {
     return 400;
   }
 
-  if (message.startsWith('ERR_USER_NOT_FOUND')) {
+  if (message.startsWith("ERR_USER_NOT_FOUND")) {
     return 404;
   }
 
@@ -25,26 +25,33 @@ export async function POST(request: Request) {
   let body: Partial<PrepareSolanaCharacterCreationInput>;
 
   try {
-    body = (await request.json()) as Partial<PrepareSolanaCharacterCreationInput>;
+    body =
+      (await request.json()) as Partial<PrepareSolanaCharacterCreationInput>;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
   try {
     const result = await prepareSolanaCharacterCreation({
-      userId: typeof body.userId === 'string' ? body.userId : '',
-      authority: typeof body.authority === 'string' ? body.authority : '',
-      feePayer: typeof body.feePayer === 'string' ? body.feePayer : undefined,
-      name: typeof body.name === 'string' ? body.name : undefined,
-      seasonIdAtCreation:
-        typeof body.seasonIdAtCreation === 'number' ? body.seasonIdAtCreation : Number.NaN,
+      userId: typeof body.userId === "string" ? body.userId : "",
+      authority: typeof body.authority === "string" ? body.authority : "",
+      feePayer: typeof body.feePayer === "string" ? body.feePayer : undefined,
+      name: typeof body.name === "string" ? body.name : undefined,
       initialUnlockedZoneId:
-        typeof body.initialUnlockedZoneId === 'number' ? body.initialUnlockedZoneId : Number.NaN,
+        typeof body.initialUnlockedZoneId === "number"
+          ? body.initialUnlockedZoneId
+          : Number.NaN,
     });
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to prepare Solana character creation.';
-    return NextResponse.json({ error: message }, { status: statusForError(message) });
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to prepare Solana character creation.";
+    return NextResponse.json(
+      { error: message },
+      { status: statusForError(message) },
+    );
   }
 }

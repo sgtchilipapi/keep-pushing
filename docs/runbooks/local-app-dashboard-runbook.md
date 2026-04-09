@@ -31,7 +31,9 @@ cd /home/paps/projects/keep-pushing
 pkill -f "next dev" || true
 pkill -f solana-test-validator || true
 docker compose --env-file .env.docker down -v || true
+npm run app:local:clean-space
 npm run app:local:fresh
+solana airdrop 5 D6jgHRYrA3As8ar6uvUixxyrdkb7t8658e2zuCHmMm2w --url http://127.0.0.1:8899
 
 
 What the one-shot helper now does:
@@ -97,6 +99,13 @@ cp .env.docker.example .env.docker
 npm install
 ```
 
+If WSL disk usage is already ballooning, reclaim local validator and Rust build space before starting:
+
+```bash
+cd /home/paps/projects/keep-pushing
+npm run app:local:clean-space
+```
+
 ## Choose A Startup Mode
 
 ### Option A: Dockerized App For A Production-Like Fresh Build
@@ -120,6 +129,12 @@ Then start the Docker app and Postgres with a fresh image build:
 
 ```bash
 cd /home/paps/projects/keep-pushing
+docker compose --env-file .env.docker up -d postgres app
+```
+
+Use `--build` only when you actually need a new image:
+
+```bash
 docker compose --env-file .env.docker up -d --build postgres app
 ```
 
@@ -188,6 +203,8 @@ This helper will:
 - reuse the already-running app on `http://127.0.0.1:3000`
 - create an anon backend user for the artifact bundle
 - write artifacts under `.tmp/manual-character-test/<timestamp>`
+- reuse `.tmp/manual-character-test/validator-ledger-current` so validator state does not accumulate into a new multi-GB ledger on every run
+- prune older timestamped artifact bundles automatically
 
 Important:
 

@@ -52,8 +52,8 @@ export interface CharacterCreationRelayMetadata {
   localCharacterId: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
-  characterCreationTs: number;
-  seasonIdAtCreation: number;
+  characterCreationTs?: number;
+  seasonIdAtCreation?: number;
   initialUnlockedZoneId: number;
   recentBlockhash: string;
   lastValidBlockHeight: number;
@@ -92,8 +92,8 @@ export interface PrepareCharacterCreationTransactionRequest {
   localCharacterId: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
-  characterCreationTs: number;
-  seasonIdAtCreation: number;
+  characterCreationTs?: number;
+  seasonIdAtCreation?: number;
   initialUnlockedZoneId: number;
   recentBlockhash: string;
   lastValidBlockHeight: number;
@@ -118,11 +118,17 @@ export interface PrepareFirstSyncTransactionRequest {
   serializedTransactionBase64?: string;
   characterCreation: Omit<
     PrepareCharacterCreationTransactionRequest,
-    "authority" | "feePayer" | "serializedMessageBase64" | "serializedTransactionBase64"
+    | "authority"
+    | "feePayer"
+    | "serializedMessageBase64"
+    | "serializedTransactionBase64"
   >;
   settlement: Omit<
     PrepareSettlementTransactionRequest,
-    "playerAuthority" | "feePayer" | "serializedMessageBase64" | "serializedTransactionBase64"
+    | "playerAuthority"
+    | "feePayer"
+    | "serializedMessageBase64"
+    | "serializedTransactionBase64"
   >;
 }
 
@@ -167,6 +173,59 @@ export type PrepareSettlementRouteResponse =
 
 export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {
   settlementBatchId: string;
+}
+
+export interface PrepareCharacterCreationRouteRequest {
+  userId: string;
+  authority: string;
+  feePayer?: string;
+  name?: string;
+  initialUnlockedZoneId: number;
+}
+
+export interface PrepareCharacterCreationRouteResponse {
+  character: {
+    characterId: string;
+    userId: string;
+    name: string;
+    level: number;
+    exp: number;
+    stats: {
+      hp: number;
+      hpMax: number;
+      atk: number;
+      def: number;
+      spd: number;
+      accuracyBP: number;
+      evadeBP: number;
+    };
+    activeSkills: string[];
+    passiveSkills: string[];
+    unlockedSkillIds: string[];
+    chain: {
+      playerAuthorityPubkey: string;
+      chainCharacterIdHex: string;
+      characterRootPubkey: string;
+      chainCreationStatus: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
+      chainCreationTxSignature: string | null;
+      chainCreatedAt: string | null;
+      chainCreationTs: number | null;
+      chainCreationSeasonId: number | null;
+    };
+  };
+  preparedTransaction: PreparedPlayerOwnedTransaction;
+}
+
+export interface SubmitCharacterCreationRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {}
+
+export interface SubmitCharacterCreationRouteResponse {
+  characterId: string;
+  chainCreationStatus: "CONFIRMED";
+  transactionSignature: string;
+  chainCharacterIdHex: string;
+  characterRootPubkey: string;
+  chainCreatedAt: string;
+  cursor: SettlementCursorExpectation;
 }
 
 export interface PrepareFirstSyncRouteRequest {
