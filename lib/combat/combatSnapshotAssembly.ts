@@ -3,6 +3,7 @@ import { getSkillDef } from '../../engine/battle/skillRegistry';
 import { prisma, type CharacterBattleReadyRecord } from '../prisma';
 import type { CombatantSnapshot } from '../../types/combat';
 import type { EnemyArchetypeDef } from './enemyArchetypes';
+import type { ZoneRunPlayerCarryoverState } from '../../types/zoneRun';
 
 function toSkillTuple(ids: string[], field: string): [string, string] {
   if (ids.length !== 2) {
@@ -41,6 +42,17 @@ export function buildPlayerCombatSnapshot(character: CharacterBattleReadyRecord)
     evadeBP: character.evadeBP,
     activeSkillIds,
     passiveSkillIds,
+  };
+}
+
+export function buildPlayerCombatSnapshotFromCarryover(
+  character: CharacterBattleReadyRecord,
+  carryover: ZoneRunPlayerCarryoverState,
+): CombatantSnapshot {
+  const snapshot = buildPlayerCombatSnapshot(character);
+  return {
+    ...snapshot,
+    hp: Math.min(snapshot.hpMax, Math.max(0, carryover.hp)),
   };
 }
 

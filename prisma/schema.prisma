@@ -38,6 +38,20 @@ enum SettlementSubmissionAttemptStatus {
   TIMEOUT
 }
 
+enum ActiveZoneRunState {
+  TRAVERSING
+  AWAITING_BRANCH
+  POST_BATTLE_PAUSE
+}
+
+enum ZoneRunTerminalStatus {
+  COMPLETED
+  FAILED
+  ABANDONED
+  EXPIRED
+  SEASON_CUTOFF
+}
+
 model User {
   id         String      @id @default(cuid())
   createdAt  DateTime    @default(now())
@@ -83,6 +97,9 @@ model Character {
   battleOutcomes   BattleOutcomeLedger[]
   settlementBatches SettlementBatch[]
   provisionalProgress CharacterProvisionalProgress?
+  activeZoneRun    ActiveZoneRun?
+  closedZoneRuns   ClosedZoneRunSummary[]
+  zoneRunActions   ZoneRunActionLog[]
 
   @@index([userId])
   @@index([chainCreationStatus])
@@ -155,11 +172,17 @@ model BattleRecord {
   id               String    @id @default(cuid())
   battleId         String    @unique
   characterId      String
+  zoneRunId        String?
   zoneId           Int
+  nodeId           String?
+  subnodeId        String?
   enemyArchetypeId Int
   seed             Int
   playerInitialJson Json
   enemyInitialJson  Json
+  playerFinalJson  Json?
+  enemyFinalJson   Json?
+  rewardEligible   Boolean   @default(true)
   winnerEntityId   String
   roundsPlayed     Int
   eventsJson       Json
@@ -169,12 +192,14 @@ model BattleRecord {
 
   @@index([characterId, createdAt])
   @@index([characterId, zoneId, enemyArchetypeId])
+  @@index([characterId, zoneRunId, createdAt])
 }
 
 model BattleOutcomeLedger {
   id                   String                   @id @default(cuid())
   characterId          String
   battleId             String                   @unique
+  zoneRunId            String?
   localSequence        BigInt
   battleNonce          BigInt?
   battleTs             BigInt
@@ -195,6 +220,60 @@ model BattleOutcomeLedger {
   @@index([characterId, settlementStatus, localSequence])
   @@index([characterId, settlementStatus, battleNonce])
   @@index([sealedBatchId])
+  @@index([characterId, zoneRunId, localSequence])
+}
+
+model ActiveZoneRun {
+  id                String             @id @default(cuid())
+  characterId       String             @unique
+  zoneId            Int
+  seasonId          Int
+  topologyVersion   Int
+  topologyHash      String
+  state             ActiveZoneRunState
+  currentNodeId     String
+  stateJson         Json
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  character         Character          @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, zoneId, state])
+}
+
+model ClosedZoneRunSummary {
+  id                            String                @id @default(cuid())
+  zoneRunId                     String                @unique
+  characterId                   String
+  zoneId                        Int
+  seasonId                      Int
+  topologyVersion               Int
+  topologyHash                  String
+  terminalStatus                ZoneRunTerminalStatus
+  rewardedBattleCount           Int
+  rewardedEncounterHistogramJson Json
+  zoneProgressDeltaJson         Json
+  createdAt                     DateTime              @default(now())
+  updatedAt                     DateTime              @updatedAt
+  closedAt                      DateTime
+  character                     Character             @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, createdAt])
+  @@index([characterId, zoneId, terminalStatus])
+}
+
+model ZoneRunActionLog {
+  id          String      @id @default(cuid())
+  zoneRunId   String
+  characterId String
+  actionType  String
+  nodeId      String?
+  subnodeId   String?
+  payloadJson Json
+  createdAt   DateTime    @default(now())
+  character   Character    @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([zoneRunId, createdAt])
+  @@index([characterId, createdAt])
 }
 
 model SettlementBatch {

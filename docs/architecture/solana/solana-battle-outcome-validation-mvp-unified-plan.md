@@ -1282,3 +1282,17 @@ Reward / registry failures:
 ### 17.6 Implementation requirement
 
 When the on-chain program and relayer are implemented, every surfaced settlement rejection must map to one support code in section 16 and follow the retry/remediation policy in this runbook.
+
+## 18) Zone-Run Redesign Cross-Reference
+
+The agreed zone-run execution and run-native settlement redesign is maintained in a separate document to avoid confusion with the currently implemented battle-native MVP plan.
+
+Canonical document:
+
+- `/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md`
+
+Scope note:
+
+- this unified plan remains the canonical reference for the currently implemented and battle-native MVP settlement path,
+- the separate zone-run document is the canonical reference for the next-phase redesign workstream,
+- implementation work for nodes, subnodes, active runs, closed-run summaries, and run-native settlement should follow the separate zone-run document rather than appending new rules here.

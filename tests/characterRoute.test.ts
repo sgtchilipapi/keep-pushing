@@ -12,6 +12,12 @@ const prismaMock = {
   settlementBatch: {
     findNextUnconfirmedForCharacter: jest.fn(),
   },
+  activeZoneRun: {
+    findByCharacterId: jest.fn(),
+  },
+  closedZoneRunSummary: {
+    findLatestForCharacter: jest.fn(),
+  },
 };
 
 jest.mock("../lib/prisma", () => ({
@@ -97,6 +103,8 @@ describe("GET /api/character", () => {
         failureCode: null,
       },
     );
+    prismaMock.activeZoneRun.findByCharacterId.mockResolvedValue(null);
+    prismaMock.closedZoneRunSummary.findLatestForCharacter.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/character?userId=user-1"),
@@ -113,6 +121,8 @@ describe("GET /api/character", () => {
       "AWAITING_FIRST_SYNC",
     );
     expect(json.character.nextSettlementBatch.batchId).toBe(1);
+    expect(json.character.activeZoneRun).toBeNull();
+    expect(json.character.latestClosedZoneRun).toBeNull();
   });
 
   it("returns null when the user has no character", async () => {
@@ -171,6 +181,8 @@ describe("GET /api/character", () => {
     prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(
       null,
     );
+    prismaMock.activeZoneRun.findByCharacterId.mockResolvedValue(null);
+    prismaMock.closedZoneRunSummary.findLatestForCharacter.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/character?userId=user-1"),

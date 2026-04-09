@@ -17,11 +17,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ character: null });
   }
 
-  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch] = await Promise.all([
+  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch, activeZoneRun, latestClosedZoneRun] = await Promise.all([
     prisma.character.findChainState(character.id),
     prisma.characterProvisionalProgress.findByCharacterId(character.id),
     prisma.battleOutcomeLedger.findLatestForCharacter(character.id),
     prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
+    prisma.activeZoneRun.findByCharacterId(character.id),
+    prisma.closedZoneRunSummary.findLatestForCharacter(character.id),
   ]);
 
   const syncState = deriveCharacterSyncState({
@@ -127,7 +129,35 @@ export async function GET(request: Request) {
             latestTransactionSignature: nextSettlementBatch.latestTransactionSignature,
             failureCategory: nextSettlementBatch.failureCategory,
             failureCode: nextSettlementBatch.failureCode,
-          }
+          },
+      activeZoneRun: activeZoneRun === null
+        ? null
+        : {
+            runId: activeZoneRun.snapshot.runId,
+            zoneId: activeZoneRun.snapshot.zoneId,
+            seasonId: activeZoneRun.snapshot.seasonId,
+            state: activeZoneRun.snapshot.state,
+            currentNodeId: activeZoneRun.snapshot.currentNodeId,
+            currentSubnodeId: activeZoneRun.snapshot.currentSubnodeId,
+            totalSubnodesTraversed: activeZoneRun.snapshot.totalSubnodesTraversed,
+            totalSubnodesInRun: activeZoneRun.snapshot.totalSubnodesInRun,
+            branchOptions: activeZoneRun.snapshot.branchOptions,
+          },
+      latestClosedZoneRun: latestClosedZoneRun === null
+        ? null
+        : {
+            zoneRunId: latestClosedZoneRun.zoneRunId,
+            characterId: latestClosedZoneRun.characterId,
+            zoneId: latestClosedZoneRun.zoneId,
+            seasonId: latestClosedZoneRun.seasonId,
+            topologyVersion: latestClosedZoneRun.topologyVersion,
+            topologyHash: latestClosedZoneRun.topologyHash,
+            terminalStatus: latestClosedZoneRun.terminalStatus,
+            rewardedBattleCount: latestClosedZoneRun.rewardedBattleCount,
+            rewardedEncounterHistogram: latestClosedZoneRun.rewardedEncounterHistogram,
+            zoneProgressDelta: latestClosedZoneRun.zoneProgressDelta,
+            closedAt: latestClosedZoneRun.closedAt.toISOString(),
+          },
     }
   });
 }

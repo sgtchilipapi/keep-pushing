@@ -1,5 +1,6 @@
 import type { PrepareSettlementRouteResponse } from "./solana";
 import type { BattleResult } from "../battle";
+import type { ActiveZoneRunState, ClosedZoneRunSummary } from "../zoneRun";
 
 export type ChainCreationStatus =
   | "NOT_STARTED"
@@ -100,6 +101,18 @@ export interface CharacterReadModel {
     failureCategory: string | null;
     failureCode: string | null;
   } | null;
+  activeZoneRun?: {
+    runId: string;
+    zoneId: number;
+    seasonId: number;
+    state: ActiveZoneRunState;
+    currentNodeId: string;
+    currentSubnodeId: string | null;
+    totalSubnodesTraversed: number;
+    totalSubnodesInRun: number;
+    branchOptions: string[];
+  } | null;
+  latestClosedZoneRun?: ClosedZoneRunSummary | null;
 }
 
 export interface CharacterQueryResponse {

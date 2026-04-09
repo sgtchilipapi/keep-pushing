@@ -11,7 +11,7 @@ import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/resolverRegistry';
 import type { StatusResolvePhase } from './statuses/types';
 import type { ArchetypeDecisionModel } from './learning';
-import type { BattleEvent, BattleResult } from '../../types/battle';
+import type { BattleEvent, BattleResult, CombatantBattleStateSnapshot } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
 export type { CombatantSnapshot } from '../../types/combat';
@@ -21,6 +21,10 @@ export type BattleInput = {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
+  playerInitialCooldowns?: Record<string, number>;
+  playerInitialStatuses?: ActiveStatuses;
+  enemyInitialCooldowns?: Record<string, number>;
+  enemyInitialStatuses?: ActiveStatuses;
   playerSkillWeights?: ArchetypeDecisionModel;
   enemySkillWeights?: ArchetypeDecisionModel;
   maxRounds?: number;
@@ -68,8 +72,44 @@ function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   return cloned;
 }
 
+function cloneRuntimeEntity(entity: RuntimeEntity): CombatantBattleStateSnapshot {
+  return {
+    ...cloneEntity(entity),
+    hp: entity.hp,
+    initiative: entity.initiative,
+    cooldowns: { ...entity.cooldowns },
+    statuses: Object.fromEntries(
+      Object.entries(entity.statuses)
+        .filter(([, value]) => (value?.remainingTurns ?? 0) > 0)
+        .map(([statusId, value]) => [
+          statusId,
+          {
+            sourceId: value?.sourceId ?? entity.entityId,
+            remainingTurns: value?.remainingTurns ?? 0,
+          },
+        ]),
+    ),
+  };
+}
+
 function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
   return Object.fromEntries(entity.activeSkillIds.map((skillId) => [skillId, 0]));
+}
+
+function cloneStatuses(statuses: ActiveStatuses | undefined): ActiveStatuses {
+  if (statuses === undefined) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(statuses).map(([statusId, value]) => [
+      statusId,
+      {
+        sourceId: value?.sourceId ?? '',
+        remainingTurns: value?.remainingTurns ?? 0,
+      },
+    ]),
+  ) as ActiveStatuses;
 }
 
 function decrementCooldowns(entity: RuntimeEntity): void {
@@ -163,14 +203,14 @@ export function simulateBattle(input: BattleInput): BattleResult {
   const player: RuntimeEntity = {
     ...applyFlatPassives(cloneEntity(input.playerInitial)),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.playerInitial),
-    statuses: {}
+    cooldowns: { ...initializeCooldowns(input.playerInitial), ...(input.playerInitialCooldowns ?? {}) },
+    statuses: cloneStatuses(input.playerInitialStatuses)
   };
   const enemy: RuntimeEntity = {
     ...applyFlatPassives(cloneEntity(input.enemyInitial)),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.enemyInitial),
-    statuses: {}
+    cooldowns: { ...initializeCooldowns(input.enemyInitial), ...(input.enemyInitialCooldowns ?? {}) },
+    statuses: cloneStatuses(input.enemyInitialStatuses)
   };
   const combatants: RuntimeEntity[] = [player, enemy];
 
@@ -403,6 +443,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
     seed: input.seed,
     playerInitial: cloneEntity(input.playerInitial),
     enemyInitial: cloneEntity(input.enemyInitial),
+    playerFinal: cloneRuntimeEntity(player),
+    enemyFinal: cloneRuntimeEntity(enemy),
     events,
     winnerEntityId: winner.entityId,
     roundsPlayed

@@ -116,7 +116,20 @@ export interface BattleResult {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
+  playerFinal?: CombatantBattleStateSnapshot;
+  enemyFinal?: CombatantBattleStateSnapshot;
   events: BattleEvent[];
   winnerEntityId: string;
   roundsPlayed: number;
+}
+
+export interface ActiveStatusSnapshot {
+  sourceId: string;
+  remainingTurns: number;
+}
+
+export interface CombatantBattleStateSnapshot extends CombatantSnapshot {
+  initiative: number;
+  cooldowns: Record<string, number>;
+  statuses: Record<string, ActiveStatusSnapshot>;
 }

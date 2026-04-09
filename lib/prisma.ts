@@ -4,6 +4,14 @@ import { Pool, type PoolClient } from 'pg';
 
 import { allocateNextBattleNonce } from './combat/battleNonce';
 import type { ZoneState } from '../types/settlement';
+import type {
+  ActiveZoneRunSnapshot,
+  ActiveZoneRunState,
+  ClosedZoneRunSummary,
+  ZoneRunLastBattleSummary,
+  ZoneRunPlayerCarryoverState,
+  ZoneRunTerminalStatus,
+} from '../types/zoneRun';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -50,6 +58,8 @@ export type BattleOutcomeLedgerStatus =
   | 'COMMITTED';
 export type SettlementBatchStatus = 'SEALED' | 'PREPARED' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 export type SettlementSubmissionAttemptStatus = 'STARTED' | 'BROADCAST' | 'CONFIRMED' | 'FAILED' | 'TIMEOUT';
+export type ActiveZoneRunStateRecord = ActiveZoneRunState;
+export type ZoneRunTerminalStatusRecord = ZoneRunTerminalStatus;
 export type CharacterProvisionalZoneState = ZoneState;
 
 export type CharacterProvisionalProgressRecord = {
@@ -143,6 +153,7 @@ export type BattleOutcomeLedgerRecord = {
   id: string;
   characterId: string;
   battleId: string;
+  zoneRunId?: string | null;
   localSequence: number;
   battleNonce: number | null;
   battleTs: number;
@@ -160,6 +171,7 @@ export type BattleOutcomeLedgerRecord = {
 export type CreateBattleOutcomeLedgerInput = {
   characterId: string;
   battleId: string;
+  zoneRunId?: string | null;
   localSequence: number;
   battleNonce?: number | null;
   battleTs: number;
@@ -174,11 +186,17 @@ export type BattleRecordRecord = {
   id: string;
   battleId: string;
   characterId: string;
+  zoneRunId?: string | null;
   zoneId: number;
+  nodeId?: string | null;
+  subnodeId?: string | null;
   enemyArchetypeId: number;
   seed: number;
   playerInitial: unknown;
   enemyInitial: unknown;
+  playerFinal?: unknown | null;
+  enemyFinal?: unknown | null;
+  rewardEligible?: boolean;
   winnerEntityId: string;
   roundsPlayed: number;
   events: unknown;
@@ -189,11 +207,17 @@ export type BattleRecordRecord = {
 export type CreateBattleRecordInput = {
   battleId: string;
   characterId: string;
+  zoneRunId?: string | null;
   zoneId: number;
+  nodeId?: string | null;
+  subnodeId?: string | null;
   enemyArchetypeId: number;
   seed: number;
   playerInitial: unknown;
   enemyInitial: unknown;
+  playerFinal?: unknown | null;
+  enemyFinal?: unknown | null;
+  rewardEligible?: boolean;
   winnerEntityId: string;
   roundsPlayed: number;
   events: unknown;
@@ -202,11 +226,17 @@ export type CreateBattleRecordInput = {
 export type CreatePersistedEncounterInput = {
   battleId: string;
   characterId: string;
+  zoneRunId?: string | null;
   zoneId: number;
+  nodeId?: string | null;
+  subnodeId?: string | null;
   enemyArchetypeId: number;
   seed: number;
   playerInitial: unknown;
   enemyInitial: unknown;
+  playerFinal?: unknown | null;
+  enemyFinal?: unknown | null;
+  rewardEligible?: boolean;
   winnerEntityId: string;
   roundsPlayed: number;
   events: unknown;
@@ -218,6 +248,89 @@ export type CreatePersistedEncounterInput = {
 export type PersistedEncounterRecord = {
   battleRecord: BattleRecordRecord;
   ledger: BattleOutcomeLedgerRecord;
+};
+
+export type ActiveZoneRunRecord = {
+  id: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  state: ActiveZoneRunStateRecord;
+  currentNodeId: string;
+  snapshot: ActiveZoneRunSnapshot;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateActiveZoneRunInput = {
+  id: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  state: ActiveZoneRunStateRecord;
+  currentNodeId: string;
+  snapshot: ActiveZoneRunSnapshot;
+};
+
+export type UpdateActiveZoneRunInput = {
+  state: ActiveZoneRunStateRecord;
+  currentNodeId: string;
+  snapshot: ActiveZoneRunSnapshot;
+};
+
+export type ClosedZoneRunSummaryRecord = {
+  id: string;
+  zoneRunId: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: ZoneRunTerminalStatusRecord;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogram: Record<string, number>;
+  zoneProgressDelta: unknown;
+  closedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateClosedZoneRunSummaryInput = {
+  zoneRunId: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: ZoneRunTerminalStatusRecord;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogram: Record<string, number>;
+  zoneProgressDelta: unknown;
+  closedAt?: Date;
+};
+
+export type ZoneRunActionLogRecord = {
+  id: string;
+  zoneRunId: string;
+  characterId: string;
+  actionType: string;
+  nodeId: string | null;
+  subnodeId: string | null;
+  payload: unknown;
+  createdAt: Date;
+};
+
+export type CreateZoneRunActionLogInput = {
+  zoneRunId: string;
+  characterId: string;
+  actionType: string;
+  nodeId?: string | null;
+  subnodeId?: string | null;
+  payload: unknown;
 };
 
 export type CreateLocalFirstPersistedEncounterInput = CreatePersistedEncounterInput & {
@@ -363,6 +476,7 @@ type BattleOutcomeLedgerRow = {
   id: string;
   characterId: string;
   battleId: string;
+  zoneRunId: string | null;
   localSequence: string | number;
   battleNonce: string | number | null;
   battleTs: string | number;
@@ -381,16 +495,64 @@ type BattleRecordRow = {
   id: string;
   battleId: string;
   characterId: string;
+  zoneRunId: string | null;
   zoneId: number;
+  nodeId: string | null;
+  subnodeId: string | null;
   enemyArchetypeId: number;
   seed: number;
   playerInitialJson: unknown;
   enemyInitialJson: unknown;
+  playerFinalJson: unknown | null;
+  enemyFinalJson: unknown | null;
+  rewardEligible: boolean;
   winnerEntityId: string;
   roundsPlayed: number;
   eventsJson: unknown;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type ActiveZoneRunRow = {
+  id: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  state: ActiveZoneRunStateRecord;
+  currentNodeId: string;
+  stateJson: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ClosedZoneRunSummaryRow = {
+  id: string;
+  zoneRunId: string;
+  characterId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: ZoneRunTerminalStatusRecord;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogramJson: unknown;
+  zoneProgressDeltaJson: unknown;
+  closedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ZoneRunActionLogRow = {
+  id: string;
+  zoneRunId: string;
+  characterId: string;
+  actionType: string;
+  nodeId: string | null;
+  subnodeId: string | null;
+  payloadJson: unknown;
+  createdAt: Date;
 };
 
 type SettlementBatchRow = {
@@ -520,6 +682,7 @@ function mapBattleOutcomeLedger(row: BattleOutcomeLedgerRow): BattleOutcomeLedge
     id: row.id,
     characterId: row.characterId,
     battleId: row.battleId,
+    zoneRunId: row.zoneRunId,
     localSequence: parseRequiredSafeInteger(row.localSequence, 'localSequence'),
     battleNonce: parseNullableSafeInteger(row.battleNonce, 'battleNonce'),
     battleTs: parseRequiredSafeInteger(row.battleTs, 'battleTs'),
@@ -540,16 +703,70 @@ function mapBattleRecord(row: BattleRecordRow): BattleRecordRecord {
     id: row.id,
     battleId: row.battleId,
     characterId: row.characterId,
+    zoneRunId: row.zoneRunId,
     zoneId: row.zoneId,
+    nodeId: row.nodeId,
+    subnodeId: row.subnodeId,
     enemyArchetypeId: row.enemyArchetypeId,
     seed: row.seed,
     playerInitial: row.playerInitialJson,
     enemyInitial: row.enemyInitialJson,
+    playerFinal: row.playerFinalJson,
+    enemyFinal: row.enemyFinalJson,
+    rewardEligible: row.rewardEligible,
     winnerEntityId: row.winnerEntityId,
     roundsPlayed: row.roundsPlayed,
     events: row.eventsJson,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+function mapActiveZoneRun(row: ActiveZoneRunRow): ActiveZoneRunRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    zoneId: row.zoneId,
+    seasonId: row.seasonId,
+    topologyVersion: row.topologyVersion,
+    topologyHash: row.topologyHash,
+    state: row.state,
+    currentNodeId: row.currentNodeId,
+    snapshot: row.stateJson as ActiveZoneRunSnapshot,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapClosedZoneRunSummary(row: ClosedZoneRunSummaryRow): ClosedZoneRunSummaryRecord {
+  return {
+    id: row.id,
+    zoneRunId: row.zoneRunId,
+    characterId: row.characterId,
+    zoneId: row.zoneId,
+    seasonId: row.seasonId,
+    topologyVersion: row.topologyVersion,
+    topologyHash: row.topologyHash,
+    terminalStatus: row.terminalStatus,
+    rewardedBattleCount: row.rewardedBattleCount,
+    rewardedEncounterHistogram: row.rewardedEncounterHistogramJson as Record<string, number>,
+    zoneProgressDelta: row.zoneProgressDeltaJson,
+    closedAt: row.closedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapZoneRunActionLog(row: ZoneRunActionLogRow): ZoneRunActionLogRecord {
+  return {
+    id: row.id,
+    zoneRunId: row.zoneRunId,
+    characterId: row.characterId,
+    actionType: row.actionType,
+    nodeId: row.nodeId,
+    subnodeId: row.subnodeId,
+    payload: row.payloadJson,
+    createdAt: row.createdAt,
   };
 }
 
@@ -563,26 +780,38 @@ async function insertPersistedEncounter(
         id,
         "battleId",
         "characterId",
+        "zoneRunId",
         "zoneId",
+        "nodeId",
+        "subnodeId",
         "enemyArchetypeId",
         seed,
         "playerInitialJson",
         "enemyInitialJson",
+        "playerFinalJson",
+        "enemyFinalJson",
+        "rewardEligible",
         "winnerEntityId",
         "roundsPlayed",
         "eventsJson",
         "updatedAt"
       )
-    VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15,$16,$17::jsonb,$18)
     RETURNING
       id,
       "battleId",
       "characterId",
+      "zoneRunId",
       "zoneId",
+      "nodeId",
+      "subnodeId",
       "enemyArchetypeId",
       seed,
       "playerInitialJson",
       "enemyInitialJson",
+      "playerFinalJson",
+      "enemyFinalJson",
+      "rewardEligible",
       "winnerEntityId",
       "roundsPlayed",
       "eventsJson",
@@ -592,11 +821,17 @@ async function insertPersistedEncounter(
       createRowId(),
       input.battleId,
       input.characterId,
+      input.zoneRunId ?? null,
       input.zoneId,
+      input.nodeId ?? null,
+      input.subnodeId ?? null,
       input.enemyArchetypeId,
       input.seed,
       JSON.stringify(input.playerInitial),
       JSON.stringify(input.enemyInitial),
+      JSON.stringify(input.playerFinal ?? null),
+      JSON.stringify(input.enemyFinal ?? null),
+      input.rewardEligible ?? true,
       input.winnerEntityId,
       input.roundsPlayed,
       JSON.stringify(input.events),
@@ -610,6 +845,7 @@ async function insertPersistedEncounter(
         id,
         "characterId",
         "battleId",
+        "zoneRunId",
         "localSequence",
         "battleNonce",
         "battleTs",
@@ -619,11 +855,12 @@ async function insertPersistedEncounter(
         "zoneProgressDeltaJson",
         "updatedAt"
       )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
     RETURNING
       id,
       "characterId",
       "battleId",
+      "zoneRunId",
       "localSequence",
       "battleNonce",
       "battleTs",
@@ -640,6 +877,7 @@ async function insertPersistedEncounter(
       createRowId(),
       input.characterId,
       input.battleId,
+      input.zoneRunId ?? null,
       input.localSequence,
       input.battleNonce,
       input.battleTs,
@@ -1205,6 +1443,258 @@ export const prisma = {
       return result.rows[0] ? mapCharacterProvisionalProgress(result.rows[0]) : null;
     }
   },
+  activeZoneRun: {
+    async create(input: CreateActiveZoneRunInput) {
+      const result = await pool.query<ActiveZoneRunRow>(
+        `INSERT INTO "ActiveZoneRun"
+          (
+            id,
+            "characterId",
+            "zoneId",
+            "seasonId",
+            "topologyVersion",
+            "topologyHash",
+            "state",
+            "currentNodeId",
+            "stateJson",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+        RETURNING
+          id,
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "state",
+          "currentNodeId",
+          "stateJson",
+          "createdAt",
+          "updatedAt"`,
+        [
+          input.id,
+          input.characterId,
+          input.zoneId,
+          input.seasonId,
+          input.topologyVersion,
+          input.topologyHash,
+          input.state,
+          input.currentNodeId,
+          JSON.stringify(input.snapshot),
+          new Date(),
+        ],
+      );
+
+      return mapActiveZoneRun(result.rows[0]);
+    },
+    async findByCharacterId(characterId: string) {
+      const result = await pool.query<ActiveZoneRunRow>(
+        `SELECT
+          id,
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "state",
+          "currentNodeId",
+          "stateJson",
+          "createdAt",
+          "updatedAt"
+        FROM "ActiveZoneRun"
+        WHERE "characterId" = $1
+        LIMIT 1`,
+        [characterId],
+      );
+
+      return result.rows[0] ? mapActiveZoneRun(result.rows[0]) : null;
+    },
+    async updateByCharacterId(characterId: string, input: UpdateActiveZoneRunInput) {
+      const result = await pool.query<ActiveZoneRunRow>(
+        `UPDATE "ActiveZoneRun"
+        SET
+          "state" = $2,
+          "currentNodeId" = $3,
+          "stateJson" = $4::jsonb,
+          "updatedAt" = $5
+        WHERE "characterId" = $1
+        RETURNING
+          id,
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "state",
+          "currentNodeId",
+          "stateJson",
+          "createdAt",
+          "updatedAt"`,
+        [characterId, input.state, input.currentNodeId, JSON.stringify(input.snapshot), new Date()],
+      );
+
+      return result.rows[0] ? mapActiveZoneRun(result.rows[0]) : null;
+    },
+    async closeWithSummary(args: {
+      characterId: string;
+      summary: CreateClosedZoneRunSummaryInput;
+      provisionalProgress?: UpdateCharacterProvisionalProgressInput | null;
+    }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const closedSummaryResult = await client.query<ClosedZoneRunSummaryRow>(
+          `INSERT INTO "ClosedZoneRunSummary"
+            (
+              id,
+              "zoneRunId",
+              "characterId",
+              "zoneId",
+              "seasonId",
+              "topologyVersion",
+              "topologyHash",
+              "terminalStatus",
+              "rewardedBattleCount",
+              "rewardedEncounterHistogramJson",
+              "zoneProgressDeltaJson",
+              "closedAt",
+              "updatedAt"
+            )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13)
+          RETURNING
+            id,
+            "zoneRunId",
+            "characterId",
+            "zoneId",
+            "seasonId",
+            "topologyVersion",
+            "topologyHash",
+            "terminalStatus",
+            "rewardedBattleCount",
+            "rewardedEncounterHistogramJson",
+            "zoneProgressDeltaJson",
+            "closedAt",
+            "createdAt",
+            "updatedAt"`,
+          [
+            createRowId(),
+            args.summary.zoneRunId,
+            args.summary.characterId,
+            args.summary.zoneId,
+            args.summary.seasonId,
+            args.summary.topologyVersion,
+            args.summary.topologyHash,
+            args.summary.terminalStatus,
+            args.summary.rewardedBattleCount,
+            JSON.stringify(args.summary.rewardedEncounterHistogram),
+            JSON.stringify(args.summary.zoneProgressDelta),
+            args.summary.closedAt ?? new Date(),
+            new Date(),
+          ],
+        );
+
+        if (args.provisionalProgress !== undefined && args.provisionalProgress !== null) {
+          await client.query(
+            `UPDATE "CharacterProvisionalProgress"
+            SET
+              "highestUnlockedZoneId" = $2,
+              "highestClearedZoneId" = $3,
+              "zoneStatesJson" = $4::jsonb,
+              "updatedAt" = $5
+            WHERE "characterId" = $1`,
+            [
+              args.characterId,
+              args.provisionalProgress.highestUnlockedZoneId,
+              args.provisionalProgress.highestClearedZoneId,
+              JSON.stringify(args.provisionalProgress.zoneStates),
+              new Date(),
+            ],
+          );
+        }
+
+        await client.query(
+          `DELETE FROM "ActiveZoneRun"
+          WHERE "characterId" = $1`,
+          [args.characterId],
+        );
+
+        await client.query('COMMIT');
+        return mapClosedZoneRunSummary(closedSummaryResult.rows[0]);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  },
+  closedZoneRunSummary: {
+    async findLatestForCharacter(characterId: string) {
+      const result = await pool.query<ClosedZoneRunSummaryRow>(
+        `SELECT
+          id,
+          "zoneRunId",
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "terminalStatus",
+          "rewardedBattleCount",
+          "rewardedEncounterHistogramJson",
+          "zoneProgressDeltaJson",
+          "closedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "ClosedZoneRunSummary"
+        WHERE "characterId" = $1
+        ORDER BY "createdAt" DESC
+        LIMIT 1`,
+        [characterId],
+      );
+
+      return result.rows[0] ? mapClosedZoneRunSummary(result.rows[0]) : null;
+    },
+  },
+  zoneRunActionLog: {
+    async create(input: CreateZoneRunActionLogInput) {
+      const result = await pool.query<ZoneRunActionLogRow>(
+        `INSERT INTO "ZoneRunActionLog"
+          (
+            id,
+            "zoneRunId",
+            "characterId",
+            "actionType",
+            "nodeId",
+            "subnodeId",
+            "payloadJson"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+        RETURNING
+          id,
+          "zoneRunId",
+          "characterId",
+          "actionType",
+          "nodeId",
+          "subnodeId",
+          "payloadJson",
+          "createdAt"`,
+        [
+          createRowId(),
+          input.zoneRunId,
+          input.characterId,
+          input.actionType,
+          input.nodeId ?? null,
+          input.subnodeId ?? null,
+          JSON.stringify(input.payload),
+        ],
+      );
+
+      return mapZoneRunActionLog(result.rows[0]);
+    },
+  },
   battleRecord: {
     async create(input: CreateBattleRecordInput) {
       const result = await pool.query<BattleRecordRow>(
@@ -1213,26 +1703,38 @@ export const prisma = {
             id,
             "battleId",
             "characterId",
+            "zoneRunId",
             "zoneId",
+            "nodeId",
+            "subnodeId",
             "enemyArchetypeId",
             seed,
             "playerInitialJson",
             "enemyInitialJson",
+            "playerFinalJson",
+            "enemyFinalJson",
+            "rewardEligible",
             "winnerEntityId",
             "roundsPlayed",
             "eventsJson",
             "updatedAt"
           )
-        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15,$16,$17::jsonb,$18)
         RETURNING
           id,
           "battleId",
           "characterId",
+          "zoneRunId",
           "zoneId",
+          "nodeId",
+          "subnodeId",
           "enemyArchetypeId",
           seed,
           "playerInitialJson",
           "enemyInitialJson",
+          "playerFinalJson",
+          "enemyFinalJson",
+          "rewardEligible",
           "winnerEntityId",
           "roundsPlayed",
           "eventsJson",
@@ -1242,11 +1744,17 @@ export const prisma = {
           createRowId(),
           input.battleId,
           input.characterId,
+          input.zoneRunId ?? null,
           input.zoneId,
+          input.nodeId ?? null,
+          input.subnodeId ?? null,
           input.enemyArchetypeId,
           input.seed,
           JSON.stringify(input.playerInitial),
           JSON.stringify(input.enemyInitial),
+          JSON.stringify(input.playerFinal ?? null),
+          JSON.stringify(input.enemyFinal ?? null),
+          input.rewardEligible ?? true,
           input.winnerEntityId,
           input.roundsPlayed,
           JSON.stringify(input.events),
@@ -1262,11 +1770,17 @@ export const prisma = {
           id,
           "battleId",
           "characterId",
+          "zoneRunId",
           "zoneId",
+          "nodeId",
+          "subnodeId",
           "enemyArchetypeId",
           seed,
           "playerInitialJson",
           "enemyInitialJson",
+          "playerFinalJson",
+          "enemyFinalJson",
+          "rewardEligible",
           "winnerEntityId",
           "roundsPlayed",
           "eventsJson",
@@ -1420,6 +1934,7 @@ export const prisma = {
             id,
             "characterId",
             "battleId",
+            "zoneRunId",
             "localSequence",
             "battleNonce",
             "battleTs",
@@ -1464,6 +1979,82 @@ export const prisma = {
       } finally {
         client.release();
       }
+    },
+    async createAwaitingFirstSync(
+      input: CreatePersistedEncounterInput
+    ): Promise<PersistedEncounterRecord> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const lockedCharacterResult = await client.query<{ id: string }>(
+          `SELECT id
+          FROM "Character"
+          WHERE id = $1
+          FOR UPDATE`,
+          [input.characterId]
+        );
+        if (lockedCharacterResult.rows[0] === undefined) {
+          throw new Error(`ERR_CHARACTER_NOT_FOUND: character ${input.characterId} was not found`);
+        }
+
+        const latestLocalSequenceResult = await client.query<{ localSequence: string | number }>(
+          `SELECT "localSequence"
+          FROM "BattleOutcomeLedger"
+          WHERE "characterId" = $1
+          ORDER BY "localSequence" DESC
+          LIMIT 1`,
+          [input.characterId]
+        );
+        const latestLocalSequence = latestLocalSequenceResult.rows[0]
+          ? parseRequiredSafeInteger(latestLocalSequenceResult.rows[0].localSequence, 'localSequence')
+          : 0;
+
+        const persisted = await insertPersistedEncounter(client, {
+          ...input,
+          localSequence: latestLocalSequence + 1,
+          battleNonce: latestLocalSequence + 1,
+        });
+
+        const ledgerResult = await client.query<BattleOutcomeLedgerRow>(
+          `UPDATE "BattleOutcomeLedger"
+          SET
+            "battleNonce" = NULL,
+            "settlementStatus" = 'AWAITING_FIRST_SYNC',
+            "updatedAt" = $2
+          WHERE id = $1
+          RETURNING
+            id,
+            "characterId",
+            "battleId",
+            "zoneRunId",
+            "localSequence",
+            "battleNonce",
+            "battleTs",
+            "seasonId",
+            "zoneId",
+            "enemyArchetypeId",
+            "zoneProgressDeltaJson",
+            "settlementStatus",
+            "sealedBatchId",
+            "committedAt",
+            "createdAt",
+            "updatedAt"`,
+          [persisted.ledger.id, new Date()]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+          battleRecord: persisted.battleRecord,
+          ledger: mapBattleOutcomeLedger(ledgerResult.rows[0]),
+        };
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
     }
   },
   battleOutcomeLedger: {
@@ -1474,6 +2065,7 @@ export const prisma = {
             id,
             "characterId",
             "battleId",
+            "zoneRunId",
             "localSequence",
             "battleNonce",
             "battleTs",
@@ -1484,11 +2076,12 @@ export const prisma = {
             "zoneProgressDeltaJson",
             "updatedAt"
           )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
         RETURNING
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
@@ -1505,6 +2098,7 @@ export const prisma = {
           createRowId(),
           input.characterId,
           input.battleId,
+          input.zoneRunId ?? null,
           input.localSequence,
           input.battleNonce ?? null,
           input.battleTs,
@@ -1525,6 +2119,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
@@ -1552,6 +2147,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
@@ -1579,6 +2175,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
@@ -1665,6 +2262,7 @@ export const prisma = {
               id,
               "characterId",
               "battleId",
+              "zoneRunId",
               "localSequence",
               "battleNonce",
               "battleTs",
@@ -1713,6 +2311,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
@@ -1741,6 +2340,7 @@ export const prisma = {
           id,
           "characterId",
           "battleId",
+          "zoneRunId",
           "localSequence",
           "battleNonce",
           "battleTs",
