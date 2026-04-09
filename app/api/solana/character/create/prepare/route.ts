@@ -18,7 +18,11 @@ function statusForError(message: string): number {
     return 404;
   }
 
-  if (message.startsWith("ERR_CHARACTER_CHAIN_IDENTITY_ALREADY_RESERVED")) {
+  if (
+    message.startsWith("ERR_CHARACTER_ALREADY_CONFIRMED") ||
+    message.startsWith("ERR_CHARACTER_AUTHORITY_MISMATCH") ||
+    message.startsWith("ERR_CHARACTER_CHAIN_IDENTITY_CORRUPT")
+  ) {
     return 409;
   }
 
@@ -47,7 +51,9 @@ export async function POST(request: Request) {
           : Number.NaN,
     });
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, {
+      status: result.phase === "sign_transaction" ? 201 : 200,
+    });
   } catch (error) {
     const message =
       error instanceof Error

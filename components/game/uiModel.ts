@@ -61,7 +61,7 @@ export function resolveSyncPanelState(character: CharacterReadModel): SyncPanelS
         season: resolveEffectiveSeason(character),
         statusLabel: 'CREATING',
         statusTone: 'info',
-        syncMode: null,
+        syncMode: 'create_then_settle',
       };
     case 'INITIAL_SETTLEMENT_REQUIRED':
       return {

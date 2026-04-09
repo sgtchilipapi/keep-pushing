@@ -117,8 +117,15 @@ export interface SolanaCharacterSummary {
 }
 
 export interface PreparedSolanaCharacterCreationResult {
+  phase: "sign_transaction";
   character: SolanaCharacterSummary;
   preparedTransaction: ReturnType<typeof prepareCharacterCreationTransaction>;
+}
+
+export interface InFlightSolanaCharacterCreationResult {
+  phase: "submitted";
+  character: SolanaCharacterSummary;
+  transactionSignature: string | null;
 }
 
 export interface SubmittedSolanaCharacterCreationResult {
@@ -557,29 +564,90 @@ async function updateCharacterChainState(args: {
 function assertCharacterReadyForFirstChainBinding(args: {
   characterId: string;
   chainState: Awaited<ReturnType<typeof prisma.character.findChainState>>;
-}): void {
+  authority: string;
+}):
+  | { mode: "reserve_new" }
+  | {
+      mode: "reuse_reserved";
+      chainCharacterIdHex: string;
+      characterRootPubkey: string;
+    }
+  | {
+      mode: "in_flight";
+      chainCharacterIdHex: string;
+      characterRootPubkey: string;
+      transactionSignature: string | null;
+      chainCreationTs: number | null;
+      chainCreationSeasonId: number | null;
+      chainCreatedAt: Date | null;
+    } {
   if (args.chainState === null) {
     throw new Error(
       `ERR_CHARACTER_NOT_FOUND: local character ${args.characterId} was not found`,
     );
   }
 
+  if (args.chainState.chainCreationStatus === "NOT_STARTED") {
+    if (
+      args.chainState.playerAuthorityPubkey !== null ||
+      args.chainState.chainCharacterIdHex !== null ||
+      args.chainState.characterRootPubkey !== null
+    ) {
+      throw new Error(
+        "ERR_CHARACTER_CHAIN_IDENTITY_CORRUPT: character has partial chain identity data while still marked NOT_STARTED",
+      );
+    }
+
+    return { mode: "reserve_new" };
+  }
+
   if (
-    args.chainState.playerAuthorityPubkey !== null ||
-    args.chainState.chainCharacterIdHex !== null ||
-    args.chainState.characterRootPubkey !== null ||
-    args.chainState.chainCreationStatus !== "NOT_STARTED"
+    args.chainState.playerAuthorityPubkey === null ||
+    args.chainState.chainCharacterIdHex === null ||
+    args.chainState.characterRootPubkey === null
   ) {
     throw new Error(
-      "ERR_CHARACTER_CHAIN_IDENTITY_ALREADY_RESERVED: character already has a reserved or confirmed on-chain identity",
+      "ERR_CHARACTER_CHAIN_IDENTITY_CORRUPT: character has incomplete reserved chain identity state",
     );
   }
+
+  if (args.chainState.playerAuthorityPubkey !== args.authority) {
+    throw new Error(
+      "ERR_CHARACTER_AUTHORITY_MISMATCH: prepared authority does not match persisted chain state",
+    );
+  }
+
+  if (args.chainState.chainCreationStatus === "CONFIRMED") {
+    throw new Error(
+      "ERR_CHARACTER_ALREADY_CONFIRMED: character is already confirmed on chain",
+    );
+  }
+
+  if (args.chainState.chainCreationStatus === "SUBMITTED") {
+    return {
+      mode: "in_flight",
+      chainCharacterIdHex: args.chainState.chainCharacterIdHex,
+      characterRootPubkey: args.chainState.characterRootPubkey,
+      transactionSignature: args.chainState.chainCreationTxSignature,
+      chainCreationTs: args.chainState.chainCreationTs,
+      chainCreationSeasonId: args.chainState.chainCreationSeasonId,
+      chainCreatedAt: args.chainState.chainCreatedAt,
+    };
+  }
+
+  return {
+    mode: "reuse_reserved",
+    chainCharacterIdHex: args.chainState.chainCharacterIdHex,
+    characterRootPubkey: args.chainState.characterRootPubkey,
+  };
 }
 
 export async function prepareSolanaCharacterCreation(
   input: PrepareSolanaCharacterCreationInput,
   deps: CharacterCreationServiceDependencies = {},
-): Promise<PreparedSolanaCharacterCreationResult> {
+): Promise<
+  PreparedSolanaCharacterCreationResult | InFlightSolanaCharacterCreationResult
+> {
   assertNonEmptyString(input.characterId, "characterId");
   assertNonEmptyString(input.authority, "authority");
   assertInteger(input.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
@@ -599,10 +667,29 @@ export async function prepareSolanaCharacterCreation(
   }
   STARTER_ACTIVE_SKILLS.forEach((skillId) => getSkillDef(skillId));
   STARTER_PASSIVES.forEach((passiveId) => getPassiveDef(passiveId));
-  assertCharacterReadyForFirstChainBinding({
+  const createPreparation = assertCharacterReadyForFirstChainBinding({
     characterId: character.id,
     chainState: await prisma.character.findChainState(character.id),
+    authority: authority.toBase58(),
   });
+
+  if (createPreparation.mode === "in_flight") {
+    return {
+      phase: "submitted",
+      character: buildCharacterSummary({
+        character,
+        playerAuthorityPubkey: authority.toBase58(),
+        chainCharacterIdHex: createPreparation.chainCharacterIdHex,
+        characterRootPubkey: createPreparation.characterRootPubkey,
+        chainCreationStatus: "SUBMITTED",
+        chainCreationTxSignature: createPreparation.transactionSignature,
+        chainCreatedAt: createPreparation.chainCreatedAt,
+        chainCreationTs: createPreparation.chainCreationTs,
+        chainCreationSeasonId: createPreparation.chainCreationSeasonId,
+      }),
+      transactionSignature: createPreparation.transactionSignature,
+    };
+  }
 
   const connection = deps.connection ?? createRunanaConnection();
   const commitment = deps.commitment ?? resolveRunanaCommitment();
@@ -626,7 +713,10 @@ export async function prepareSolanaCharacterCreation(
   const generateCharacterIdHex =
     deps.generateCharacterIdHex ?? defaultCharacterIdHex;
 
-  let chainCharacterIdHex = "";
+  let chainCharacterIdHex =
+    createPreparation.mode === "reuse_reserved"
+      ? createPreparation.chainCharacterIdHex
+      : "";
   let createInstruction: ReturnType<
     typeof buildCreateCharacterInstruction
   > | null = null;
@@ -639,7 +729,9 @@ export async function prepareSolanaCharacterCreation(
     attempt <= MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS;
     attempt += 1
   ) {
-    chainCharacterIdHex = generateCharacterIdHex();
+    if (createPreparation.mode === "reserve_new") {
+      chainCharacterIdHex = generateCharacterIdHex();
+    }
     createInstruction = buildCreateCharacterInstruction({
       payer: feePayer,
       authority,
@@ -655,6 +747,26 @@ export async function prepareSolanaCharacterCreation(
       instructions: [createInstruction.instruction],
       commitment,
     });
+
+    if (createPreparation.mode === "reuse_reserved") {
+      if (
+        createInstruction.characterRoot.toBase58() !==
+        createPreparation.characterRootPubkey
+      ) {
+        throw new Error(
+          "ERR_CHARACTER_CHAIN_IDENTITY_CORRUPT: reserved character root does not match the canonical PDA for the persisted chain id",
+        );
+      }
+
+      await updateCharacterChainState({
+        characterId: character.id,
+        playerAuthorityPubkey: authority.toBase58(),
+        chainCharacterIdHex,
+        characterRootPubkey: createPreparation.characterRootPubkey,
+        chainCreationStatus: "PENDING",
+      });
+      break;
+    }
 
     try {
       await updateCharacterChainState({
@@ -712,6 +824,7 @@ export async function prepareSolanaCharacterCreation(
   });
 
   return {
+    phase: "sign_transaction",
     character: buildCharacterSummary({
       character,
       playerAuthorityPubkey: authority.toBase58(),

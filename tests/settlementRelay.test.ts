@@ -127,10 +127,13 @@ describe('settlementRelay', () => {
     );
 
     expect(result.phase).toBe('authorize');
+    if (result.phase !== 'authorize') {
+      throw new Error('expected authorize phase');
+    }
     expect(result.settlementBatchId).toBe(batch.id);
     expect(result.permitDomain.batchHash).toBe(batch.batchHash);
     expect(result.payload.signatureScheme).toBe(1);
-    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA Wallet Authorization');
+    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA|settlement|');
     expect(Buffer.from(result.playerAuthorizationMessageBase64, 'base64').length).toBeGreaterThan(32);
   });
 
@@ -218,5 +221,93 @@ describe('settlementRelay', () => {
     expect(result.preparedTransaction.kind).toBe('battle_settlement');
     expect(result.preparedTransaction.settlementRelay?.batchId).toBe(batch.batchId);
     expect(updateStatus).toHaveBeenCalled();
+  });
+
+  it('returns an in-flight response when the oldest settlement batch is already submitted', async () => {
+    const authority = Keypair.generate().publicKey;
+    const characterRoot = Keypair.generate().publicKey;
+    const batch = buildBatch({
+      status: 'SUBMITTED',
+      latestTransactionSignature: 'submitted-sig-1',
+      submittedAt: new Date('2026-04-04T00:01:00.000Z'),
+    });
+    const prismaClient = {
+      character: {
+        findChainState: jest
+          .fn()
+          .mockResolvedValue(buildChainState(characterRoot.toBase58(), authority.toBase58())),
+      },
+      settlementBatch: {
+        findById: jest.fn().mockResolvedValue(batch),
+        findNextUnconfirmedForCharacter: jest.fn().mockResolvedValue(batch),
+        updateStatus: jest.fn().mockResolvedValue(batch),
+      },
+    };
+
+    const result = await prepareSolanaSettlement(
+      {
+        characterId: 'character-1',
+        authority: authority.toBase58(),
+      },
+      {
+        prismaClient: prismaClient as never,
+        reconcileBatch: jest.fn().mockResolvedValue({
+          state: 'SUBMITTED',
+          retryDisposition: 'NONE',
+          batch,
+          attempt: null,
+          cursor: {
+            lastCommittedEndNonce: 0,
+            lastCommittedBatchId: 0,
+            lastCommittedStateHash: '11'.repeat(32),
+            lastCommittedBattleTs: 1_700_000_090,
+            lastCommittedSeasonId: 4,
+          },
+        }),
+        sealNextSettlementBatch: jest.fn().mockResolvedValue({
+          batch,
+          payload: {
+            characterId: '00112233445566778899aabbccddeeff',
+            batchId: batch.batchId,
+            startNonce: batch.startNonce,
+            endNonce: batch.endNonce,
+            battleCount: batch.battleCount,
+            startStateHash: batch.startStateHash,
+            endStateHash: batch.endStateHash,
+            zoneProgressDelta: batch.zoneProgressDelta,
+            encounterHistogram: batch.encounterHistogram,
+            optionalLoadoutRevision: undefined,
+            batchHash: batch.batchHash,
+            firstBattleTs: batch.firstBattleTs,
+            lastBattleTs: batch.lastBattleTs,
+            seasonId: batch.seasonId,
+            schemaVersion: 2 as const,
+            signatureScheme: 1 as const,
+          },
+          dryRunResult: {},
+          validationContext: {},
+          wasExistingBatch: true,
+        }),
+        loadEnvelope: jest.fn().mockResolvedValue({
+          playerAuthority: authority,
+          characterRoot: { pubkey: characterRoot },
+          characterBatchCursor: {
+            lastCommittedEndNonce: 0n,
+            lastCommittedBatchId: 0n,
+            lastCommittedStateHash: Buffer.from('11'.repeat(32), 'hex'),
+            lastCommittedBattleTs: 1_700_000_090n,
+            lastCommittedSeasonId: 4,
+          },
+        }),
+      },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        phase: 'submitted',
+        settlementBatchId: batch.id,
+        transactionSignature: 'submitted-sig-1',
+      }),
+    );
   });
 });

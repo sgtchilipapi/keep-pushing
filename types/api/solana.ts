@@ -169,9 +169,19 @@ export interface SettlementPreparedPhase extends SettlementPreparationBase {
   preparedTransaction: PreparedPlayerOwnedTransaction;
 }
 
+export interface SettlementSubmittedPhase {
+  phase: "submitted";
+  settlementBatchId: string;
+  payload: SettlementBatchPayloadV2;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  transactionSignature: string | null;
+}
+
 export type PrepareSettlementRouteResponse =
   | SettlementAuthorizationPhase
-  | SettlementPreparedPhase;
+  | SettlementPreparedPhase
+  | SettlementSubmittedPhase;
 
 export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {
   settlementBatchId: string;
@@ -184,7 +194,8 @@ export interface PrepareCharacterCreationRouteRequest {
   initialUnlockedZoneId: number;
 }
 
-export interface PrepareCharacterCreationRouteResponse {
+export interface PrepareCharacterCreationSignPhase {
+  phase: "sign_transaction";
   character: {
     characterId: string;
     userId: string;
@@ -216,6 +227,16 @@ export interface PrepareCharacterCreationRouteResponse {
   };
   preparedTransaction: PreparedPlayerOwnedTransaction;
 }
+
+export interface PrepareCharacterCreationSubmittedPhase {
+  phase: "submitted";
+  character: PrepareCharacterCreationSignPhase["character"];
+  transactionSignature: string | null;
+}
+
+export type PrepareCharacterCreationRouteResponse =
+  | PrepareCharacterCreationSignPhase
+  | PrepareCharacterCreationSubmittedPhase;
 
 export interface SubmitCharacterCreationRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {}
 

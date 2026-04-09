@@ -202,6 +202,12 @@ async function main(): Promise<void> {
   );
   writeJson(resolve(artifactsDir, 'settlement.prepare.authorize.response.json'), prepareAuthorizeResponse);
 
+  if (prepareAuthorizeResponse.phase !== 'authorize') {
+    throw new Error(
+      `ERR_SETTLEMENT_PREPARE_PHASE: expected authorize response, received ${prepareAuthorizeResponse.phase}`,
+    );
+  }
+
   const playerAuthorizationSignatureBase64 = signAuthorizationMessageBase64(
     prepareAuthorizeResponse.playerAuthorizationMessageBase64,
     player.secretKey,

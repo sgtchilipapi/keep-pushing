@@ -51,6 +51,7 @@ type PrepareSettlementDependencies = SettlementLifecycleDependencies & {
   addressLookupTableAccounts?: AddressLookupTableAccount[];
   sealNextSettlementBatch?: typeof loadOrSealNextSettlementBatchForCharacter;
   loadEnvelope?: typeof loadSettlementInstructionAccountEnvelope;
+  reconcileBatch?: typeof reconcileSettlementBatch;
   buildPreparedSettlement?: (args: {
     connection: Connection;
     envelope: Awaited<ReturnType<typeof loadSettlementInstructionAccountEnvelope>>;
@@ -127,12 +128,6 @@ function isRetryableFailure(batch: SettlementBatchRecord): boolean {
 }
 
 function assertBatchCanBePrepared(batch: SettlementBatchRecord): void {
-  if (batch.status === 'SUBMITTED') {
-    throw new Error(
-      'ERR_SETTLEMENT_ALREADY_SUBMITTED: settlement batch is already submitted and awaiting reconciliation',
-    );
-  }
-
   if (batch.status === 'FAILED' && !isRetryableFailure(batch)) {
     throw new Error(
       'ERR_SETTLEMENT_NOT_RETRYABLE: settlement batch failed and requires remediation before retry',
@@ -140,23 +135,50 @@ function assertBatchCanBePrepared(batch: SettlementBatchRecord): void {
   }
 }
 
+type NextPreparationResolution =
+  | {
+      kind: 'ready';
+      sealed: Awaited<ReturnType<typeof loadOrSealNextSettlementBatchForCharacter>>;
+    }
+  | {
+      kind: 'in_flight';
+      sealed: Awaited<ReturnType<typeof loadOrSealNextSettlementBatchForCharacter>>;
+      reconciliation: Awaited<ReturnType<typeof reconcileSettlementBatch>>;
+    };
+
 async function resolveNextBatchForPreparation(
   characterId: string,
   lifecycleDeps: SettlementLifecycleDependencies,
   sealingDeps: Parameters<typeof loadOrSealNextSettlementBatchForCharacter>[1],
   sealNextSettlementBatch: typeof loadOrSealNextSettlementBatchForCharacter,
-) {
+  reconcileBatch: typeof reconcileSettlementBatch,
+): Promise<NextPreparationResolution> {
   let prepared = await sealNextSettlementBatch(characterId, sealingDeps);
 
   if (prepared.batch.status === 'SUBMITTED') {
-    const reconciled = await reconcileSettlementBatch(prepared.batch.id, lifecycleDeps);
+    const reconciled = await reconcileBatch(prepared.batch.id, lifecycleDeps);
     if (reconciled.state === 'CONFIRMED') {
       prepared = await sealNextSettlementBatch(characterId, sealingDeps);
+    } else {
+      prepared = {
+        ...prepared,
+        batch: reconciled.batch,
+      };
+      if (reconciled.state === 'SUBMITTED') {
+        return {
+          kind: 'in_flight',
+          sealed: prepared,
+          reconciliation: reconciled,
+        };
+      }
     }
   }
 
   assertBatchCanBePrepared(prepared.batch);
-  return prepared;
+  return {
+    kind: 'ready',
+    sealed: prepared,
+  };
 }
 
 export async function prepareSolanaSettlement(
@@ -203,12 +225,15 @@ export async function prepareSolanaSettlement(
   }
 
   const sealNextSettlementBatch = deps.sealNextSettlementBatch ?? loadOrSealNextSettlementBatchForCharacter;
-  const sealed = await resolveNextBatchForPreparation(
+  const reconcileBatch = deps.reconcileBatch ?? reconcileSettlementBatch;
+  const nextBatch = await resolveNextBatchForPreparation(
     input.characterId,
     lifecycleDeps,
     sealingDeps,
     sealNextSettlementBatch,
+    reconcileBatch,
   );
+  const sealed = nextBatch.sealed;
   const loadEnvelope = deps.loadEnvelope ?? loadSettlementInstructionAccountEnvelope;
   const envelope = await loadEnvelope({
     reader: connection,
@@ -249,6 +274,17 @@ export async function prepareSolanaSettlement(
           signatureScheme: 1,
         })
       : Buffer.from(canonicalMessages.playerAuthorizationMessage).toString('utf8');
+
+  if (nextBatch.kind === 'in_flight') {
+    return {
+      phase: 'submitted',
+      settlementBatchId: sealed.batch.id,
+      payload: sealed.payload,
+      expectedCursor,
+      permitDomain,
+      transactionSignature: nextBatch.reconciliation.batch.latestTransactionSignature,
+    };
+  }
 
   if (!input.playerAuthorizationSignatureBase64) {
     return {

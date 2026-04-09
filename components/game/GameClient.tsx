@@ -426,6 +426,14 @@ function SettlementPanel(props: SettlementPanelProps) {
         },
       );
 
+      if (response.phase === "submitted") {
+        setAuthorizeData(null);
+        setPreparedData(null);
+        setSubmitResult(response);
+        await props.onRefresh();
+        return;
+      }
+
       if (response.phase !== "authorize") {
         throw new Error(
           "Unexpected settlement response: expected authorize phase.",
@@ -485,6 +493,14 @@ function SettlementPanel(props: SettlementPanelProps) {
           }),
         },
       );
+
+      if (response.phase === "submitted") {
+        setAuthorizeData(null);
+        setPreparedData(null);
+        setSubmitResult(response);
+        await props.onRefresh();
+        return;
+      }
 
       if (response.phase !== "sign_transaction") {
         throw new Error(
@@ -711,11 +727,11 @@ function SyncPanel(props: SyncPanelProps) {
     (props.character.syncPhase === "LOCAL_ONLY"
       ? "Battles are still available locally. Sync will save the character genesis on chain first, then backlog settlement can follow."
       : props.character.syncPhase === "CREATING_ON_CHAIN"
-        ? "Character genesis creation is already in flight. Wait for confirmation before settling backlog."
+        ? "Character genesis is reserved or already submitted. Sync again to resume signing or check the in-flight transaction."
         : props.character.syncPhase === "INITIAL_SETTLEMENT_REQUIRED"
           ? "The character is confirmed on chain. Settle the first backlog batch before adding more battles."
           : props.character.syncPhase === "SETTLEMENT_PENDING"
-            ? "A later settlement batch is pending."
+            ? "A later settlement batch is pending. Sync again to submit the next batch or check the in-flight one."
             : props.character.syncPhase === "FAILED"
               ? "The last sync attempt failed before confirmation. Retry the sync flow to continue."
               : "Character and settlement cursor are in sync.");
@@ -735,7 +751,7 @@ function SyncPanel(props: SyncPanelProps) {
 
   async function runSettlementSync(
     provider: NonNullable<ReturnType<typeof getPhantomProvider>>,
-  ): Promise<void> {
+  ): Promise<"confirmed" | "submitted"> {
     const authorizeResponse = await apiRequest<SettlementPrepareResponse>(
       "/api/solana/settlement/prepare",
       {
@@ -747,6 +763,11 @@ function SyncPanel(props: SyncPanelProps) {
         }),
       },
     );
+
+    if (authorizeResponse.phase === "submitted") {
+      await props.onRefresh();
+      return "submitted";
+    }
 
     if (authorizeResponse.phase !== "authorize") {
       throw new Error(
@@ -780,6 +801,11 @@ function SyncPanel(props: SyncPanelProps) {
       },
     );
 
+    if (preparedResponse.phase === "submitted") {
+      await props.onRefresh();
+      return "submitted";
+    }
+
     if (preparedResponse.phase !== "sign_transaction") {
       throw new Error(
         "Unexpected settlement response: expected sign_transaction phase.",
@@ -801,6 +827,8 @@ function SyncPanel(props: SyncPanelProps) {
         signedTransactionBase64: signed.signedTransactionBase64,
       }),
     });
+
+    return "confirmed";
   }
 
   async function handleSync() {
@@ -850,6 +878,34 @@ function SyncPanel(props: SyncPanelProps) {
             },
           );
 
+        if (prepareResponse.phase === "submitted") {
+          const refreshedCharacter = await props.onRefresh();
+          if (
+            refreshedCharacter?.syncPhase === "INITIAL_SETTLEMENT_REQUIRED" ||
+            refreshedCharacter?.syncPhase === "SETTLEMENT_PENDING"
+          ) {
+            setStepMessage("Settling first backlog batch");
+            const settlementOutcome = await runSettlementSync(provider);
+            await props.onRefresh();
+            setSuccess(
+              settlementOutcome === "submitted"
+                ? "Character creation already landed. Settlement is now in flight."
+                : "Character creation already landed. First settlement batch confirmed.",
+            );
+          } else {
+            setSuccess(
+              `Character creation is already in flight. Tx ${truncateMiddle(prepareResponse.transactionSignature)}`,
+            );
+          }
+          return;
+        }
+
+        if (prepareResponse.phase !== "sign_transaction") {
+          throw new Error(
+            "Unexpected character creation response: expected sign_transaction phase.",
+          );
+        }
+
         props.setWalletActionStatus("signing_transaction");
         const signed = await signPreparedPlayerOwnedTransaction(
           provider,
@@ -889,9 +945,13 @@ function SyncPanel(props: SyncPanelProps) {
             ? "Settling first battle batch"
             : "Settling battle batch",
         );
-        await runSettlementSync(provider);
+        const settlementOutcome = await runSettlementSync(provider);
         await props.onRefresh();
-        setSuccess("Sync confirmed.");
+        setSuccess(
+          settlementOutcome === "submitted"
+            ? "Settlement is already in flight."
+            : "Sync confirmed.",
+        );
       }
     } catch (nextError) {
       setError(normalizeWalletError(nextError));

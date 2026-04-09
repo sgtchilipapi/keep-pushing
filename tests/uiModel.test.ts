@@ -163,6 +163,33 @@ describe("game ui model helpers", () => {
     });
   });
 
+  it("keeps sync available while chain creation is reserved or already submitted", () => {
+    const state = resolveSyncPanelState(
+      buildCharacter({
+        syncPhase: "CREATING_ON_CHAIN",
+        battleEligible: false,
+        chain: {
+          playerAuthorityPubkey: "wallet",
+          chainCharacterIdHex: "chain-id",
+          characterRootPubkey: "root",
+          chainCreationStatus: "SUBMITTED",
+          chainCreationTxSignature: "sig",
+          chainCreatedAt: null,
+          chainCreationTs: null,
+          chainCreationSeasonId: null,
+          cursor: null,
+        },
+      }),
+    );
+
+    expect(state).toEqual({
+      season: null,
+      statusLabel: "CREATING",
+      statusTone: "info",
+      syncMode: "create_then_settle",
+    });
+  });
+
   it("reports pending settlement after confirmation when a batch exists", () => {
     const state = resolveSyncPanelState(
       buildCharacter({
