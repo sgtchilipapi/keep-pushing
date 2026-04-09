@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for candidate_bin in \
+  "$HOME/.local/share/solana/install/active_release/bin" \
+  "$HOME/.cargo/bin"
+do
+  if [[ -d "$candidate_bin" && ":$PATH:" != *":$candidate_bin:"* ]]; then
+    PATH="$candidate_bin:$PATH"
+  fi
+done
+export PATH
+
 KEEP_PUSHING_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNANA_PROGRAM_ROOT="${RUNANA_PROGRAM_ROOT:-$(cd "$KEEP_PUSHING_ROOT/../runana-program" && pwd)}"
 ARTIFACT_PARENT="${RUNANA_MANUAL_TEST_ROOT:-$KEEP_PUSHING_ROOT/.tmp/manual-character-test}"
