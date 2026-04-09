@@ -16,7 +16,7 @@ function buildCharacter(
     level: 1,
     exp: 0,
     syncPhase: "LOCAL_ONLY",
-    battleEligible: false,
+    battleEligible: true,
     stats: {
       hp: 1200,
       hpMax: 1200,

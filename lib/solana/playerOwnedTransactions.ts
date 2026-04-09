@@ -18,7 +18,11 @@ function assertNonEmptyString(value: string, field: string): void {
   }
 }
 
-function assertPlayerPaysOwnTransaction(authority: string, feePayer: string, kind: string): void {
+function assertPlayerPaysOwnTransaction(
+  authority: string,
+  feePayer: string,
+  kind: string,
+): void {
   if (authority !== feePayer) {
     throw new Error(
       `ERR_PLAYER_MUST_PAY: ${kind} requires feePayer to match authority`,
@@ -76,21 +80,46 @@ function buildSettlementRelayMetadata(
     "expectedCursor.lastCommittedStateHash",
   );
   assertNonEmptyString(request.permitDomain.programId, "programId");
-  assertNonEmptyString(request.permitDomain.playerAuthority, "permitDomain.playerAuthority");
+  assertNonEmptyString(
+    request.permitDomain.playerAuthority,
+    "permitDomain.playerAuthority",
+  );
   assertNonEmptyString(
     request.permitDomain.characterRootPubkey,
     "permitDomain.characterRootPubkey",
   );
-  assertNonEmptyString(request.permitDomain.batchHash, "permitDomain.batchHash");
+  assertNonEmptyString(
+    request.permitDomain.batchHash,
+    "permitDomain.batchHash",
+  );
 
   assertCanonicalSettlementPayload(payload);
-  assertInteger(request.expectedCursor.lastCommittedBattleTs, "lastCommittedBattleTs", 0);
-  assertInteger(request.expectedCursor.lastCommittedSeasonId, "lastCommittedSeasonId", 0);
-  assertInteger(request.expectedCursor.lastCommittedEndNonce, "lastCommittedEndNonce", 0);
-  assertInteger(request.expectedCursor.lastCommittedBatchId, "lastCommittedBatchId", 0);
+  assertInteger(
+    request.expectedCursor.lastCommittedBattleTs,
+    "lastCommittedBattleTs",
+    0,
+  );
+  assertInteger(
+    request.expectedCursor.lastCommittedSeasonId,
+    "lastCommittedSeasonId",
+    0,
+  );
+  assertInteger(
+    request.expectedCursor.lastCommittedEndNonce,
+    "lastCommittedEndNonce",
+    0,
+  );
+  assertInteger(
+    request.expectedCursor.lastCommittedBatchId,
+    "lastCommittedBatchId",
+    0,
+  );
   assertInteger(request.permitDomain.clusterId, "clusterId", 1);
   assertInteger(request.permitDomain.batchId, "permitDomain.batchId", 1);
-  assertSupportedSignatureScheme(request.permitDomain.signatureScheme, "signatureScheme");
+  assertSupportedSignatureScheme(
+    request.permitDomain.signatureScheme,
+    "signatureScheme",
+  );
 
   if (payload.endNonce < payload.startNonce) {
     throw new Error(
@@ -110,7 +139,9 @@ function buildSettlementRelayMetadata(
     );
   }
 
-  if (payload.startStateHash !== request.expectedCursor.lastCommittedStateHash) {
+  if (
+    payload.startStateHash !== request.expectedCursor.lastCommittedStateHash
+  ) {
     throw new Error(
       "ERR_START_STATE_HASH_MISMATCH: settlement startStateHash must match the committed cursor",
     );
@@ -128,15 +159,27 @@ function buildSettlementRelayMetadata(
     );
   }
 
-  assertFieldMatch(request.playerAuthority, request.permitDomain.playerAuthority, "playerAuthority");
+  assertFieldMatch(
+    request.playerAuthority,
+    request.permitDomain.playerAuthority,
+    "playerAuthority",
+  );
   assertFieldMatch(
     request.characterRootPubkey,
     request.permitDomain.characterRootPubkey,
     "characterRootPubkey",
   );
-  assertFieldMatch(payload.batchHash, request.permitDomain.batchHash, "batchHash");
+  assertFieldMatch(
+    payload.batchHash,
+    request.permitDomain.batchHash,
+    "batchHash",
+  );
   assertFieldMatch(payload.batchId, request.permitDomain.batchId, "batchId");
-  assertFieldMatch(payload.signatureScheme, request.permitDomain.signatureScheme, "signatureScheme");
+  assertFieldMatch(
+    payload.signatureScheme,
+    request.permitDomain.signatureScheme,
+    "signatureScheme",
+  );
 
   return {
     relayRequestId: request.relayRequestId,
@@ -169,6 +212,9 @@ function buildCharacterCreationRelayMetadata(
   assertNonEmptyString(request.recentBlockhash, "recentBlockhash");
   assertInteger(request.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
   assertInteger(request.lastValidBlockHeight, "lastValidBlockHeight", 0);
+  if (request.seasonPolicyPubkey !== undefined) {
+    assertNonEmptyString(request.seasonPolicyPubkey, "seasonPolicyPubkey");
+  }
 
   if (request.characterCreationTs !== undefined) {
     assertInteger(request.characterCreationTs, "characterCreationTs", 0);
@@ -181,6 +227,9 @@ function buildCharacterCreationRelayMetadata(
     localCharacterId: request.localCharacterId,
     chainCharacterIdHex: request.chainCharacterIdHex,
     characterRootPubkey: request.characterRootPubkey,
+    ...(request.seasonPolicyPubkey !== undefined
+      ? { seasonPolicyPubkey: request.seasonPolicyPubkey }
+      : {}),
     ...(request.characterCreationTs !== undefined
       ? { characterCreationTs: request.characterCreationTs }
       : {}),
@@ -193,7 +242,9 @@ function buildCharacterCreationRelayMetadata(
   };
 }
 
-function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): void {
+function assertCanonicalSettlementPayload(
+  payload: SettlementBatchPayloadV2,
+): void {
   assertInteger(payload.batchId, "payload.batchId", 1);
   assertInteger(payload.startNonce, "payload.startNonce", 1);
   assertInteger(payload.endNonce, "payload.endNonce", 1);
@@ -202,14 +253,16 @@ function assertCanonicalSettlementPayload(payload: SettlementBatchPayloadV2): vo
   assertInteger(payload.lastBattleTs, "payload.lastBattleTs", 0);
   assertInteger(payload.seasonId, "payload.seasonId", 0);
   assertInteger(payload.schemaVersion, "payload.schemaVersion", 2);
-  assertSupportedSignatureScheme(payload.signatureScheme, "payload.signatureScheme");
+  assertSupportedSignatureScheme(
+    payload.signatureScheme,
+    "payload.signatureScheme",
+  );
 
   if (payload.schemaVersion !== 2) {
     throw new Error(
       "ERR_UNSUPPORTED_SETTLEMENT_SCHEMA: canonical settlement preparation requires schemaVersion = 2",
     );
   }
-
 }
 
 function buildPreparedTransaction(
@@ -224,7 +277,10 @@ function buildPreparedTransaction(
   assertNonEmptyString(authority, "authority");
   assertNonEmptyString(feePayer, "feePayer");
   assertNonEmptyString(serializedMessageBase64, "serializedMessageBase64");
-  assertNonEmptyString(serializedTransactionBase64, "serializedTransactionBase64");
+  assertNonEmptyString(
+    serializedTransactionBase64,
+    "serializedTransactionBase64",
+  );
   assertPlayerPaysOwnTransaction(authority, feePayer, kind);
 
   return {
@@ -305,7 +361,10 @@ export function acceptSignedPlayerOwnedTransaction(
   request: SubmitSignedPlayerOwnedTransactionRequest,
 ): SubmittedPlayerOwnedTransaction {
   assertNonEmptyString(request.signedMessageBase64, "signedMessageBase64");
-  assertNonEmptyString(request.signedTransactionBase64, "signedTransactionBase64");
+  assertNonEmptyString(
+    request.signedTransactionBase64,
+    "signedTransactionBase64",
+  );
 
   return {
     kind: request.prepared.kind,

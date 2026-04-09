@@ -38,6 +38,7 @@ ADMIN_KEYPAIR_PATH="$KEYPAIR_DIR/admin.json"
 SERVER_SIGNER_KEYPAIR_PATH="$KEYPAIR_DIR/server.json"
 PLAYER_KEYPAIR_PATH="$KEYPAIR_DIR/player.json"
 VALIDATOR_LOG_PATH="$LOG_DIR/validator.log"
+VALIDATOR_INTERNAL_LOG_PATH="$VALIDATOR_LEDGER_PATH/validator.log"
 SERVER_LOG_PATH="$LOG_DIR/server.log"
 VALIDATOR_PID_PATH="$ARTIFACT_DIR/validator.pid"
 SERVER_PID_PATH="$ARTIFACT_DIR/server.pid"
@@ -56,6 +57,16 @@ function note() {
 function fail() {
   printf '[setup] ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+function validator_process_running() {
+  if [[ ! -f "$VALIDATOR_PID_PATH" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(cat "$VALIDATOR_PID_PATH")"
+  kill -0 "$pid" >/dev/null 2>&1
 }
 
 function require_command() {
@@ -105,11 +116,22 @@ function wait_for_rpc() {
     if solana block-height --url "$RPC_URL" >/dev/null 2>&1; then
       return
     fi
+    if [[ -f "$VALIDATOR_PID_PATH" ]] && ! validator_process_running; then
+      if [[ -f "$VALIDATOR_INTERNAL_LOG_PATH" ]]; then
+        printf '[setup] validator ledger log tail (%s):\n' "$VALIDATOR_INTERNAL_LOG_PATH" >&2
+        tail -n 40 "$VALIDATOR_INTERNAL_LOG_PATH" >&2 || true
+      fi
+      fail "validator process exited before RPC became ready; check $VALIDATOR_LOG_PATH and $VALIDATOR_INTERNAL_LOG_PATH"
+    fi
     attempts=$((attempts + 1))
     sleep 1
   done
 
-  fail "validator at $RPC_URL did not become ready in time; check $VALIDATOR_LOG_PATH"
+  if [[ -f "$VALIDATOR_INTERNAL_LOG_PATH" ]]; then
+    printf '[setup] validator ledger log tail (%s):\n' "$VALIDATOR_INTERNAL_LOG_PATH" >&2
+    tail -n 40 "$VALIDATOR_INTERNAL_LOG_PATH" >&2 || true
+  fi
+  fail "validator at $RPC_URL did not become ready in time; check $VALIDATOR_LOG_PATH and $VALIDATOR_INTERNAL_LOG_PATH"
 }
 
 function server_health_code() {
@@ -143,9 +165,11 @@ function start_validator_if_needed() {
     fail "RUNANA_SKIP_VALIDATOR_START=1 was set, but no validator is reachable at $RPC_URL"
   fi
 
+  pkill -f solana-faucet >/dev/null 2>&1 || true
   note "Starting solana-test-validator at $RPC_URL using reusable ledger $VALIDATOR_LEDGER_PATH"
   nohup solana-test-validator \
     --reset \
+    --quiet \
     --bind-address "$VALIDATOR_HOST" \
     --rpc-port "$VALIDATOR_PORT" \
     --ledger "$VALIDATOR_LEDGER_PATH" >"$VALIDATOR_LOG_PATH" 2>&1 &

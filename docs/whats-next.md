@@ -1,4 +1,4 @@
 # What's Next
 
-- [X] Implement the split first-sync redesign without program changes.
-  See [split-first-sync-no-program-change-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/split-first-sync-no-program-change-plan.md).
+- [x] Restore the local-first sequential sync flow.
+      See [local-first-sequential-sync-refactor-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/local-first-sequential-sync-refactor-plan.md).

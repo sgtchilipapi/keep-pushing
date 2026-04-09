@@ -708,11 +708,11 @@ function SyncPanel(props: SyncPanelProps) {
   const statusDetail =
     stepMessage ??
     (props.character.syncPhase === "LOCAL_ONLY"
-      ? "Sync will create the on-chain character first. Battles stay disabled until that creation confirms."
+      ? "Battles are still available locally. Sync will save the character genesis on chain first, then backlog settlement can follow."
       : props.character.syncPhase === "CREATING_ON_CHAIN"
-        ? "Character creation is already in flight. Wait for confirmation before starting new battles."
+        ? "Character genesis creation is already in flight. Wait for confirmation before settling backlog."
         : props.character.syncPhase === "INITIAL_SETTLEMENT_REQUIRED"
-          ? "Settle the first battle batch before new battles are allowed."
+          ? "The character is confirmed on chain. Settle the first backlog batch before adding more battles."
           : props.character.syncPhase === "SETTLEMENT_PENDING"
             ? "A later settlement batch is pending."
             : props.character.syncPhase === "FAILED"
@@ -834,7 +834,7 @@ function SyncPanel(props: SyncPanelProps) {
         const initialUnlockedZoneId =
           props.character.provisionalProgress?.highestUnlockedZoneId ?? 1;
 
-        setStepMessage("Creating character on chain");
+        setStepMessage("Saving character genesis on chain");
         const prepareResponse =
           await apiRequest<PrepareCharacterCreationRouteResponse>(
             "/api/solana/character/create/prepare",
@@ -875,7 +875,7 @@ function SyncPanel(props: SyncPanelProps) {
           refreshedCharacter?.syncPhase === "INITIAL_SETTLEMENT_REQUIRED" ||
           refreshedCharacter?.syncPhase === "SETTLEMENT_PENDING"
         ) {
-          setStepMessage("Settling first battle batch");
+          setStepMessage("Settling first backlog batch");
           await runSettlementSync(provider);
           await props.onRefresh();
         }

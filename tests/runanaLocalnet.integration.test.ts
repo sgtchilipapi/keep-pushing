@@ -682,7 +682,7 @@ describeLocalnet("runana localnet integration", () => {
       context.seasonEndTs,
     );
     expect(Number(initialCursor.lastCommittedBattleTs)).toBe(
-      Number(characterRoot.characterCreationTs),
+      context.seasonStartTs,
     );
     expect(initialCursor.lastCommittedSeasonId).toBe(context.seasonId);
     expect(

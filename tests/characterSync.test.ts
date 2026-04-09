@@ -1,7 +1,7 @@
 import { deriveCharacterSyncState } from "../lib/characterSync";
 
 describe("deriveCharacterSyncState", () => {
-  it("blocks battles until the character has been created on chain", () => {
+  it("keeps local-only characters battle eligible before chain creation", () => {
     expect(
       deriveCharacterSyncState({
         chain: null,
@@ -10,7 +10,7 @@ describe("deriveCharacterSyncState", () => {
       }),
     ).toEqual({
       syncPhase: "LOCAL_ONLY",
-      battleEligible: false,
+      battleEligible: true,
     });
   });
 

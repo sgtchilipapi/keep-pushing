@@ -7,6 +7,7 @@ Status: Reusable local runbook for starting the full `keep-pushing` app stack ne
 Quickest fresh start:
 
 1. Run the one-shot helper
+
 ```bash
 cd /home/paps/projects/keep-pushing
 npm run app:local:fresh
@@ -23,18 +24,19 @@ http://127.0.0.1:3000/
 - create character
 - run local battle
 - connect Phantom
-- first sync
+- save character on chain
+- settle battles
 
 Truly fresh:
 
 cd /home/paps/projects/keep-pushing
 pkill -f "next dev" || true
 pkill -f solana-test-validator || true
+pkill -f solana-faucet || true
 docker compose --env-file .env.docker down -v || true
 npm run app:local:clean-space
 npm run app:local:fresh
 solana airdrop 5 D6jgHRYrA3As8ar6uvUixxyrdkb7t8658e2zuCHmMm2w --url http://127.0.0.1:8899
-
 
 What the one-shot helper now does:
 
@@ -48,9 +50,11 @@ What the one-shot helper now does:
 - enables backend-side auto-ALT creation for local first-sync and settlement preparation
 
 4. Shutdown
+
 ```bash
 pkill -f "next dev"
 pkill -f solana-test-validator
+pkill -f solana-faucet
 ```
 
 This runbook supports two local workflows:
@@ -231,7 +235,8 @@ The homepage is now the main dashboard for:
 - anonymous user bootstrap
 - local-first character creation
 - local battle execution
-- first-sync preparation/submission
+- on-chain character creation
+- initial backlog settlement
 - post-sync settlement preparation/submission
 
 The old proof page is still available at:
@@ -250,9 +255,9 @@ http://127.0.0.1:3000/battle%20(old%20pof)
 4. Choose a zone and run `Battle`
 5. Observe latest battle status become `AWAITING_FIRST_SYNC`
 
-### First Sync Path
+### Create And Initial Settlement Path
 
-The current frontend uses Phantom directly for first sync.
+The current frontend uses Phantom directly for both character creation and settlement.
 
 This means:
 
@@ -263,12 +268,17 @@ This means:
 - Phantom signs the transaction
 - the app submits through the backend broadcaster
 
+The sync flow is sequential:
+
+- first save the genesis character on chain
+- then settle the local backlog as the first batch
+
 When the app is started through `npm run app:local:fresh`, backend-side auto-ALT creation is already enabled, so you should not need a manual lookup-table step for normal browser testing.
 
-If you need a developer fallback without using the browser UI, use:
+If you need a developer fallback without using the browser UI for character creation, use:
 
 ```bash
-npm run solana:first-sync -- --player-keypair <path> --character-id <id>
+npm run solana:character:create -- --player-keypair <path> --character-id <id>
 ```
 
 ### Post-Sync Settlement Path

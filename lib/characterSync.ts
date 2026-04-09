@@ -47,7 +47,7 @@ export function deriveCharacterSyncState(
   if (input.chain === null || chainStatus === "NOT_STARTED") {
     return {
       syncPhase: "LOCAL_ONLY",
-      battleEligible: false,
+      battleEligible: true,
     };
   }
 

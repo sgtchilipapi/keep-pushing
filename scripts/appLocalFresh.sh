@@ -12,6 +12,7 @@ export RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES="${RUNANA_AUTO_CREATE_SETTLEM
 echo "[app:local:fresh] stopping old app and validator if present"
 pkill -f "next dev" || true
 pkill -f solana-test-validator || true
+pkill -f solana-faucet || true
 
 echo "[app:local:fresh] stopping dockerized app if present"
 docker compose --env-file .env.docker stop app >/dev/null 2>&1 || true

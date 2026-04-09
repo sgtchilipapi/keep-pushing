@@ -240,7 +240,7 @@ describe("executeRealEncounter", () => {
     );
   });
 
-  it("rejects encounters before the character is chain-confirmed", async () => {
+  it("persists local-first encounters before the character is chain-confirmed", async () => {
     (loadCharacterBattleReadyRecord as jest.Mock).mockResolvedValue({
       id: "character-1",
       userId: "user-1",
@@ -278,9 +278,17 @@ describe("executeRealEncounter", () => {
           env: encounterEnv,
         },
       ),
-    ).rejects.toThrow(/ERR_CHARACTER_NOT_CONFIRMED/);
+    ).resolves.toMatchObject({
+      characterId: "character-1",
+      zoneId: 2,
+      settlementStatus: "AWAITING_FIRST_SYNC",
+      battleNonce: 5,
+    });
     expect(
       prismaMock.battleRecord.createAwaitingFirstSyncWithProgress,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      prismaMock.battleRecord.allocateNonceAndCreateWithSettlementLedger,
     ).not.toHaveBeenCalled();
   });
 

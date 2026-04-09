@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { PublicKey, type Commitment, type Connection } from "@solana/web3.js";
+import {
+  ComputeBudgetProgram,
+  PublicKey,
+  SystemProgram,
+  TransactionMessage,
+  type Commitment,
+  type Connection,
+} from "@solana/web3.js";
 
 import { getPassiveDef } from "../../engine/battle/passiveRegistry";
 import { getSkillDef } from "../../engine/battle/skillRegistry";
@@ -32,11 +39,17 @@ import {
 } from "./runanaClient";
 import {
   deriveCharacterBatchCursorPda,
+  deriveCharacterRootPda,
+  deriveCharacterStatsPda,
+  deriveCharacterWorldProgressPda,
+  deriveCharacterZoneProgressPagePda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
   deriveZoneEnemySetPda,
   deriveZoneRegistryPda,
+  computeAnchorInstructionDiscriminator,
 } from "./runanaProgram";
+import { serializeCreateCharacterArgs } from "./runanaCharacterInstructions";
 
 const STARTER_ACTIVE_SKILLS = ["1001", "1002"];
 const STARTER_PASSIVES = ["2001", "2002"];
@@ -233,9 +246,217 @@ function sha256HexFromBase64(base64Value: string): string {
     .digest("hex");
 }
 
-function resolveConfiguredActiveSeasonId(
-  env: CharacterCreationEnv,
-): number {
+function buildCreateMessageDiagnostics(args: {
+  preparedMessageBase64: string;
+  signedMessageBase64: string;
+  localCharacterId: string;
+  characterRootPubkey: string;
+  walletAuthority: string;
+}) {
+  return {
+    preparedMessageSha256Hex: sha256HexFromBase64(args.preparedMessageBase64),
+    signedMessageSha256Hex: sha256HexFromBase64(args.signedMessageBase64),
+    transactionVersion: "v0" as const,
+    localCharacterId: args.localCharacterId,
+    characterRootPubkey: args.characterRootPubkey,
+    walletAuthority: args.walletAuthority,
+  };
+}
+
+function assertAccountMeta(args: {
+  actual: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean };
+  expectedPubkey: PublicKey;
+  expectedIsSigner: boolean;
+  expectedIsWritable: boolean;
+  label: string;
+  diagnostics: ReturnType<typeof buildCreateMessageDiagnostics>;
+}): void {
+  if (
+    !args.actual.pubkey.equals(args.expectedPubkey) ||
+    args.actual.isSigner !== args.expectedIsSigner ||
+    args.actual.isWritable !== args.expectedIsWritable
+  ) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: ${args.label} does not match the prepared character-create instruction: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+}
+
+function assertSemanticallyValidSignedCreateTransaction(args: {
+  authority: string;
+  relay: NonNullable<
+    ReturnType<
+      typeof acceptSignedPlayerOwnedTransaction
+    >["characterCreationRelay"]
+  >;
+  programId: PublicKey;
+  transaction: ReturnType<typeof deserializeVersionedTransactionBase64>;
+  diagnostics: ReturnType<typeof buildCreateMessageDiagnostics>;
+}): void {
+  if (
+    args.relay.seasonPolicyPubkey === undefined ||
+    args.relay.seasonPolicyPubkey.length === 0
+  ) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: season policy relay metadata is missing: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  if (args.transaction.message.addressTableLookups.length > 0) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: character creation does not support address table lookups: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  let message;
+  try {
+    message = TransactionMessage.decompile(args.transaction.message);
+  } catch {
+    throw new Error(
+      `ERR_INVALID_SIGNED_TRANSACTION: could not decompile the signed character creation transaction: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  const authority = new PublicKey(args.authority);
+  if (!message.payerKey.equals(authority)) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed fee payer does not match authority: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  const executableInstructions = message.instructions.filter(
+    (instruction) =>
+      !instruction.programId.equals(ComputeBudgetProgram.programId),
+  );
+  if (executableInstructions.length !== 1) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: expected exactly one non-compute instruction in the signed transaction: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  const instruction = executableInstructions[0]!;
+  if (!instruction.programId.equals(args.programId)) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed instruction program does not match Runana: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  const expectedSeasonPolicy = new PublicKey(args.relay.seasonPolicyPubkey);
+  const expectedCharacterRoot = deriveCharacterRootPda(
+    authority,
+    args.relay.chainCharacterIdHex,
+    args.programId,
+  );
+  const expectedCharacterStats = deriveCharacterStatsPda(
+    expectedCharacterRoot,
+    args.programId,
+  );
+  const expectedCharacterWorldProgress = deriveCharacterWorldProgressPda(
+    expectedCharacterRoot,
+    args.programId,
+  );
+  const expectedInitialPageIndex = Math.floor(
+    args.relay.initialUnlockedZoneId / 256,
+  );
+  const expectedCharacterZoneProgressPage = deriveCharacterZoneProgressPagePda(
+    expectedCharacterRoot,
+    expectedInitialPageIndex,
+    args.programId,
+  );
+  const expectedCharacterBatchCursor = deriveCharacterBatchCursorPda(
+    expectedCharacterRoot,
+    args.programId,
+  );
+  const expectedInstructionData = Buffer.concat([
+    computeAnchorInstructionDiscriminator("create_character"),
+    serializeCreateCharacterArgs({
+      characterIdHex: args.relay.chainCharacterIdHex,
+      initialUnlockedZoneId: args.relay.initialUnlockedZoneId,
+    }),
+  ]);
+
+  const expectedAccounts = [
+    {
+      pubkey: authority,
+      isSigner: true,
+      isWritable: true,
+      label: "payer",
+    },
+    {
+      pubkey: authority,
+      isSigner: true,
+      isWritable: true,
+      label: "authority",
+    },
+    {
+      pubkey: expectedSeasonPolicy,
+      isSigner: false,
+      isWritable: false,
+      label: "season_policy",
+    },
+    {
+      pubkey: expectedCharacterRoot,
+      isSigner: false,
+      isWritable: true,
+      label: "character_root",
+    },
+    {
+      pubkey: expectedCharacterStats,
+      isSigner: false,
+      isWritable: true,
+      label: "character_stats",
+    },
+    {
+      pubkey: expectedCharacterWorldProgress,
+      isSigner: false,
+      isWritable: true,
+      label: "character_world_progress",
+    },
+    {
+      pubkey: expectedCharacterZoneProgressPage,
+      isSigner: false,
+      isWritable: true,
+      label: "character_zone_progress_page",
+    },
+    {
+      pubkey: expectedCharacterBatchCursor,
+      isSigner: false,
+      isWritable: true,
+      label: "character_batch_cursor",
+    },
+    {
+      pubkey: SystemProgram.programId,
+      isSigner: false,
+      isWritable: false,
+      label: "system_program",
+    },
+  ];
+
+  if (instruction.keys.length !== expectedAccounts.length) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed instruction account count does not match the canonical create_character layout: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+
+  expectedAccounts.forEach((expectedAccount, index) => {
+    assertAccountMeta({
+      actual: instruction.keys[index]!,
+      expectedPubkey: expectedAccount.pubkey,
+      expectedIsSigner: expectedAccount.isSigner,
+      expectedIsWritable: expectedAccount.isWritable,
+      label: expectedAccount.label,
+      diagnostics: args.diagnostics,
+    });
+  });
+
+  if (!Buffer.from(instruction.data).equals(expectedInstructionData)) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed instruction data does not match the prepared create_character payload: ${JSON.stringify(args.diagnostics)}`,
+    );
+  }
+}
+
+function resolveConfiguredActiveSeasonId(env: CharacterCreationEnv): number {
   const configured =
     env.RUNANA_ACTIVE_SEASON_ID?.trim() ??
     env.RUNANA_SEASON_ID?.trim() ??
@@ -480,6 +701,7 @@ export async function prepareSolanaCharacterCreation(
     localCharacterId: character.id,
     chainCharacterIdHex,
     characterRootPubkey: createInstruction.characterRoot.toBase58(),
+    seasonPolicyPubkey: createInstruction.seasonPolicy.toBase58(),
     initialUnlockedZoneId: input.initialUnlockedZoneId,
     recentBlockhash: preparedTransactionBytes.recentBlockhash,
     lastValidBlockHeight: preparedTransactionBytes.lastValidBlockHeight,
@@ -538,21 +760,20 @@ export async function submitSolanaCharacterCreation(
   const signedMessageBase64 = serializeVersionedTransactionMessageBase64(
     deserializedTransaction,
   );
-
-  if (signedMessageBase64 !== input.prepared.serializedMessageBase64) {
-    throw new Error(
-      `ERR_SIGNED_TRANSACTION_MESSAGE_MISMATCH: ${JSON.stringify({
-        preparedMessageSha256Hex: sha256HexFromBase64(
-          input.prepared.serializedMessageBase64,
-        ),
-        signedMessageSha256Hex: sha256HexFromBase64(signedMessageBase64),
-        transactionVersion: "v0",
-        localCharacterId: relay.localCharacterId,
-        characterRootPubkey: relay.characterRootPubkey,
-        walletAuthority: accepted.authority,
-      })}`,
-    );
-  }
+  const messageDiagnostics = buildCreateMessageDiagnostics({
+    preparedMessageBase64: input.prepared.serializedMessageBase64,
+    signedMessageBase64,
+    localCharacterId: relay.localCharacterId,
+    characterRootPubkey: relay.characterRootPubkey,
+    walletAuthority: accepted.authority,
+  });
+  assertSemanticallyValidSignedCreateTransaction({
+    authority: accepted.authority,
+    relay,
+    programId,
+    transaction: deserializedTransaction,
+    diagnostics: messageDiagnostics,
+  });
 
   const chainState = await prisma.character.findChainState(
     relay.localCharacterId,
@@ -589,6 +810,14 @@ export async function submitSolanaCharacterCreation(
   ) {
     throw new Error(
       "ERR_CHARACTER_SUBMISSION_STATE: character creation submission requires PENDING or FAILED state",
+    );
+  }
+  if (
+    relay.seasonPolicyPubkey === undefined ||
+    relay.seasonPolicyPubkey.length === 0
+  ) {
+    throw new Error(
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: season policy relay metadata is missing: ${JSON.stringify(messageDiagnostics)}`,
     );
   }
 
