@@ -5,11 +5,14 @@ jest.mock("../lib/combat/zoneRunService", () => ({
 import { POST } from "../app/api/zone-runs/start/route";
 import { startZoneRun } from "../lib/combat/zoneRunService";
 
-async function postStart(body: unknown): Promise<Response> {
+async function postStart(body: unknown, requestKey = "req-1"): Promise<Response> {
   return POST(
     new Request("http://localhost/api/zone-runs/start", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "Idempotency-Key": requestKey,
+      },
       body: JSON.stringify(body),
     }),
   );
@@ -56,8 +59,22 @@ describe("POST /api/zone-runs/start", () => {
     expect(startZoneRun).toHaveBeenCalledWith({
       characterId: "character-1",
       zoneId: 2,
+      requestKey: "req-1",
     });
     expect(json.activeRun.runId).toBe("run-1");
+  });
+
+  it("rejects a missing idempotency key before hitting the service", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/zone-runs/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ characterId: "character-1", zoneId: 2 }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(startZoneRun).not.toHaveBeenCalled();
   });
 
   it("rejects malformed payloads before hitting the service", async () => {

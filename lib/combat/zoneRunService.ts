@@ -67,21 +67,33 @@ export interface ZoneRunServiceDependencies {
 export interface StartZoneRunInput {
   characterId: string;
   zoneId: number;
+  requestKey: string;
 }
 
 export interface ZoneRunBranchInput {
   characterId: string;
   nextNodeId: string;
+  requestKey: string;
 }
 
 export interface ZoneRunCharacterInput {
   characterId: string;
+  requestKey?: string;
 }
 
 export interface ZoneRunPauseSkillInput {
   characterId: string;
   skillId: string;
+  requestKey: string;
 }
+
+type ZoneRunMutationActionType =
+  | "START"
+  | "CHOOSE_BRANCH"
+  | "ADVANCE"
+  | "USE_PAUSE_SKILL"
+  | "CONTINUE"
+  | "ABANDON";
 
 function currentUnixTimestamp(now: Date): number {
   return Math.floor(now.getTime() / 1000);
@@ -94,6 +106,12 @@ function statusForMissingFinals(): never {
 function assertInteger(value: number, field: string, minimum = 0): void {
   if (!Number.isInteger(value) || value < minimum) {
     throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be an integer >= ${minimum}`);
+  }
+}
+
+function assertNonEmptyString(value: string, field: string): void {
+  if (value.trim().length === 0) {
+    throw new Error(`ERR_EMPTY_${field.toUpperCase()}: ${field} must not be empty`);
   }
 }
 
@@ -617,6 +635,67 @@ function buildActionResponse(args: {
   };
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
+}
+
+async function withZoneRunMutationIdempotency(args: {
+  characterId: string;
+  requestKey: string;
+  actionType: ZoneRunMutationActionType;
+  execute: () => Promise<ZoneRunActionResponse>;
+}): Promise<ZoneRunActionResponse> {
+  assertNonEmptyString(args.requestKey, "requestKey");
+
+  const existing = await prisma.zoneRunMutationDedup.findByCharacterIdAndRequestKey(
+    args.characterId,
+    args.requestKey,
+  );
+  if (existing !== null) {
+    if (existing.actionType !== args.actionType) {
+      throw new Error(
+        `ERR_ZONE_RUN_IDEMPOTENCY_KEY_REUSED: request key ${args.requestKey} was already used for ${existing.actionType}`,
+      );
+    }
+    return existing.response as ZoneRunActionResponse;
+  }
+
+  const result = await args.execute();
+
+  try {
+    await prisma.zoneRunMutationDedup.create({
+      characterId: args.characterId,
+      requestKey: args.requestKey,
+      actionType: args.actionType,
+      response: result,
+    });
+    return result;
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+
+    const replay = await prisma.zoneRunMutationDedup.findByCharacterIdAndRequestKey(
+      args.characterId,
+      args.requestKey,
+    );
+    if (replay === null) {
+      throw error;
+    }
+    if (replay.actionType !== args.actionType) {
+      throw new Error(
+        `ERR_ZONE_RUN_IDEMPOTENCY_KEY_REUSED: request key ${args.requestKey} was already used for ${replay.actionType}`,
+      );
+    }
+    return replay.response as ZoneRunActionResponse;
+  }
+}
+
 async function closeRun(args: {
   snapshot: InternalActiveZoneRunSnapshot;
   terminalStatus: ZoneRunTerminalStatus;
@@ -758,7 +837,7 @@ async function loadActiveSnapshot(
   };
 }
 
-export async function startZoneRun(
+async function startZoneRunInternal(
   input: StartZoneRunInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -820,6 +899,18 @@ export async function startZoneRun(
   return buildActionResponse({ snapshot });
 }
 
+export async function startZoneRun(
+  input: StartZoneRunInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey,
+    actionType: "START",
+    execute: () => startZoneRunInternal(input, deps),
+  });
+}
+
 export async function getActiveZoneRun(
   input: ZoneRunCharacterInput,
   deps: ZoneRunServiceDependencies = {},
@@ -828,7 +919,7 @@ export async function getActiveZoneRun(
   return buildActionResponse({ snapshot, closedRunSummary });
 }
 
-export async function chooseZoneRunBranch(
+async function chooseZoneRunBranchInternal(
   input: ZoneRunBranchInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -868,7 +959,19 @@ export async function chooseZoneRunBranch(
   return buildActionResponse({ snapshot: nextSnapshot });
 }
 
-export async function advanceZoneRunSubnode(
+export async function chooseZoneRunBranch(
+  input: ZoneRunBranchInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey,
+    actionType: "CHOOSE_BRANCH",
+    execute: () => chooseZoneRunBranchInternal(input, deps),
+  });
+}
+
+async function advanceZoneRunSubnodeInternal(
   input: ZoneRunCharacterInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1119,7 +1222,19 @@ export async function advanceZoneRunSubnode(
   });
 }
 
-export async function useZoneRunPauseSkill(
+export async function advanceZoneRunSubnode(
+  input: ZoneRunCharacterInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey ?? "",
+    actionType: "ADVANCE",
+    execute: () => advanceZoneRunSubnodeInternal(input, deps),
+  });
+}
+
+async function useZoneRunPauseSkillInternal(
   input: ZoneRunPauseSkillInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1162,7 +1277,19 @@ export async function useZoneRunPauseSkill(
   return buildActionResponse({ snapshot: nextSnapshot });
 }
 
-export async function continueZoneRunAfterBattle(
+export async function useZoneRunPauseSkill(
+  input: ZoneRunPauseSkillInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey,
+    actionType: "USE_PAUSE_SKILL",
+    execute: () => useZoneRunPauseSkillInternal(input, deps),
+  });
+}
+
+async function continueZoneRunAfterBattleInternal(
   input: ZoneRunCharacterInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1233,7 +1360,19 @@ export async function continueZoneRunAfterBattle(
   return buildActionResponse({ snapshot: nextSnapshot });
 }
 
-export async function abandonZoneRun(
+export async function continueZoneRunAfterBattle(
+  input: ZoneRunCharacterInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey ?? "",
+    actionType: "CONTINUE",
+    execute: () => continueZoneRunAfterBattleInternal(input, deps),
+  });
+}
+
+async function abandonZoneRunInternal(
   input: ZoneRunCharacterInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1260,5 +1399,17 @@ export async function abandonZoneRun(
     snapshot: null,
     closedRunSummary: closedSummary,
     battle: snapshot.lastBattle,
+  });
+}
+
+export async function abandonZoneRun(
+  input: ZoneRunCharacterInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  return withZoneRunMutationIdempotency({
+    characterId: input.characterId,
+    requestKey: input.requestKey ?? "",
+    actionType: "ABANDON",
+    execute: () => abandonZoneRunInternal(input, deps),
   });
 }

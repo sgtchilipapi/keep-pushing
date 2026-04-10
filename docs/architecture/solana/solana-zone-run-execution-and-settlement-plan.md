@@ -76,6 +76,8 @@ Canonical mutating run actions:
 Transport requirement:
 
 - every mutating run action must support idempotent retry semantics,
+- canonical API retries use an `Idempotency-Key` request header per mutating action,
+- the server replays the stored action response for repeated identical request keys,
 - every mutating run action returns the full updated active-run snapshot,
 - a dedicated active-run read endpoint must exist for reload/resume,
 - the broader character read model should expose only a lightweight active-run summary.
@@ -433,7 +435,7 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 - [x] Add `POST /api/zone-runs/use-skill`.
 - [x] Add `POST /api/zone-runs/continue`.
 - [x] Add `POST /api/zone-runs/abandon`.
-- [ ] Make every mutating action idempotent.
+- [x] Make every mutating action idempotent.
 - [x] Make every mutating action return the full updated active-run snapshot.
 - [x] Add a lightweight active-run summary to the character read model.
 - [x] Keep the legacy direct encounter route available as non-canonical sandbox behavior.

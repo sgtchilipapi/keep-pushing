@@ -29,6 +29,10 @@ const prismaMock = {
   battleRecord: {
     create: jest.fn(),
   },
+  zoneRunMutationDedup: {
+    findByCharacterIdAndRequestKey: jest.fn(),
+    create: jest.fn(),
+  },
 };
 
 jest.mock("../lib/prisma", () => ({
@@ -170,6 +174,12 @@ describe("zoneRunService terminal closure behavior", () => {
       }
       return node;
     });
+    prismaMock.zoneRunMutationDedup.findByCharacterIdAndRequestKey.mockResolvedValue(
+      null,
+    );
+    prismaMock.zoneRunMutationDedup.create.mockResolvedValue({
+      id: "dedup-1",
+    });
   });
 
   it("closes a run as failed after a combat loss and keeps progression empty", async () => {
@@ -252,7 +262,7 @@ describe("zoneRunService terminal closure behavior", () => {
     });
 
     const result = await advanceZoneRunSubnode(
-      { characterId: "character-1" },
+      { characterId: "character-1", requestKey: "advance-1" },
       {
         now: () => new Date("2023-11-14T22:13:20.000Z"),
         env: {
@@ -355,7 +365,7 @@ describe("zoneRunService terminal closure behavior", () => {
     );
 
     const result = await abandonZoneRun(
-      { characterId: "character-1" },
+      { characterId: "character-1", requestKey: "abandon-1" },
       {
         now: () => new Date("2023-11-14T22:13:20.000Z"),
         env: {

@@ -31,3 +31,8 @@ export function statusForZoneRunError(message: string): number {
 
   return 500;
 }
+
+export function readRequiredIdempotencyKey(request: Request): string | null {
+  const requestKey = request.headers.get("Idempotency-Key")?.trim() ?? "";
+  return requestKey.length > 0 ? requestKey : null;
+}

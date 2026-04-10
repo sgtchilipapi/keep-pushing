@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 
 import { startZoneRun } from "../../../../lib/combat/zoneRunService";
-import { statusForZoneRunError } from "../routeSupport";
+import { readRequiredIdempotencyKey, statusForZoneRunError } from "../routeSupport";
 
 export async function POST(request: Request) {
+  const requestKey = readRequiredIdempotencyKey(request);
+  if (requestKey === null) {
+    return NextResponse.json(
+      { error: "Missing Idempotency-Key header." },
+      { status: 400 },
+    );
+  }
+
   let body: Partial<{ characterId: string; zoneId: number }>;
 
   try {
@@ -27,6 +35,7 @@ export async function POST(request: Request) {
     const result = await startZoneRun({
       characterId: body.characterId,
       zoneId: body.zoneId,
+      requestKey,
     });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

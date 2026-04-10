@@ -333,6 +333,23 @@ export type CreateZoneRunActionLogInput = {
   payload: unknown;
 };
 
+export type ZoneRunMutationDedupRecord = {
+  id: string;
+  characterId: string;
+  requestKey: string;
+  actionType: string;
+  response: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateZoneRunMutationDedupInput = {
+  characterId: string;
+  requestKey: string;
+  actionType: string;
+  response: unknown;
+};
+
 export type CreateLocalFirstPersistedEncounterInput = CreatePersistedEncounterInput & {
   provisionalProgress: UpdateCharacterProvisionalProgressInput;
 };
@@ -555,6 +572,16 @@ type ZoneRunActionLogRow = {
   createdAt: Date;
 };
 
+type ZoneRunMutationDedupRow = {
+  id: string;
+  characterId: string;
+  requestKey: string;
+  actionType: string;
+  responseJson: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type SettlementBatchRow = {
   id: string;
   characterId: string;
@@ -767,6 +794,18 @@ function mapZoneRunActionLog(row: ZoneRunActionLogRow): ZoneRunActionLogRecord {
     subnodeId: row.subnodeId,
     payload: row.payloadJson,
     createdAt: row.createdAt,
+  };
+}
+
+function mapZoneRunMutationDedup(row: ZoneRunMutationDedupRow): ZoneRunMutationDedupRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    requestKey: row.requestKey,
+    actionType: row.actionType,
+    response: row.responseJson,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -1693,6 +1732,59 @@ export const prisma = {
       );
 
       return mapZoneRunActionLog(result.rows[0]);
+    },
+  },
+  zoneRunMutationDedup: {
+    async findByCharacterIdAndRequestKey(characterId: string, requestKey: string) {
+      const result = await pool.query<ZoneRunMutationDedupRow>(
+        `SELECT
+          id,
+          "characterId",
+          "requestKey",
+          "actionType",
+          "responseJson",
+          "createdAt",
+          "updatedAt"
+        FROM "ZoneRunMutationDedup"
+        WHERE "characterId" = $1
+          AND "requestKey" = $2
+        LIMIT 1`,
+        [characterId, requestKey],
+      );
+
+      return result.rows[0] ? mapZoneRunMutationDedup(result.rows[0]) : null;
+    },
+    async create(input: CreateZoneRunMutationDedupInput) {
+      const result = await pool.query<ZoneRunMutationDedupRow>(
+        `INSERT INTO "ZoneRunMutationDedup"
+          (
+            id,
+            "characterId",
+            "requestKey",
+            "actionType",
+            "responseJson",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        RETURNING
+          id,
+          "characterId",
+          "requestKey",
+          "actionType",
+          "responseJson",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.characterId,
+          input.requestKey,
+          input.actionType,
+          JSON.stringify(input.response),
+          new Date(),
+        ],
+      );
+
+      return mapZoneRunMutationDedup(result.rows[0]);
     },
   },
   battleRecord: {
