@@ -44,7 +44,13 @@ import type {
   ZoneRunTerminalStatus,
 } from "../../types/zoneRun";
 import type { ZoneProgressDeltaEntry } from "../../types/settlement";
-import { getZoneNode, getZoneRunTopology, type ZoneNodeDef, type ZoneRunTopology } from "./zoneRunTopologies";
+import {
+  getLatestZoneRunTopology,
+  getZoneNode,
+  getZoneRunTopology,
+  type ZoneNodeDef,
+  type ZoneRunTopology,
+} from "./zoneRunTopologies";
 
 type InternalActiveZoneRunSnapshot = ActiveZoneRunSnapshot & {
   resumeState?: ActiveZoneRunState | "COMPLETE";
@@ -414,7 +420,7 @@ function resolveCombatTriggered(snapshot: InternalActiveZoneRunSnapshot): boolea
     throw new Error("ERR_ZONE_RUN_STATE_INVALID: cannot resolve combat without an active subnode");
   }
 
-  const topology = getZoneRunTopology(snapshot.zoneId);
+  const topology = getZoneRunTopology(snapshot.zoneId, snapshot.topologyVersion);
   const subnode = getZoneNode(topology, snapshot.currentNodeId).subnodes.find(
     (candidate) => candidate.subnodeId === snapshot.currentSubnodeId,
   );
@@ -481,7 +487,7 @@ function computeZoneProgressUpdateForSuccess(
 
   const nextZoneId = zoneId + 1;
   try {
-    getZoneRunTopology(nextZoneId);
+    getLatestZoneRunTopology(nextZoneId);
     const nextZoneKey = String(nextZoneId);
     if ((zoneStates[nextZoneKey] ?? 0) === 0) {
       zoneStates[nextZoneKey] = 1;
@@ -773,7 +779,7 @@ export async function startZoneRun(
     throw new Error("ERR_CHARACTER_NOT_FOUND: character was not found");
   }
 
-  const topology = getZoneRunTopology(input.zoneId);
+  const topology = getLatestZoneRunTopology(input.zoneId);
   const { seasonId, highestUnlockedZoneId } = await resolveAccessContext(character, deps);
   if (input.zoneId > highestUnlockedZoneId) {
     throw new Error(
@@ -837,7 +843,7 @@ export async function chooseZoneRunBranch(
     throw new Error(`ERR_ZONE_RUN_BRANCH_INVALID: node ${input.nextNodeId} is not a legal branch`);
   }
 
-  const topology = getZoneRunTopology(snapshot.zoneId);
+  const topology = getZoneRunTopology(snapshot.zoneId, snapshot.topologyVersion);
   const nextNode = getZoneNode(topology, input.nextNodeId);
   const nextSnapshot = cloneSnapshot(snapshot);
   nextSnapshot.currentNodeId = nextNode.nodeId;
@@ -882,7 +888,7 @@ export async function advanceZoneRunSubnode(
 
   await resolveAccessContext(character, deps);
 
-  const topology = getZoneRunTopology(snapshot.zoneId);
+  const topology = getZoneRunTopology(snapshot.zoneId, snapshot.topologyVersion);
   const node = getZoneNode(topology, snapshot.currentNodeId);
   const nodeId = node.nodeId;
   const subnodeId = snapshot.currentSubnodeId;

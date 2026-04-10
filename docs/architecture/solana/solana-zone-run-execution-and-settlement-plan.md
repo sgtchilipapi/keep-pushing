@@ -400,7 +400,7 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 
 ### 11.3 Phase 2: topology loader and deterministic run executor
 
-- [ ] Implement topology lookup by `zone_id + topology_version`.
+- [x] Implement topology lookup by `zone_id + topology_version`.
 - [x] Implement explicit start-node initialization.
 - [x] Implement node-boundary branch validation and commit logic.
 - [x] Implement per-subnode traversal consumption.
@@ -512,8 +512,7 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 - [ ] Add tests for successful branching runs with merges.
 - [ ] Add tests for no-combat subnode traversal.
 - [ ] Add tests for cap exhaustion reroll and empty-filtered-pool traversal fallback.
-- [ ] Add tests for failure, abandon, idle expiry, and season-cutoff closure.
-  Idle-expiry and season-cutoff service coverage is now in place; failure/abandon still need dedicated automated tests.
+- [x] Add tests for failure, abandon, idle expiry, and season-cutoff closure.
 - [ ] Add tests for carryover HP/cooldowns/statuses/modifiers and per-subnode traversal ticks.
 - [ ] Add tests for repeated pause-state support/recovery skills and explicit continue.
 - [ ] Add tests for settleable vs zero-value closed-run classification.

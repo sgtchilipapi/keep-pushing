@@ -357,7 +357,10 @@ const TOPOLOGIES: ZoneRunTopology[] = [
   }),
 ];
 
-const TOPOLOGY_BY_ZONE_ID = new Map(TOPOLOGIES.map((topology) => [topology.zoneId, topology] as const));
+const TOPOLOGY_BY_ZONE_AND_VERSION = new Map<string, ZoneRunTopology>(
+  TOPOLOGIES.map((topology) => [`${topology.zoneId}:${topology.topologyVersion}`, topology] as const),
+);
+const LATEST_TOPOLOGY_BY_ZONE_ID = new Map<number, ZoneRunTopology>();
 
 function cloneTopology(topology: ZoneRunTopology): ZoneRunTopology {
   return {
@@ -374,9 +377,31 @@ function cloneTopology(topology: ZoneRunTopology): ZoneRunTopology {
 
 function assertIntegrity(): void {
   for (const topology of TOPOLOGIES) {
+    const topologyKey = `${topology.zoneId}:${topology.topologyVersion}`;
+    if (TOPOLOGY_BY_ZONE_AND_VERSION.get(topologyKey) !== topology) {
+      throw new Error(
+        `ERR_INVALID_ZONE_TOPOLOGY: duplicate topology version ${topology.zoneId}:${topology.topologyVersion}`,
+      );
+    }
+
+    const latestForZone = LATEST_TOPOLOGY_BY_ZONE_ID.get(topology.zoneId);
+    if (
+      latestForZone === undefined ||
+      topology.topologyVersion > latestForZone.topologyVersion
+    ) {
+      LATEST_TOPOLOGY_BY_ZONE_ID.set(topology.zoneId, topology);
+    }
+
     const nodeIds = new Set(topology.nodes.map((node) => node.nodeId));
     if (!nodeIds.has(topology.startNodeId)) {
       throw new Error(`ERR_INVALID_ZONE_TOPOLOGY: zone ${topology.zoneId} missing start node`);
+    }
+    for (const terminalNodeId of topology.terminalNodeIds) {
+      if (!nodeIds.has(terminalNodeId)) {
+        throw new Error(
+          `ERR_INVALID_ZONE_TOPOLOGY: zone ${topology.zoneId} missing terminal node ${terminalNodeId}`,
+        );
+      }
     }
 
     const legalEnemyIds = new Set(topology.enemyRules.map((entry) => entry.enemyArchetypeId));
@@ -418,10 +443,22 @@ function assertIntegrity(): void {
 
 assertIntegrity();
 
-export function getZoneRunTopology(zoneId: number): ZoneRunTopology {
-  const topology = TOPOLOGY_BY_ZONE_ID.get(zoneId);
+export function getLatestZoneRunTopology(zoneId: number): ZoneRunTopology {
+  const topology = LATEST_TOPOLOGY_BY_ZONE_ID.get(zoneId);
   if (topology === undefined) {
     throw new Error(`ERR_UNKNOWN_ZONE_ID: ${zoneId}`);
+  }
+
+  return cloneTopology(topology);
+}
+
+export function getZoneRunTopology(
+  zoneId: number,
+  topologyVersion: number,
+): ZoneRunTopology {
+  const topology = TOPOLOGY_BY_ZONE_AND_VERSION.get(`${zoneId}:${topologyVersion}`);
+  if (topology === undefined) {
+    throw new Error(`ERR_UNKNOWN_ZONE_TOPOLOGY_VERSION: ${zoneId}:${topologyVersion}`);
   }
 
   return cloneTopology(topology);
