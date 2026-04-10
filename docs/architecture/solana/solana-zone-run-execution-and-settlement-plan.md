@@ -350,9 +350,59 @@ These invariants must hold before implementation is considered complete:
 - every reward-bearing settlement batch can be replayed from sealed run summaries plus referenced registries,
 - topology truth remains server-side while chain legality remains bounded and deterministic.
 
+## 10.1) Current execution strategy
+
+For the current implementation pass, the priority is **end-to-end playable core loop first, settlement later**.
+
+That means we should first complete enough backend execution, DB persistence, front-end integration, and UX polish to manually test the full zone-run experience in the real app. The goal is to confirm:
+
+- the gameplay flow feels right,
+- the run-state transitions are understandable,
+- the resume/reload behavior is reliable,
+- the post-battle pause and branch-choice UX are workable,
+- the progression/unlock loop feels correct,
+- the local persistence model supports realistic play sessions.
+
+Only after that manual gameplay/UX confirmation should we proceed into run-native sealing and on-chain settlement work.
+
+Practical implication:
+
+- checklist items that are strictly required to make the core loop playable and testable should be pulled forward,
+- checklist items that exist mainly for settlement continuity, batch construction, or on-chain validation should wait until after the core loop is manually validated,
+- selected tooling/read-model/docs work may be executed earlier than its checklist phase number if it directly supports manual gameplay testing.
+
 ## 11) Ordered implementation checklist
 
 Follow this checklist in order. Do not start a later group until the earlier group is stable enough to serve as a contract for it.
+
+### 11.0 Overview order for execution
+
+Use the checklist in this practical order:
+
+1. Finish the gameplay-core backend contract.
+   This means completing the remaining server-side traversal, closure, progression, and closed-run semantics needed for a stable local gameplay loop.
+
+2. Pull forward the front-end/manual-QA enablers.
+   This includes any read-model, route-contract, debug-page, dashboard, or operator-doc work needed so a real player can start a run, advance it, branch, pause, continue, abandon, resume, and see the resulting state clearly.
+
+3. Complete gameplay-focused hardening before settlement work.
+   Add the remaining tests that validate branching runs, no-combat traversal, reroll/cap exhaustion behavior, carryover behavior, continue/pause flow, and successful-run-only progression.
+
+4. Run real manual end-to-end play sessions.
+   Confirm backend behavior, DB persistence, front-end UX, and gameplay pacing together before changing the settlement model further.
+
+5. Only after manual confirmation, resume the settlement path.
+   At that point complete settleable/zero-value closed-run classification, then the run-native sealing pipeline, then the on-chain account/payload redesign, then the validator rewrite.
+
+6. Finish the migration/tooling tail last.
+   After the run-native settlement architecture is stable, finish surrounding service migrations, bootstrap/admin tooling, validator tooling, and final performance/hardening checks.
+
+Execution grouping for the existing phases:
+
+- Execute Phases 0 through 5 first as the main gameplay-core track.
+- Pull forward the gameplay-relevant parts of Phase 9 and Phase 10 as needed to make manual testing possible.
+- Defer Phases 6 through 8 until the core loop has been manually validated in the app.
+- Finish the remaining Phase 9 and Phase 10 items after the settlement/on-chain model is stable.
 
 ### 11.1 Phase 0: freeze contracts and content model
 
@@ -424,7 +474,7 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 - [x] Implement explicit post-battle pause state after every combat.
 - [x] Implement repeated tagged support/recovery skill use during pause.
 - [x] Implement explicit continue action to exit pause.
-- [ ] Reject unsupported consumable item use in the zone-run path.
+- [x] Reject unsupported consumable item use in the zone-run path.
 
 ### 11.5 Phase 4: dedicated API surface and read models
 
