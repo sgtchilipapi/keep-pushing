@@ -42,8 +42,12 @@ export interface ActiveZoneRunSnapshot {
   topologyHash: string;
   state: ActiveZoneRunState;
   currentNodeId: string;
+  enteredNodeIds: string[];
   currentSubnodeId: string | null;
   currentSubnodeOrdinal: number;
+  lastConsumedNodeId: string | null;
+  lastConsumedSubnodeId: string | null;
+  lastConsumedSubnodeOrdinal: number;
   totalSubnodesTraversed: number;
   totalSubnodesInRun: number;
   branchOptions: string[];
@@ -66,8 +70,40 @@ export interface ClosedZoneRunSummary {
   closedAt: string;
 }
 
+export interface ZoneRunTopologyNodePreview {
+  nodeId: string;
+  subnodes: Array<{
+    subnodeId: string;
+    combatChanceBP: number;
+  }>;
+  nextNodeIds: string[];
+  enemyArchetypes: Array<{
+    enemyArchetypeId: number;
+    displayName: string;
+  }>;
+}
+
+export interface ZoneRunTopologyPreview {
+  zoneId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  startNodeId: string;
+  terminalNodeIds: string[];
+  totalSubnodeCount: number;
+  enemyRules: Array<{
+    enemyArchetypeId: number;
+    displayName: string;
+    maxPerRun: number;
+  }>;
+  nodes: ZoneRunTopologyNodePreview[];
+}
+
 export interface ZoneRunActionResponse {
   activeRun: ActiveZoneRunSnapshot | null;
   closedRunSummary: ClosedZoneRunSummary | null;
   battle: ZoneRunLastBattleSummary | null;
+}
+
+export interface ZoneRunTopologyResponse {
+  topology: ZoneRunTopologyPreview;
 }

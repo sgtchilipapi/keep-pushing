@@ -366,8 +366,12 @@ function buildInitialSnapshot(args: {
     topologyHash: args.topology.topologyHash,
     state: "TRAVERSING",
     currentNodeId: startNode.nodeId,
-    currentSubnodeId: firstSubnode.subnodeId,
-    currentSubnodeOrdinal: 1,
+    enteredNodeIds: [startNode.nodeId],
+    currentSubnodeId: null,
+    currentSubnodeOrdinal: 0,
+    lastConsumedNodeId: null,
+    lastConsumedSubnodeId: null,
+    lastConsumedSubnodeOrdinal: 0,
     totalSubnodesTraversed: 0,
     totalSubnodesInRun: args.topology.totalSubnodeCount,
     branchOptions: [],
@@ -394,6 +398,9 @@ function resolveNodeProgressAfterTraversal(
   }
 
   next.totalSubnodesTraversed += 1;
+  next.lastConsumedNodeId = currentNode.nodeId;
+  next.lastConsumedSubnodeId = next.currentSubnodeId;
+  next.lastConsumedSubnodeOrdinal = consumedSubnodeIndex + 1;
   const nextSubnode = currentNode.subnodes[consumedSubnodeIndex + 1] ?? null;
   if (nextSubnode !== null) {
     next.currentSubnodeId = nextSubnode.subnodeId;
@@ -407,7 +414,7 @@ function resolveNodeProgressAfterTraversal(
   }
 
   next.currentSubnodeId = null;
-  next.currentSubnodeOrdinal = currentNode.subnodes.length;
+  next.currentSubnodeOrdinal = 0;
   if (topology.terminalNodeIds.includes(currentNode.nodeId)) {
     next.branchOptions = [];
     next.resumeState = "COMPLETE";
@@ -417,25 +424,31 @@ function resolveNodeProgressAfterTraversal(
     };
   }
 
-  if (currentNode.nextNodeIds.length === 1) {
-    const onlyNextNode = getZoneNode(topology, currentNode.nextNodeIds[0]!);
-    next.currentNodeId = onlyNextNode.nodeId;
-    next.currentSubnodeId = onlyNextNode.subnodes[0]?.subnodeId ?? null;
-    next.currentSubnodeOrdinal = next.currentSubnodeId === null ? 0 : 1;
-    next.branchOptions = [];
-    next.resumeState = undefined;
-    return {
-      snapshot: next,
-      completeRun: false,
-    };
-  }
-
   next.branchOptions = [...currentNode.nextNodeIds];
   next.resumeState = undefined;
   return {
     snapshot: next,
     completeRun: false,
   };
+}
+
+function materializePendingSubnode(
+  snapshot: InternalActiveZoneRunSnapshot,
+  node: ZoneNodeDef,
+): InternalActiveZoneRunSnapshot {
+  if (snapshot.currentSubnodeId !== null) {
+    return snapshot;
+  }
+
+  const firstSubnode = node.subnodes[0] ?? null;
+  if (firstSubnode === null) {
+    throw new Error(`ERR_INVALID_ZONE_TOPOLOGY: node ${node.nodeId} has no subnodes`);
+  }
+
+  const next = cloneSnapshot(snapshot);
+  next.currentSubnodeId = firstSubnode.subnodeId;
+  next.currentSubnodeOrdinal = 1;
+  return next;
 }
 
 function resolveCombatTriggered(snapshot: InternalActiveZoneRunSnapshot): boolean {
@@ -943,8 +956,12 @@ async function chooseZoneRunBranchInternal(
   const nextNode = getZoneNode(topology, input.nextNodeId);
   const nextSnapshot = cloneSnapshot(snapshot);
   nextSnapshot.currentNodeId = nextNode.nodeId;
-  nextSnapshot.currentSubnodeId = nextNode.subnodes[0]?.subnodeId ?? null;
-  nextSnapshot.currentSubnodeOrdinal = nextSnapshot.currentSubnodeId === null ? 0 : 1;
+  nextSnapshot.enteredNodeIds = [...nextSnapshot.enteredNodeIds, nextNode.nodeId];
+  nextSnapshot.currentSubnodeId = null;
+  nextSnapshot.currentSubnodeOrdinal = 0;
+  nextSnapshot.lastConsumedNodeId = null;
+  nextSnapshot.lastConsumedSubnodeId = null;
+  nextSnapshot.lastConsumedSubnodeOrdinal = 0;
   nextSnapshot.state = "TRAVERSING";
   nextSnapshot.branchOptions = [];
 
@@ -985,7 +1002,7 @@ async function advanceZoneRunSubnodeInternal(
     return buildActionResponse({ snapshot: null, closedRunSummary: active.closedRunSummary });
   }
   const snapshot = active.snapshot;
-  if (snapshot.state !== "TRAVERSING" || snapshot.currentSubnodeId === null) {
+  if (snapshot.state !== "TRAVERSING") {
     throw new Error("ERR_ZONE_RUN_ADVANCE_INVALID: run is not ready to advance a subnode");
   }
 
@@ -998,11 +1015,15 @@ async function advanceZoneRunSubnodeInternal(
 
   const topology = getZoneRunTopology(snapshot.zoneId, snapshot.topologyVersion);
   const node = getZoneNode(topology, snapshot.currentNodeId);
+  const effectiveSnapshot = materializePendingSubnode(snapshot, node);
   const nodeId = node.nodeId;
-  const subnodeId = snapshot.currentSubnodeId;
+  const subnodeId = effectiveSnapshot.currentSubnodeId;
+  if (subnodeId === null) {
+    throw new Error("ERR_ZONE_RUN_STATE_INVALID: missing active subnode for traversal");
+  }
 
-  if (!resolveCombatTriggered(snapshot)) {
-    const progressed = resolveNodeProgressAfterTraversal(snapshot, topology);
+  if (!resolveCombatTriggered(effectiveSnapshot)) {
+    const progressed = resolveNodeProgressAfterTraversal(effectiveSnapshot, topology);
     progressed.snapshot.playerCarryover = applyTraversalTickToCarryover(progressed.snapshot.playerCarryover);
     progressed.snapshot.state = progressed.completeRun
       ? "POST_BATTLE_PAUSE"
@@ -1060,12 +1081,12 @@ async function advanceZoneRunSubnodeInternal(
   }
 
   const enemyArchetypeId = selectEnemyArchetypeForSubnode({
-    snapshot,
+    snapshot: effectiveSnapshot,
     topology,
     node,
   });
   if (enemyArchetypeId === null) {
-    const progressed = resolveNodeProgressAfterTraversal(snapshot, topology);
+    const progressed = resolveNodeProgressAfterTraversal(effectiveSnapshot, topology);
     progressed.snapshot.playerCarryover = applyTraversalTickToCarryover(progressed.snapshot.playerCarryover);
     progressed.snapshot.state = progressed.completeRun
       ? "POST_BATTLE_PAUSE"
@@ -1123,15 +1144,15 @@ async function advanceZoneRunSubnodeInternal(
 
   const battleId = randomUUID();
   const seed = generateBattleSeed();
-  const playerInitial = buildPlayerCombatSnapshotFromCarryover(character, snapshot.playerCarryover);
+  const playerInitial = buildPlayerCombatSnapshotFromCarryover(character, effectiveSnapshot.playerCarryover);
   const enemyInitial = buildEnemyCombatSnapshot(getEnemyArchetypeDef(enemyArchetypeId));
   const battleResult = simulateBattle({
     battleId,
     seed,
     playerInitial,
     enemyInitial,
-    playerInitialCooldowns: snapshot.playerCarryover.cooldowns,
-    playerInitialStatuses: toBattleStatuses(snapshot.playerCarryover),
+    playerInitialCooldowns: effectiveSnapshot.playerCarryover.cooldowns,
+    playerInitialStatuses: toBattleStatuses(effectiveSnapshot.playerCarryover),
   });
   const playerFinal = battleResult.playerFinal ?? statusForMissingFinals();
   const enemyFinal = battleResult.enemyFinal ?? statusForMissingFinals();
@@ -1151,7 +1172,7 @@ async function advanceZoneRunSubnodeInternal(
 
   if (battleResult.winnerEntityId !== character.id) {
     await persistLosingBattle({
-      snapshot,
+      snapshot: effectiveSnapshot,
       character,
       nodeId,
       subnodeId,
@@ -1169,7 +1190,7 @@ async function advanceZoneRunSubnodeInternal(
       payload: { battleId, enemyArchetypeId },
     });
     const closedSummary = await closeRun({
-      snapshot,
+      snapshot: effectiveSnapshot,
       terminalStatus: "FAILED",
       zoneProgressDelta: [],
       provisionalProgressUpdate: null,
@@ -1182,7 +1203,7 @@ async function advanceZoneRunSubnodeInternal(
   }
 
   await persistWinningBattle({
-    snapshot,
+    snapshot: effectiveSnapshot,
     character,
     nodeId,
     subnodeId,
@@ -1193,19 +1214,45 @@ async function advanceZoneRunSubnodeInternal(
     battleResult: lastBattle.battleResult,
   });
 
-  const progressed = resolveNodeProgressAfterTraversal(snapshot, topology);
+  const progressed = resolveNodeProgressAfterTraversal(effectiveSnapshot, topology);
   progressed.snapshot.enemyAppearanceCounts[String(enemyArchetypeId)] =
     (progressed.snapshot.enemyAppearanceCounts[String(enemyArchetypeId)] ?? 0) + 1;
   progressed.snapshot.playerCarryover = applyTraversalTickToCarryover(
     buildCarryoverFromBattleFinal(playerFinal),
   );
   progressed.snapshot.lastBattle = lastBattle;
-  progressed.snapshot.state = "POST_BATTLE_PAUSE";
-  progressed.snapshot.resumeState = progressed.completeRun
-    ? "COMPLETE"
+  progressed.snapshot.state = progressed.completeRun
+    ? "TRAVERSING"
     : progressed.snapshot.branchOptions.length > 0
       ? "AWAITING_BRANCH"
       : "TRAVERSING";
+  progressed.snapshot.resumeState = undefined;
+
+  if (progressed.completeRun) {
+    const provisionalProgress = await prisma.characterProvisionalProgress.findByCharacterId(character.id);
+    const progressUpdate = provisionalProgress === null
+      ? null
+      : computeZoneProgressUpdateForSuccess(provisionalProgress, snapshot.zoneId);
+    const closedSummary = await closeRun({
+      snapshot: progressed.snapshot,
+      terminalStatus: "COMPLETED",
+      zoneProgressDelta: progressUpdate?.zoneProgressDelta ?? [],
+      provisionalProgressUpdate: isConfirmedEncounterCharacter(character)
+        ? null
+        : progressUpdate === null
+          ? null
+          : {
+              highestUnlockedZoneId: progressUpdate.highestUnlockedZoneId,
+              highestClearedZoneId: progressUpdate.highestClearedZoneId,
+              zoneStates: progressUpdate.zoneStates,
+            },
+    });
+    return buildActionResponse({
+      snapshot: null,
+      closedRunSummary: closedSummary,
+      battle: lastBattle,
+    });
+  }
 
   await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
     state: progressed.snapshot.state,
@@ -1213,8 +1260,8 @@ async function advanceZoneRunSubnodeInternal(
     snapshot: progressed.snapshot,
   });
   await prisma.zoneRunActionLog.create({
-    zoneRunId: snapshot.runId,
-    characterId: snapshot.characterId,
+    zoneRunId: effectiveSnapshot.runId,
+    characterId: effectiveSnapshot.characterId,
     actionType: "ADVANCE_COMBAT_WIN",
     nodeId,
     subnodeId,

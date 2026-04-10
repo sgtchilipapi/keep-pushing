@@ -347,6 +347,58 @@
   font-weight: 600;
 }
 
+.stepperScroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pathDiagram {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  height: auto;
+}
+
+.pathEdge {
+  fill: none;
+  stroke: #cbd5e1;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pathEdgeBranch {
+  stroke: #f59e0b;
+}
+
+.pathShape {
+  fill: #ffffff;
+  stroke: #cbd5e1;
+  stroke-width: 2;
+}
+
+.pathShapeDone {
+  fill: #dcfce7;
+  stroke: #16a34a;
+}
+
+.pathShapeCurrent {
+  fill: #dbeafe;
+  stroke: #2563eb;
+}
+
+.pathShapeBranch {
+  fill: #fef3c7;
+  stroke: #f59e0b;
+}
+
+.pathLabel {
+  fill: #0f172a;
+  text-anchor: middle;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .list {
   margin: 0;
   padding-left: 18px;
