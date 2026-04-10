@@ -87,6 +87,11 @@ export interface ZoneRunPauseSkillInput {
   requestKey: string;
 }
 
+export interface ZoneRunUseItemInput {
+  characterId: string;
+  itemId: string;
+}
+
 type ZoneRunMutationActionType =
   | "START"
   | "CHOOSE_BRANCH"
@@ -1412,4 +1417,18 @@ export async function abandonZoneRun(
     actionType: "ABANDON",
     execute: () => abandonZoneRunInternal(input, deps),
   });
+}
+
+export async function useZoneRunConsumableItem(
+  input: ZoneRunUseItemInput,
+  deps: ZoneRunServiceDependencies = {},
+): Promise<ZoneRunActionResponse> {
+  const { snapshot, closedRunSummary } = await loadActiveSnapshot(input.characterId, deps);
+  if (snapshot === null) {
+    return buildActionResponse({ snapshot: null, closedRunSummary });
+  }
+
+  throw new Error(
+    `ERR_ZONE_RUN_ITEMS_UNSUPPORTED: consumable item ${input.itemId} is not supported during zone runs`,
+  );
 }

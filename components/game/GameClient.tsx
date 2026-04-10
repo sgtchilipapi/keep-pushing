@@ -10,12 +10,20 @@ import type {
 } from "../../types/api/solana";
 import type {
   AnonymousUserResponse,
+  BattleSettlementStatus,
   CharacterQueryResponse,
   CharacterReadModel,
   CreateCharacterResponse,
   EncounterResponse,
   SettlementPrepareResponse,
 } from "../../types/api/frontend";
+import type {
+  ActiveZoneRunSnapshot,
+  ClosedZoneRunSummary,
+  ZoneRunActionResponse,
+  ZoneRunLastBattleSummary,
+  ZoneRunTerminalStatus,
+} from "../../types/zoneRun";
 import BattleReplay from "../BattleReplay";
 import StatusBadge from "./StatusBadge";
 import styles from "./game-shell.module.css";
@@ -25,6 +33,11 @@ import {
   resolveSkillNames,
   resolveSyncPanelState,
 } from "./uiModel";
+import {
+  BARRIER_SKILL_ID,
+  REPAIR_SKILL_ID,
+  getSkillDef,
+} from "../../engine/battle/skillRegistry";
 import {
   connectPhantom,
   disconnectPhantom,
@@ -132,6 +145,113 @@ function settlementTone(
     default:
       return "neutral";
   }
+}
+
+function zoneRunTerminalTone(
+  status: ZoneRunTerminalStatus | null | undefined,
+): "neutral" | "warning" | "success" | "danger" | "info" {
+  switch (status) {
+    case "COMPLETED":
+      return "success";
+    case "FAILED":
+      return "danger";
+    case "ABANDONED":
+    case "EXPIRED":
+    case "SEASON_CUTOFF":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
+
+function zoneRunStateTone(
+  state: ActiveZoneRunSnapshot["state"] | null | undefined,
+): "neutral" | "warning" | "success" | "danger" | "info" {
+  switch (state) {
+    case "TRAVERSING":
+      return "info";
+    case "AWAITING_BRANCH":
+      return "warning";
+    case "POST_BATTLE_PAUSE":
+      return "success";
+    default:
+      return "neutral";
+  }
+}
+
+function formatZoneRunState(
+  state: ActiveZoneRunSnapshot["state"] | null | undefined,
+): string {
+  switch (state) {
+    case "TRAVERSING":
+      return "TRAVERSING";
+    case "AWAITING_BRANCH":
+      return "CHOOSE BRANCH";
+    case "POST_BATTLE_PAUSE":
+      return "POST BATTLE";
+    default:
+      return "IDLE";
+  }
+}
+
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `zone-run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatEnemyHistogram(histogram: Record<string, number>): string {
+  const entries = Object.entries(histogram).filter(([, count]) => count > 0);
+  if (entries.length === 0) {
+    return "No encounters yet";
+  }
+
+  return entries
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([enemyId, count]) => `Enemy ${enemyId} x${count}`)
+    .join(", ");
+}
+
+function formatZoneProgressDelta(delta: unknown): string {
+  if (!Array.isArray(delta) || delta.length === 0) {
+    return "No zone progression";
+  }
+
+  return delta
+    .map((entry) => {
+      if (!isObject(entry)) {
+        return "Unknown zone update";
+      }
+      const zoneId = typeof entry.zoneId === "number" ? entry.zoneId : "?";
+      const newState = typeof entry.newState === "number" ? entry.newState : "?";
+      const label =
+        newState === 2 ? "cleared" : newState === 1 ? "unlocked" : `state ${newState}`;
+      return `Zone ${zoneId} ${label}`;
+    })
+    .join(", ");
+}
+
+function battleSettlementInfo(
+  battle: ZoneRunLastBattleSummary | null,
+  latestBattle: CharacterReadModel["latestBattle"],
+): { label: string; tone: "neutral" | "warning" | "success" | "danger" | "info" } | null {
+  if (battle !== null) {
+    return {
+      label: battle.rewarded ? "Reward eligible" : "Loss recorded",
+      tone: battle.rewarded ? "success" : "danger",
+    };
+  }
+
+  if (latestBattle === null) {
+    return null;
+  }
+
+  return {
+    label: latestBattle.settlementStatus,
+    tone: settlementTone(latestBattle.settlementStatus as BattleSettlementStatus),
+  };
 }
 
 function walletAvailabilityTone(
@@ -355,6 +475,398 @@ function WalletToolbar(props: WalletToolbarProps) {
         <div className={styles.errorBox}>{props.error}</div>
       ) : null}
     </div>
+  );
+}
+
+type ZoneRunPanelProps = {
+  character: CharacterReadModel;
+  selectedZoneId: number;
+  activeRun: ActiveZoneRunSnapshot | null;
+  latestBattle: ZoneRunLastBattleSummary | null;
+  latestClosedRun: ClosedZoneRunSummary | null;
+  pending: boolean;
+  refreshPending: boolean;
+  error: string | null;
+  notice: string | null;
+  onSelectZone: (zoneId: number) => void;
+  onStartRun: () => Promise<void>;
+  onRefreshRun: () => Promise<void>;
+  onAdvance: () => Promise<void>;
+  onChooseBranch: (nextNodeId: string) => Promise<void>;
+  onUsePauseSkill: (skillId: string) => Promise<void>;
+  onContinue: () => Promise<void>;
+  onAbandon: () => Promise<void>;
+  onRunSandboxBattle: () => Promise<void>;
+  sandboxBattlePending: boolean;
+  sandboxBattleError: string | null;
+  latestEncounter: EncounterResponse | null;
+};
+
+function ZoneRunPanel(props: ZoneRunPanelProps) {
+  const pauseSkillIds = props.character.activeSkills.filter(
+    (skillId) => skillId === BARRIER_SKILL_ID || skillId === REPAIR_SKILL_ID,
+  );
+  const activeRun = props.activeRun;
+  const canStartRun =
+    activeRun === null &&
+    props.character.battleEligible &&
+    !props.pending;
+  const settlementInfo = battleSettlementInfo(
+    props.latestBattle,
+    props.character.latestBattle,
+  );
+
+  return (
+    <section className={styles.panel}>
+      <div className={styles.panelTitleRow}>
+        <div className={styles.stack}>
+          <h2 className={styles.panelTitle}>Zone Run</h2>
+          <p className={styles.panelText}>
+            Play the real traversal loop here: start a run, consume subnodes,
+            branch through nodes, handle post-battle pause, and resume or
+            abandon from durable state.
+          </p>
+        </div>
+        {activeRun ? (
+          <StatusBadge
+            label={formatZoneRunState(activeRun.state)}
+            tone={zoneRunStateTone(activeRun.state)}
+          />
+        ) : props.latestClosedRun ? (
+          <StatusBadge
+            label={props.latestClosedRun.terminalStatus}
+            tone={zoneRunTerminalTone(props.latestClosedRun.terminalStatus)}
+          />
+        ) : null}
+      </div>
+
+      <div className={styles.formGrid}>
+        {activeRun === null ? (
+          <>
+            <label className={styles.field}>
+              <span className={styles.label}>Zone</span>
+              <select
+                className={styles.select}
+                value={props.selectedZoneId}
+                onChange={(event) => props.onSelectZone(Number(event.target.value))}
+                disabled={props.pending || !props.character.battleEligible}
+              >
+                {Array.from(
+                  { length: maxUnlockedZone(props.character) },
+                  (_, index) => index + 1,
+                ).map((zoneId) => (
+                  <option key={zoneId} value={zoneId}>
+                    Zone {zoneId}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className={styles.buttonRow}>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.buttonPrimary}`}
+                onClick={() => void props.onStartRun()}
+                disabled={!canStartRun}
+              >
+                {props.pending ? "Starting run..." : "Start Zone Run"}
+              </button>
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => void props.onRefreshRun()}
+                disabled={props.refreshPending}
+              >
+                {props.refreshPending ? "Refreshing..." : "Refresh Run State"}
+              </button>
+            </div>
+
+            {!props.character.battleEligible ? (
+              <div className={styles.infoBox}>
+                Sync backlog settlement before starting a new run for this
+                character.
+              </div>
+            ) : (
+              <div className={styles.infoBox}>
+                No active run right now. Start a run from an unlocked zone to
+                enter the traversal flow.
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className={styles.keyValueGrid}>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Run</span>
+                <span className={styles.keyValue}>
+                  {truncateMiddle(activeRun.runId, 6)}
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Zone / Season</span>
+                <span className={styles.keyValue}>
+                  Zone {activeRun.zoneId} / Season {activeRun.seasonId}
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Node</span>
+                <span className={styles.keyValue}>{activeRun.currentNodeId}</span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Subnode</span>
+                <span className={styles.keyValue}>
+                  {activeRun.currentSubnodeId ?? "Node boundary"}
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Progress</span>
+                <span className={styles.keyValue}>
+                  {activeRun.totalSubnodesTraversed}/
+                  {activeRun.totalSubnodesInRun} consumed
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Carryover HP</span>
+                <span className={styles.keyValue}>
+                  {activeRun.playerCarryover.hp}/
+                  {activeRun.playerCarryover.hpMax}
+                </span>
+              </div>
+            </div>
+
+            <div className={styles.infoBox}>
+              Encounters so far:{" "}
+              {formatEnemyHistogram(activeRun.enemyAppearanceCounts)}
+            </div>
+
+            {Object.keys(activeRun.playerCarryover.cooldowns).length > 0 ? (
+              <div className={styles.infoBox}>
+                Cooldowns:{" "}
+                {Object.entries(activeRun.playerCarryover.cooldowns)
+                  .map(([skillId, remaining]) => {
+                    const skillName = getSkillDef(skillId).skillName;
+                    return `${skillName} ${remaining}`;
+                  })
+                  .join(", ")}
+              </div>
+            ) : null}
+
+            {Object.keys(activeRun.playerCarryover.statuses).length > 0 ? (
+              <div className={styles.infoBox}>
+                Carryover statuses:{" "}
+                {Object.entries(activeRun.playerCarryover.statuses)
+                  .map(
+                    ([statusId, value]) =>
+                      `${statusId} (${value.remainingTurns} ticks)`,
+                  )
+                  .join(", ")}
+              </div>
+            ) : null}
+
+            {activeRun.state === "TRAVERSING" ? (
+              <div className={styles.buttonRow}>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.buttonPrimary}`}
+                  onClick={() => void props.onAdvance()}
+                  disabled={props.pending}
+                >
+                  {props.pending ? "Advancing..." : "Advance Subnode"}
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.buttonDanger}`}
+                  onClick={() => void props.onAbandon()}
+                  disabled={props.pending}
+                >
+                  Abandon Run
+                </button>
+              </div>
+            ) : null}
+
+            {activeRun.state === "AWAITING_BRANCH" ? (
+              <div className={styles.stack}>
+                <div className={styles.infoBox}>
+                  Branch choice required before the run can continue.
+                </div>
+                <div className={styles.buttonRow}>
+                  {activeRun.branchOptions.map((branchNodeId) => (
+                    <button
+                      key={branchNodeId}
+                      type="button"
+                      className={`${styles.button} ${styles.buttonPrimary}`}
+                      onClick={() => void props.onChooseBranch(branchNodeId)}
+                      disabled={props.pending}
+                    >
+                      Enter {branchNodeId}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.buttonDanger}`}
+                    onClick={() => void props.onAbandon()}
+                    disabled={props.pending}
+                  >
+                    Abandon Run
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeRun.state === "POST_BATTLE_PAUSE" ? (
+              <div className={styles.stack}>
+                <div className={styles.infoBox}>
+                  Post-battle pause is active. Use allowed support/recovery
+                  skills, then continue traversal.
+                </div>
+                <div className={styles.buttonRow}>
+                  {pauseSkillIds.map((skillId) => {
+                    const skill = getSkillDef(skillId);
+                    const remainingCooldown =
+                      activeRun.playerCarryover.cooldowns[skillId] ?? 0;
+                    return (
+                      <button
+                        key={skillId}
+                        type="button"
+                        className={styles.button}
+                        onClick={() => void props.onUsePauseSkill(skillId)}
+                        disabled={props.pending || remainingCooldown > 0}
+                      >
+                        {skill.skillName}
+                        {remainingCooldown > 0 ? ` (${remainingCooldown})` : ""}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.buttonPrimary}`}
+                    onClick={() => void props.onContinue()}
+                    disabled={props.pending}
+                  >
+                    {props.pending ? "Continuing..." : "Continue Run"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.buttonDanger}`}
+                    onClick={() => void props.onAbandon()}
+                    disabled={props.pending}
+                  >
+                    Abandon Run
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className={styles.buttonRow}>
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => void props.onRefreshRun()}
+                disabled={props.refreshPending || props.pending}
+              >
+                {props.refreshPending ? "Refreshing..." : "Refresh Run State"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {settlementInfo ? (
+          <div className={styles.inlineStack}>
+            <StatusBadge label={settlementInfo.label} tone={settlementInfo.tone} />
+          </div>
+        ) : null}
+
+        {props.notice ? <div className={styles.successBox}>{props.notice}</div> : null}
+        {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
+
+        {props.latestBattle ? (
+          <div className={styles.stack}>
+            <div className={styles.successBox}>
+              Latest zone-run battle: enemy {props.latestBattle.enemyArchetypeId} at{" "}
+              {props.latestBattle.nodeId}/{props.latestBattle.subnodeId}.{" "}
+              {props.latestBattle.rewarded ? "Reward eligible." : "Run-ending loss."}
+            </div>
+            <BattleReplay result={props.latestBattle.battleResult} />
+          </div>
+        ) : null}
+
+        {props.latestClosedRun ? (
+          <div className={styles.details}>
+            <strong>Latest closed run</strong>
+            <div className={styles.keyValueGrid}>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Terminal status</span>
+                <span className={styles.keyValue}>
+                  <StatusBadge
+                    label={props.latestClosedRun.terminalStatus}
+                    tone={zoneRunTerminalTone(props.latestClosedRun.terminalStatus)}
+                  />
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Rewarded battles</span>
+                <span className={styles.keyValue}>
+                  {props.latestClosedRun.rewardedBattleCount}
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Rewards histogram</span>
+                <span className={styles.keyValue}>
+                  {formatEnemyHistogram(
+                    props.latestClosedRun.rewardedEncounterHistogram,
+                  )}
+                </span>
+              </div>
+              <div className={styles.keyValueItem}>
+                <span className={styles.keyLabel}>Zone progression</span>
+                <span className={styles.keyValue}>
+                  {formatZoneProgressDelta(props.latestClosedRun.zoneProgressDelta)}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <details className={styles.details}>
+          <summary>Legacy sandbox battle</summary>
+          <div className={styles.formGrid}>
+            <div className={styles.infoBox}>
+              This remains available for dev comparison, but the playable core
+              loop is now the zone-run flow above.
+            </div>
+
+            <div className={styles.buttonRow}>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.buttonPrimary}`}
+                onClick={() => void props.onRunSandboxBattle()}
+                disabled={props.sandboxBattlePending || !props.character.battleEligible}
+              >
+                {props.sandboxBattlePending ? "Running battle..." : "Run sandbox battle"}
+              </button>
+            </div>
+
+            {props.sandboxBattleError ? (
+              <div className={styles.errorBox}>{props.sandboxBattleError}</div>
+            ) : null}
+
+            {props.latestEncounter ? (
+              <div className={styles.stack}>
+                <div className={styles.successBox}>
+                  Latest encounter persisted with seed {props.latestEncounter.seed} and settlement status{" "}
+                  {props.latestEncounter.settlementStatus}.
+                </div>
+                <BattleReplay result={props.latestEncounter.battleResult} />
+              </div>
+            ) : (
+              <div className={styles.infoBox}>
+                No sandbox encounter has been run in this session yet.
+              </div>
+            )}
+          </div>
+        </details>
+      </div>
+    </section>
   );
 }
 
@@ -1039,6 +1551,16 @@ export default function GameClient() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [battlePending, setBattlePending] = useState(false);
   const [battleError, setBattleError] = useState<string | null>(null);
+  const [zoneRunPending, setZoneRunPending] = useState(false);
+  const [zoneRunError, setZoneRunError] = useState<string | null>(null);
+  const [zoneRunNotice, setZoneRunNotice] = useState<string | null>(null);
+  const [zoneRunRefreshPending, setZoneRunRefreshPending] = useState(false);
+  const [activeZoneRunDetail, setActiveZoneRunDetail] =
+    useState<ActiveZoneRunSnapshot | null>(null);
+  const [latestZoneRunBattle, setLatestZoneRunBattle] =
+    useState<ZoneRunLastBattleSummary | null>(null);
+  const [latestClosedZoneRun, setLatestClosedZoneRun] =
+    useState<ClosedZoneRunSummary | null>(null);
   const [refreshPending, setRefreshPending] = useState(false);
   const [latestEncounter, setLatestEncounter] =
     useState<EncounterResponse | null>(null);
@@ -1092,6 +1614,10 @@ export default function GameClient() {
         { method: "GET", headers: undefined },
       );
       setCharacter(response.character);
+      setLatestClosedZoneRun(response.character?.latestClosedZoneRun ?? null);
+      if (response.character?.activeZoneRun === null) {
+        setActiveZoneRunDetail(null);
+      }
       setAppPhase("ready");
       return response.character;
     } finally {
@@ -1358,6 +1884,174 @@ export default function GameClient() {
     }
   }
 
+  async function refreshActiveZoneRun(nextCharacter?: CharacterReadModel | null) {
+    const activeCharacter = nextCharacter ?? character;
+    if (!activeCharacter?.activeZoneRun) {
+      setActiveZoneRunDetail(null);
+      return;
+    }
+
+    setZoneRunRefreshPending(true);
+
+    try {
+      const response = await apiRequest<ZoneRunActionResponse>(
+        `/api/zone-runs/active?characterId=${encodeURIComponent(activeCharacter.characterId)}`,
+        { method: "GET", headers: undefined },
+      );
+      setActiveZoneRunDetail(response.activeRun);
+      if (response.activeRun?.lastBattle) {
+        setLatestZoneRunBattle(response.activeRun.lastBattle);
+      }
+      if (response.closedRunSummary) {
+        setLatestClosedZoneRun(response.closedRunSummary);
+        await refreshCharacter(activeCharacter.userId);
+      }
+    } finally {
+      setZoneRunRefreshPending(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!character?.activeZoneRun) {
+      setActiveZoneRunDetail(null);
+      return;
+    }
+
+    void refreshActiveZoneRun(character);
+  }, [
+    character?.characterId,
+    character?.activeZoneRun?.runId,
+    character?.activeZoneRun?.state,
+    character?.activeZoneRun?.currentNodeId,
+    character?.activeZoneRun?.currentSubnodeId,
+  ]);
+
+  async function executeZoneRunAction(
+    path: string,
+    body: Record<string, unknown>,
+    successMessage: string,
+  ) {
+    if (!character) {
+      setZoneRunError("Create a character before starting a zone run.");
+      return;
+    }
+
+    setZoneRunPending(true);
+    setZoneRunError(null);
+    setZoneRunNotice(null);
+
+    try {
+      const response = await apiRequest<ZoneRunActionResponse>(path, {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": createIdempotencyKey(),
+        },
+        body: JSON.stringify(body),
+      });
+
+      setActiveZoneRunDetail(response.activeRun);
+      if (response.battle) {
+        setLatestZoneRunBattle(response.battle);
+      } else if (response.activeRun?.lastBattle) {
+        setLatestZoneRunBattle(response.activeRun.lastBattle);
+      }
+      if (response.closedRunSummary) {
+        setLatestClosedZoneRun(response.closedRunSummary);
+      }
+
+      await refreshCharacter(character.userId);
+      setZoneRunNotice(successMessage);
+    } catch (error) {
+      setZoneRunError(
+        error instanceof Error ? error.message : "Zone run action failed.",
+      );
+    } finally {
+      setZoneRunPending(false);
+    }
+  }
+
+  async function handleStartZoneRun() {
+    if (!character) {
+      setZoneRunError("Create a character before starting a zone run.");
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/start",
+      {
+        characterId: character.characterId,
+        zoneId: selectedZoneId,
+      },
+      `Zone ${selectedZoneId} run started.`,
+    );
+  }
+
+  async function handleAdvanceZoneRun() {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/advance",
+      { characterId: character.characterId },
+      "Subnode consumed.",
+    );
+  }
+
+  async function handleChooseZoneRunBranch(nextNodeId: string) {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/choose-branch",
+      {
+        characterId: character.characterId,
+        nextNodeId,
+      },
+      `Branch committed: ${nextNodeId}.`,
+    );
+  }
+
+  async function handleUsePauseSkill(skillId: string) {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/use-skill",
+      {
+        characterId: character.characterId,
+        skillId,
+      },
+      `${getSkillDef(skillId).skillName} applied during pause.`,
+    );
+  }
+
+  async function handleContinueZoneRun() {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/continue",
+      { characterId: character.characterId },
+      "Run continued.",
+    );
+  }
+
+  async function handleAbandonZoneRun() {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/abandon",
+      { characterId: character.characterId },
+      "Run abandoned.",
+    );
+  }
+
   if (appPhase === "bootstrapping_user" || appPhase === "loading_character") {
     return (
       <main className={styles.page}>
@@ -1488,83 +2182,29 @@ export default function GameClient() {
                 </div>
               </section>
 
-              <section className={styles.panel}>
-                <div className={styles.panelTitleRow}>
-                  <div className={styles.stack}>
-                    <h2 className={styles.panelTitle}>Battle</h2>
-                  </div>
-                  {character.latestBattle ? (
-                    <StatusBadge
-                      label={character.latestBattle.settlementStatus}
-                      tone={settlementTone(
-                        character.latestBattle.settlementStatus,
-                      )}
-                    />
-                  ) : null}
-                </div>
-
-                <div className={styles.formGrid}>
-                  <label className={styles.field}>
-                    <span className={styles.label}>Zone</span>
-                    <select
-                      className={styles.select}
-                      value={selectedZoneId}
-                      onChange={(event) =>
-                        setSelectedZoneId(Number(event.target.value))
-                      }
-                      disabled={battlePending || !character.battleEligible}
-                    >
-                      {Array.from(
-                        { length: maxUnlockedZone(character) },
-                        (_, index) => index + 1,
-                      ).map((zoneId) => (
-                        <option key={zoneId} value={zoneId}>
-                          Zone {zoneId}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className={styles.buttonRow}>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.buttonPrimary}`}
-                      onClick={handleBattle}
-                      disabled={battlePending || !character.battleEligible}
-                    >
-                      {battlePending ? "Running battle..." : "Run battle"}
-                    </button>
-                  </div>
-
-                  {!character.battleEligible ? (
-                    <div className={styles.infoBox}>
-                      Finish the initial on-chain settlement before starting
-                      another battle.
-                    </div>
-                  ) : null}
-
-                  {battleError ? (
-                    <div className={styles.errorBox}>{battleError}</div>
-                  ) : null}
-
-                  {latestEncounter ? (
-                    <div className={styles.stack}>
-                      <div className={styles.successBox}>
-                        Latest encounter persisted with seed{" "}
-                        {latestEncounter.seed} and settlement status{" "}
-                        {latestEncounter.settlementStatus}.
-                      </div>
-                      <BattleReplay result={latestEncounter.battleResult} />
-                    </div>
-                  ) : (
-                    <div className={styles.infoBox}>
-                      No new encounter has been run in this session yet. The
-                      latest persisted ledger status is still visible in the
-                      dashboard panels.
-                    </div>
-                  )}
-                </div>
-              </section>
+              <ZoneRunPanel
+                character={character}
+                selectedZoneId={selectedZoneId}
+                activeRun={activeZoneRunDetail}
+                latestBattle={latestZoneRunBattle}
+                latestClosedRun={latestClosedZoneRun}
+                pending={zoneRunPending}
+                refreshPending={zoneRunRefreshPending}
+                error={zoneRunError}
+                notice={zoneRunNotice}
+                onSelectZone={setSelectedZoneId}
+                onStartRun={handleStartZoneRun}
+                onRefreshRun={() => refreshActiveZoneRun(character)}
+                onAdvance={handleAdvanceZoneRun}
+                onChooseBranch={handleChooseZoneRunBranch}
+                onUsePauseSkill={handleUsePauseSkill}
+                onContinue={handleContinueZoneRun}
+                onAbandon={handleAbandonZoneRun}
+                onRunSandboxBattle={handleBattle}
+                sandboxBattlePending={battlePending}
+                sandboxBattleError={battleError}
+                latestEncounter={latestEncounter}
+              />
             </div>
 
             <div className={styles.panelGrid}>

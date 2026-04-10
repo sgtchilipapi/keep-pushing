@@ -7,7 +7,7 @@ This document captures the agreed next-phase redesign for real zone mechanics an
 Status:
 
 - design-locked,
-- partially implemented on the server/local DB side,
+- playable core loop now implemented across server execution, local DB persistence, and the app dashboard for manual testing,
 - run-native settlement and on-chain validation redesign not implemented yet,
 - intended to become the canonical direction for zone traversal and run-native settlement work.
 
@@ -556,7 +556,7 @@ Execution grouping for the existing phases:
 - [ ] Update settlement preparation/submit services to use run-native payloads.
 - [ ] Update local validators/dry-run validators to match the new payload and account model.
 - [ ] Update admin/bootstrap tooling for versioned zone metadata and enemy-rule accounts.
-- [ ] Update read-model builders and dashboards to show active runs and closed-run settlement state.
+- [x] Update read-model builders and dashboards to show active runs and closed-run settlement state.
 - [ ] Update API docs and operator docs to point to the zone-run path as canonical gameplay.
 
 ### 11.11 Phase 10: test matrix and hardening
