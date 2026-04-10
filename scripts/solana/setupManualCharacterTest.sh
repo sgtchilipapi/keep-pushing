@@ -150,6 +150,16 @@ function server_health_code() {
     "$SERVER_URL/api/auth/anon" || true
 }
 
+function apply_prisma_migrations() {
+  [[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL must be set before applying Prisma migrations"
+
+  note "Applying Prisma migrations"
+  (
+    cd "$KEEP_PUSHING_ROOT"
+    npx prisma migrate deploy >/dev/null
+  )
+}
+
 function wait_for_server() {
   local attempts=0
   while (( attempts < 90 )); do
@@ -299,6 +309,8 @@ function seed_bootstrap() {
 }
 
 function start_server_if_needed() {
+  apply_prisma_migrations
+
   local status
   status="$(server_health_code)"
   if [[ "$status" == "405" || "$status" == "400" || "$status" == "404" ]]; then

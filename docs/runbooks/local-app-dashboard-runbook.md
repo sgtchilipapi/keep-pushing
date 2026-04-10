@@ -38,6 +38,9 @@ npm run app:local:clean-space
 npm run app:local:fresh
 solana airdrop 5 D6jgHRYrA3As8ar6uvUixxyrdkb7t8658e2zuCHmMm2w --url http://127.0.0.1:8899
 
+Fresh local:
+
+
 What the one-shot helper now does:
 
 - starts Dockerized Postgres

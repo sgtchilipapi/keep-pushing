@@ -1032,6 +1032,11 @@ async function advanceZoneRunSubnodeInternal(
         : "TRAVERSING";
     progressed.snapshot.resumeState = progressed.completeRun ? "COMPLETE" : undefined;
     if (progressed.completeRun) {
+      await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
+        state: progressed.snapshot.state,
+        currentNodeId: progressed.snapshot.currentNodeId,
+        snapshot: progressed.snapshot,
+      });
       await prisma.zoneRunActionLog.create({
         zoneRunId: snapshot.runId,
         characterId: snapshot.characterId,
@@ -1040,28 +1045,7 @@ async function advanceZoneRunSubnodeInternal(
         subnodeId,
         payload: { completeRun: true },
       });
-      const provisionalProgress = await prisma.characterProvisionalProgress.findByCharacterId(character.id);
-      const progressUpdate = provisionalProgress === null
-        ? null
-        : computeZoneProgressUpdateForSuccess(provisionalProgress, snapshot.zoneId);
-      const closedSummary = await closeRun({
-        snapshot: progressed.snapshot,
-        terminalStatus: "COMPLETED",
-        zoneProgressDelta: progressUpdate?.zoneProgressDelta ?? [],
-        provisionalProgressUpdate: isConfirmedEncounterCharacter(character)
-          ? null
-          : progressUpdate === null
-            ? null
-            : {
-                highestUnlockedZoneId: progressUpdate.highestUnlockedZoneId,
-                highestClearedZoneId: progressUpdate.highestClearedZoneId,
-                zoneStates: progressUpdate.zoneStates,
-              },
-      });
-      return buildActionResponse({
-        snapshot: null,
-        closedRunSummary: closedSummary,
-      });
+      return buildActionResponse({ snapshot: progressed.snapshot });
     }
 
     await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
@@ -1095,6 +1079,11 @@ async function advanceZoneRunSubnodeInternal(
         : "TRAVERSING";
     progressed.snapshot.resumeState = progressed.completeRun ? "COMPLETE" : undefined;
     if (progressed.completeRun) {
+      await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
+        state: progressed.snapshot.state,
+        currentNodeId: progressed.snapshot.currentNodeId,
+        snapshot: progressed.snapshot,
+      });
       await prisma.zoneRunActionLog.create({
         zoneRunId: snapshot.runId,
         characterId: snapshot.characterId,
@@ -1103,28 +1092,7 @@ async function advanceZoneRunSubnodeInternal(
         subnodeId,
         payload: { reason: "NO_LEGAL_ENEMY_REMAINING" },
       });
-      const provisionalProgress = await prisma.characterProvisionalProgress.findByCharacterId(character.id);
-      const progressUpdate = provisionalProgress === null
-        ? null
-        : computeZoneProgressUpdateForSuccess(provisionalProgress, snapshot.zoneId);
-      const closedSummary = await closeRun({
-        snapshot: progressed.snapshot,
-        terminalStatus: "COMPLETED",
-        zoneProgressDelta: progressUpdate?.zoneProgressDelta ?? [],
-        provisionalProgressUpdate: isConfirmedEncounterCharacter(character)
-          ? null
-          : progressUpdate === null
-            ? null
-            : {
-                highestUnlockedZoneId: progressUpdate.highestUnlockedZoneId,
-                highestClearedZoneId: progressUpdate.highestClearedZoneId,
-                zoneStates: progressUpdate.zoneStates,
-              },
-      });
-      return buildActionResponse({
-        snapshot: null,
-        closedRunSummary: closedSummary,
-      });
+      return buildActionResponse({ snapshot: progressed.snapshot });
     }
     await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
       state: progressed.snapshot.state,
@@ -1222,34 +1190,28 @@ async function advanceZoneRunSubnodeInternal(
   );
   progressed.snapshot.lastBattle = lastBattle;
   progressed.snapshot.state = progressed.completeRun
-    ? "TRAVERSING"
+    ? "POST_BATTLE_PAUSE"
     : progressed.snapshot.branchOptions.length > 0
       ? "AWAITING_BRANCH"
       : "TRAVERSING";
-  progressed.snapshot.resumeState = undefined;
+  progressed.snapshot.resumeState = progressed.completeRun ? "COMPLETE" : undefined;
 
   if (progressed.completeRun) {
-    const provisionalProgress = await prisma.characterProvisionalProgress.findByCharacterId(character.id);
-    const progressUpdate = provisionalProgress === null
-      ? null
-      : computeZoneProgressUpdateForSuccess(provisionalProgress, snapshot.zoneId);
-    const closedSummary = await closeRun({
+    await prisma.activeZoneRun.updateByCharacterId(input.characterId, {
+      state: progressed.snapshot.state,
+      currentNodeId: progressed.snapshot.currentNodeId,
       snapshot: progressed.snapshot,
-      terminalStatus: "COMPLETED",
-      zoneProgressDelta: progressUpdate?.zoneProgressDelta ?? [],
-      provisionalProgressUpdate: isConfirmedEncounterCharacter(character)
-        ? null
-        : progressUpdate === null
-          ? null
-          : {
-              highestUnlockedZoneId: progressUpdate.highestUnlockedZoneId,
-              highestClearedZoneId: progressUpdate.highestClearedZoneId,
-              zoneStates: progressUpdate.zoneStates,
-            },
+    });
+    await prisma.zoneRunActionLog.create({
+      zoneRunId: effectiveSnapshot.runId,
+      characterId: effectiveSnapshot.characterId,
+      actionType: "ADVANCE_COMBAT_WIN",
+      nodeId,
+      subnodeId,
+      payload: { battleId, enemyArchetypeId, completeRun: true },
     });
     return buildActionResponse({
-      snapshot: null,
-      closedRunSummary: closedSummary,
+      snapshot: progressed.snapshot,
       battle: lastBattle,
     });
   }

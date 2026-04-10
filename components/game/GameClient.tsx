@@ -23,14 +23,7 @@ import type {
 } from "../../types/zoneRun";
 import StatusBadge from "./StatusBadge";
 import styles from "./game-shell.module.css";
-import {
-  resolveEffectiveSeason,
-  resolvePassiveNames,
-  resolveSkillNames,
-  resolveSyncPanelState,
-} from "./uiModel";
-import {
-} from "../../engine/battle/skillRegistry";
+import { resolveSyncPanelState } from "./uiModel";
 import {
   connectPhantom,
   disconnectPhantom,
@@ -723,6 +716,7 @@ type ZoneRunPanelProps = {
   onRefreshRun: () => Promise<void>;
   onAdvance: () => Promise<void>;
   onChooseBranch: (nextNodeId: string) => Promise<void>;
+  onContinue: () => Promise<void>;
   onAbandon: () => Promise<void>;
 };
 
@@ -881,7 +875,7 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
                 onClick={() => void props.onStartRun()}
                 disabled={!canStartRun}
               >
-                {props.pending ? "Starting run..." : "Start Zone Run"}
+                {props.pending ? "Starting run..." : "Start"}
               </button>
               <button
                 type="button"
@@ -936,6 +930,19 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
                   disabled={props.pending}
                 >
                   Abandon Run
+                </button>
+              </div>
+            ) : null}
+
+            {activeRun.state === "POST_BATTLE_PAUSE" ? (
+              <div className={styles.buttonRow}>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.buttonPrimary}`}
+                  onClick={() => void props.onContinue()}
+                  disabled={props.pending}
+                >
+                  {props.pending ? "Exiting..." : "Exit Zone"}
                 </button>
               </div>
             ) : null}
@@ -1298,7 +1305,7 @@ function SettlementPanel(props: SettlementPanelProps) {
   );
 }
 
-type SyncPanelProps = {
+type CharacterSyncButtonProps = {
   character: CharacterReadModel;
   walletAvailability: WalletAvailability;
   walletConnectionStatus: WalletConnectionStatus;
@@ -1307,7 +1314,7 @@ type SyncPanelProps = {
   onRefresh: () => Promise<CharacterReadModel | null>;
 };
 
-function SyncPanel(props: SyncPanelProps) {
+function CharacterSyncButton(props: CharacterSyncButtonProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -1321,21 +1328,7 @@ function SyncPanel(props: SyncPanelProps) {
     props.character,
     props.walletPublicKey,
   );
-  const season = resolveEffectiveSeason(props.character);
   const canSync = syncState.syncMode !== null;
-  const statusDetail =
-    stepMessage ??
-    (props.character.syncPhase === "LOCAL_ONLY"
-      ? "Battles are still available locally. Sync will save the character genesis on chain first, then backlog settlement can follow."
-      : props.character.syncPhase === "CREATING_ON_CHAIN"
-        ? "Character genesis is reserved or already submitted. Sync again to resume signing or check the in-flight transaction."
-        : props.character.syncPhase === "INITIAL_SETTLEMENT_REQUIRED"
-          ? "The character is confirmed on chain. Settle the first backlog batch before adding more battles."
-          : props.character.syncPhase === "SETTLEMENT_PENDING"
-            ? "A later settlement batch is pending. Sync again to submit the next batch or check the in-flight one."
-            : props.character.syncPhase === "FAILED"
-              ? "The last sync attempt failed before confirmation. Retry the sync flow to continue."
-              : "Character and settlement cursor are in sync.");
 
   useEffect(() => {
     setError(null);
@@ -1564,68 +1557,34 @@ function SyncPanel(props: SyncPanelProps) {
   }
 
   return (
-    <section className={styles.panel}>
-      <div className={styles.stack}>
-        <div className={styles.keyValueGrid}>
-          <div className={styles.keyValueItem}>
-            <span className={styles.keyLabel}>Season</span>
-            <span className={styles.keyValue}>{season ?? "Not available"}</span>
-          </div>
-          <div className={styles.keyValueItem}>
-            <span className={styles.keyLabel}>On-chain sync</span>
-            <span className={styles.keyValue}>
-              <StatusBadge
-                label={syncState.statusLabel}
-                tone={syncState.statusTone}
-              />
-            </span>
-          </div>
-        </div>
+    <div className={styles.stack}>
+      {stepMessage ? <div className={styles.infoBox}>{stepMessage}</div> : null}
+      {props.walletAvailability === "not_installed" ? (
+        <div className={styles.infoBox}>Install Phantom to use sync.</div>
+      ) : null}
+      {props.walletConnectionStatus !== "connected" ? (
+        <div className={styles.infoBox}>Connect Phantom to use sync.</div>
+      ) : null}
+      {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+      {error ? <div className={styles.errorBox}>{error}</div> : null}
+      {success ? <div className={styles.successBox}>{success}</div> : null}
 
-        <p className={styles.noteText}>
-          <em>
-            Note: Unsynced progress after the new season starts will be deleted.
-          </em>
-        </p>
-
-        <div className={styles.infoBox}>{statusDetail}</div>
-
-        {props.walletAvailability === "not_installed" ? (
-          <div className={styles.infoBox}>
-            Phantom is required for sync. Install it, refresh the page, and
-            connect your wallet.
-          </div>
-        ) : null}
-
-        {props.walletConnectionStatus !== "connected" ? (
-          <div className={styles.infoBox}>
-            Connect Phantom in the toolbar before syncing.
-          </div>
-        ) : null}
-
-        {mismatchMessage ? (
-          <div className={styles.errorBox}>{mismatchMessage}</div>
-        ) : null}
-        {error ? <div className={styles.errorBox}>{error}</div> : null}
-        {success ? <div className={styles.successBox}>{success}</div> : null}
-
-        <div className={styles.buttonRow}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={() => void handleSync()}
-            disabled={
-              pending ||
-              props.walletConnectionStatus !== "connected" ||
-              !canSync ||
-              Boolean(mismatchMessage)
-            }
-          >
-            {pending ? "Syncing..." : "Sync"}
-          </button>
-        </div>
+      <div className={styles.buttonRow}>
+        <button
+          type="button"
+          className={`${styles.button} ${styles.buttonPrimary}`}
+          onClick={() => void handleSync()}
+          disabled={
+            pending ||
+            props.walletConnectionStatus !== "connected" ||
+            !canSync ||
+            Boolean(mismatchMessage)
+          }
+        >
+          {pending ? "Syncing..." : "Sync"}
+        </button>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -1658,17 +1617,6 @@ export default function GameClient() {
 
   const walletPending =
     walletConnectionStatus === "connecting" || walletActionStatus !== "idle";
-  const activeSkillNames = useMemo(
-    () =>
-      character ? resolveSkillNames(character.activeSkills).join(", ") : "",
-    [character],
-  );
-  const passiveSkillNames = useMemo(
-    () =>
-      character ? resolvePassiveNames(character.passiveSkills).join(", ") : "",
-    [character],
-  );
-
   async function issueAnonymousUser(): Promise<string> {
     const created = await apiRequest<AnonymousUserResponse>("/api/auth/anon", {
       method: "POST",
@@ -2129,6 +2077,17 @@ export default function GameClient() {
     );
   }
 
+  async function handleContinueZoneRun() {
+    if (!character) {
+      return;
+    }
+
+    await executeZoneRunAction(
+      "/api/zone-runs/continue",
+      { characterId: character.characterId },
+    );
+  }
+
   async function handleAbandonZoneRun() {
     if (!character) {
       return;
@@ -2252,22 +2211,16 @@ export default function GameClient() {
                       {character.stats.hp}/{character.stats.hpMax}
                     </span>
                   </div>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Atk / Def / Spd</span>
-                    <span className={styles.keyValue}>
-                      {character.stats.atk} / {character.stats.def} /{" "}
-                      {character.stats.spd}
-                    </span>
-                  </div>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Active skills</span>
-                    <span className={styles.keyValue}>{activeSkillNames}</span>
-                  </div>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Passive skills</span>
-                    <span className={styles.keyValue}>{passiveSkillNames}</span>
-                  </div>
                 </div>
+
+                <CharacterSyncButton
+                  character={character}
+                  walletAvailability={walletAvailability}
+                  walletConnectionStatus={walletConnectionStatus}
+                  walletPublicKey={walletPublicKey}
+                  setWalletActionStatus={setWalletActionStatus}
+                  onRefresh={() => refreshCharacter(character.userId)}
+                />
               </section>
 
               <ZoneRunPanel
@@ -2285,18 +2238,8 @@ export default function GameClient() {
                 onRefreshRun={() => refreshActiveZoneRun(character)}
                 onAdvance={handleAdvanceZoneRun}
                 onChooseBranch={handleChooseZoneRunBranch}
+                onContinue={handleContinueZoneRun}
                 onAbandon={handleAbandonZoneRun}
-              />
-            </div>
-
-            <div className={styles.panelGrid}>
-              <SyncPanel
-                character={character}
-                walletAvailability={walletAvailability}
-                walletConnectionStatus={walletConnectionStatus}
-                walletPublicKey={walletPublicKey}
-                setWalletActionStatus={setWalletActionStatus}
-                onRefresh={() => refreshCharacter(character.userId)}
               />
             </div>
           </div>

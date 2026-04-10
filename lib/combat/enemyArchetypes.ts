@@ -13,6 +13,26 @@ export interface EnemyArchetypeDef {
   ai?: EnemyArchetypeAiDefaults;
 }
 
+const MANUAL_QA_ENEMY_NERF = {
+  hp: 0.2,
+  atk: 0.2,
+  def: 0.2,
+  accuracyBP: 0.6,
+  evadeBP: 0.2,
+} as const;
+
+function applyManualQaEnemyNerf(snapshot: EnemyArchetypeDef['snapshot']): EnemyArchetypeDef['snapshot'] {
+  return {
+    ...snapshot,
+    hp: Math.max(1, Math.round(snapshot.hp * MANUAL_QA_ENEMY_NERF.hp)),
+    hpMax: Math.max(1, Math.round(snapshot.hpMax * MANUAL_QA_ENEMY_NERF.hp)),
+    atk: Math.max(1, Math.round(snapshot.atk * MANUAL_QA_ENEMY_NERF.atk)),
+    def: Math.max(0, Math.round(snapshot.def * MANUAL_QA_ENEMY_NERF.def)),
+    accuracyBP: Math.max(0, Math.round(snapshot.accuracyBP * MANUAL_QA_ENEMY_NERF.accuracyBP)),
+    evadeBP: Math.max(0, Math.round(snapshot.evadeBP * MANUAL_QA_ENEMY_NERF.evadeBP)),
+  };
+}
+
 const ENEMY_ARCHETYPE_DEFS: EnemyArchetypeDef[] = [
   {
     enemyArchetypeId: 100,
@@ -258,14 +278,19 @@ function assertCatalogIntegrity(defs: EnemyArchetypeDef[]): void {
   }
 }
 
-assertCatalogIntegrity(ENEMY_ARCHETYPE_DEFS);
+const NERFED_ENEMY_ARCHETYPE_DEFS = ENEMY_ARCHETYPE_DEFS.map((def) => ({
+  ...def,
+  snapshot: applyManualQaEnemyNerf(def.snapshot),
+}));
+
+assertCatalogIntegrity(NERFED_ENEMY_ARCHETYPE_DEFS);
 
 const ENEMY_ARCHETYPE_BY_ID = new Map(
-  ENEMY_ARCHETYPE_DEFS.map((def) => [def.enemyArchetypeId, def] as const),
+  NERFED_ENEMY_ARCHETYPE_DEFS.map((def) => [def.enemyArchetypeId, def] as const),
 );
 
 export function listEnemyArchetypeDefs(): EnemyArchetypeDef[] {
-  return ENEMY_ARCHETYPE_DEFS.map((def) => ({
+  return NERFED_ENEMY_ARCHETYPE_DEFS.map((def) => ({
     ...def,
     snapshot: cloneSnapshot(def.snapshot),
   }));
@@ -282,4 +307,3 @@ export function getEnemyArchetypeDef(enemyArchetypeId: number): EnemyArchetypeDe
     snapshot: cloneSnapshot(def.snapshot),
   };
 }
-
