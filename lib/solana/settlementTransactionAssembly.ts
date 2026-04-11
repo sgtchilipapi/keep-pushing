@@ -19,7 +19,7 @@ export interface PrepareSettlementVersionedTransactionArgs {
   envelope: SettlementInstructionAccountEnvelope;
   payload: SettlementBatchPayloadV2;
   feePayer?: PublicKey;
-  playerAuthorizationSignature: Uint8Array;
+  playerAuthorizationSignature?: Uint8Array;
   serverSigner: Keypair;
   addressLookupTableAccounts?: AddressLookupTableAccount[];
   commitment?: Commitment;
@@ -47,7 +47,6 @@ export async function buildPreparedSettlementVersionedTransaction(
   const instructionBundle = buildSettlementTransactionInstructions({
     payload: args.payload,
     envelope: args.envelope,
-    playerAuthorizationSignature: args.playerAuthorizationSignature,
     serverSigner: args.serverSigner,
     clusterId: args.clusterId,
   });

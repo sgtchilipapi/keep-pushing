@@ -44,7 +44,7 @@ export interface BuildApplyBattleSettlementBatchV1InstructionArgs {
 export interface BuildSettlementTransactionInstructionsArgs {
   payload: SettlementBatchPayloadV2;
   envelope: SettlementInstructionAccountEnvelope;
-  playerAuthorizationSignature: Uint8Array;
+  playerAuthorizationSignature?: Uint8Array;
   serverSigner: Keypair;
   clusterId?: number;
 }
@@ -165,14 +165,6 @@ function payloadToCanonicalBytes(payload: SettlementBatchPayloadV2) {
   };
 }
 
-function toSignatureBytes(signature: Uint8Array, field: string): Uint8Array {
-  if (signature.length !== 64) {
-    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be exactly 64 bytes`);
-  }
-
-  return new Uint8Array(signature);
-}
-
 export function serializeSettlementBatchPayloadV1(payload: SettlementBatchPayloadV2): Buffer {
   return concat([
     encodeRunanaCharacterId(payload.characterId),
@@ -270,14 +262,6 @@ export function buildSettlementTransactionInstructions(
     privateKey: args.serverSigner.secretKey,
     message: messages.serverAttestationMessage,
   });
-  const playerAuthorizationInstruction = Ed25519Program.createInstructionWithPublicKey({
-    publicKey: args.envelope.playerAuthority.toBytes(),
-    message: messages.playerAuthorizationMessage,
-    signature: toSignatureBytes(
-      args.playerAuthorizationSignature,
-      'playerAuthorizationSignature',
-    ),
-  });
   const settlementInstruction = buildApplyBattleSettlementBatchV1Instruction({
     payload: args.payload,
     instructionAccounts: args.envelope.instructionAccounts,
@@ -285,11 +269,7 @@ export function buildSettlementTransactionInstructions(
   });
 
   return {
-    instructions: [
-      serverAttestationInstruction,
-      playerAuthorizationInstruction,
-      settlementInstruction,
-    ],
+    instructions: [serverAttestationInstruction, settlementInstruction],
     messages,
   };
 }

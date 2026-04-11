@@ -638,8 +638,8 @@ Execution rule:
 ### 11.5 Phase 4: dedicated API surface and read models
 
 - [ ] Add automatic anon bootstrap and wallet-link auth endpoints.
-- [ ] Add session-backed character roster/read APIs.
-- [ ] Add class catalog and season summary APIs.
+- [x] Add session-backed character roster/read APIs.
+- [x] Add class catalog and season summary APIs.
 - [x] Add `POST /api/zone-runs/start`.
 - [x] Add `GET /api/zone-runs/active`.
 - [x] Add `POST /api/zone-runs/choose-branch`.
@@ -650,45 +650,46 @@ Execution rule:
 - [x] Make every mutating action idempotent.
 - [x] Make every mutating action return the full updated active-run snapshot.
 - [x] Add a lightweight active-run summary to the character read model.
-- [ ] Add durable run-result read models keyed by `runId`.
-- [ ] Add public-by-link share/result pages and per-character sync read models.
+- [x] Add durable run-result read models keyed by `runId`.
+- [x] Add public-by-link share/result pages.
+- [ ] Add per-character sync read models.
 - [x] Keep the legacy direct encounter route available as non-canonical sandbox behavior.
 
 ### 11.5A Phase 4A: player-facing product surfaces
 
-- [ ] Build the reconciled landing/onboarding experience:
+- [x] Build the reconciled landing/onboarding experience:
   - silent anon bootstrap,
   - `Try the Game` primary CTA,
   - wallet connect secondary in header/settings,
   - disabled `coming soon` auth options only.
-- [ ] Build the reconciled roster surface:
+- [x] Build the reconciled roster surface:
   - anon single-slot behavior,
   - wallet-linked three-slot behavior,
   - compact sync/grace risk indicators.
-- [ ] Build the reconciled character creation page:
+- [x] Build the reconciled character creation page:
   - class-card selection,
   - name validation,
   - unique-name failure states,
   - redirect to character page on success.
-- [ ] Build the reconciled character page:
+- [x] Build the reconciled character page:
   - identity and progression first,
   - season summary,
   - sync summary,
   - `Start Run` strategic CTA.
-- [ ] Build the run setup page:
+- [x] Build the run setup page:
   - unlocked-zone selection,
   - locked-zone teaser cards,
   - season number/name display,
   - countdown to season end or grace end.
-- [ ] Build the active run player surface around the canonical zone-run APIs:
+- [x] Build the active run player surface around the canonical zone-run APIs:
   - local previous/current/immediate-next map window only,
   - reload/resume handling,
   - post-battle pause controls.
-- [ ] Build the run result and share surfaces:
+- [x] Build the run result and share surfaces:
   - runId-based result page,
   - public-by-link share page,
   - clear `Pending` / `Synced` / `Expired` status copy.
-- [ ] Build the dedicated per-character sync page:
+- [x] Build the dedicated per-character sync page:
   - progression first,
   - sync state second,
   - oldest unresolved batch as primary retry target.
@@ -707,14 +708,14 @@ Execution rule:
 
 ### 11.6A Phase 6A: first-sync and settlement transport rewrite
 
-- [ ] Preserve the play-first, sync-later first-sync architecture while rewriting the wallet UX.
-- [ ] Replace the separate player settlement-permit flow with player transaction-signer authorization.
+- [x] Preserve the play-first, sync-later first-sync architecture while rewriting the wallet UX.
+- [x] Replace the separate player settlement-permit flow with player transaction-signer authorization.
 - [ ] Change first-sync prepare to return structured client-build data instead of an opaque prepared transaction.
 - [ ] Change later settlement prepare to return structured client-build data instead of an opaque prepared transaction.
-- [ ] Replace first-sync submit with first-sync acknowledgement and reconciliation.
-- [ ] Replace later settlement submit with settlement acknowledgement and reconciliation.
-- [ ] Keep one sync tap equal to one oldest-contiguous eligible batch.
-- [ ] Ensure failed unresolved batches retry as the same batch identity.
+- [x] Replace first-sync submit with first-sync acknowledgement and reconciliation.
+- [x] Replace later settlement submit with settlement acknowledgement and reconciliation.
+- [x] Keep one sync tap equal to one oldest-contiguous eligible batch.
+- [x] Ensure failed unresolved batches retry as the same batch identity.
 
 ### 11.7 Phase 6: run-native sealing pipeline
 
@@ -783,7 +784,7 @@ Execution rule:
 ### 11.11 Phase 10: test matrix and hardening
 
 - [ ] Add tests for anon bootstrap, wallet-link upgrade, and roster slot semantics.
-- [ ] Add tests for local-first character creation with `name` + `classId`.
+- [x] Add tests for local-first character creation with `name` + `classId`.
 - [ ] Add tests for successful branching runs with merges.
 - [ ] Add tests for no-combat subnode traversal.
 - [ ] Add tests for cap exhaustion reroll and empty-filtered-pool traversal fallback.

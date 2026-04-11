@@ -1,27 +1,9 @@
-const prismaMock = {
-  character: {
-    findByUserId: jest.fn(),
-    findChainState: jest.fn(),
-  },
-  characterProvisionalProgress: {
-    findByCharacterId: jest.fn(),
-  },
-  battleOutcomeLedger: {
-    findLatestForCharacter: jest.fn(),
-  },
-  settlementBatch: {
-    findNextUnconfirmedForCharacter: jest.fn(),
-  },
-  activeZoneRun: {
-    findByCharacterId: jest.fn(),
-  },
-  closedZoneRunSummary: {
-    findLatestForCharacter: jest.fn(),
-  },
+const serviceMock = {
+  getFirstCharacterDetailForUser: jest.fn(),
 };
 
-jest.mock("../lib/prisma", () => ({
-  prisma: prismaMock,
+jest.mock("../lib/characterAppService", () => ({
+  getFirstCharacterDetailForUser: serviceMock.getFirstCharacterDetailForUser,
 }));
 
 import { GET } from "../app/api/character/route";
@@ -32,64 +14,61 @@ describe("GET /api/character", () => {
   });
 
   it("returns the character with chain and sync details", async () => {
-    prismaMock.character.findByUserId.mockResolvedValue({
-      id: "character-1",
+    serviceMock.getFirstCharacterDetailForUser.mockResolvedValue({
+      characterId: "character-1",
       userId: "user-1",
       name: "Rookie",
+      classId: "soldier",
+      slotIndex: 0,
+      chainBootstrapReady: true,
       level: 1,
       exp: 0,
+      syncPhase: "CREATING_ON_CHAIN",
+      battleEligible: false,
       hp: 1200,
-      hpMax: 1200,
-      atk: 120,
-      def: 70,
-      spd: 100,
-      accuracyBP: 8000,
-      evadeBP: 1200,
+      stats: {
+        hp: 1200,
+        hpMax: 1200,
+        atk: 120,
+        def: 70,
+        spd: 100,
+        accuracyBP: 8000,
+        evadeBP: 1200,
+      },
       activeSkills: ["1001", "1002"],
       passiveSkills: ["2001", "2002"],
       unlockedSkillIds: ["1001", "1002"],
       inventory: [],
-    });
-    prismaMock.character.findChainState.mockResolvedValue({
-      id: "character-1",
-      playerAuthorityPubkey: "authority",
-      chainCharacterIdHex: "11".repeat(16),
-      characterRootPubkey: "root",
-      chainCreationStatus: "PENDING",
-      chainCreationTxSignature: null,
-      chainCreatedAt: null,
-      chainCreationTs: 1700000000,
-      chainCreationSeasonId: 1,
-      lastReconciledEndNonce: null,
-      lastReconciledStateHash: null,
-      lastReconciledBatchId: null,
-      lastReconciledBattleTs: null,
-      lastReconciledSeasonId: null,
-      lastReconciledAt: null,
-    });
-    prismaMock.characterProvisionalProgress.findByCharacterId.mockResolvedValue(
-      {
-        characterId: "character-1",
+      chain: {
+        playerAuthorityPubkey: "authority",
+        chainCharacterIdHex: "11".repeat(16),
+        characterRootPubkey: "root",
+        chainCreationStatus: "PENDING",
+        chainCreationTxSignature: null,
+        chainCreatedAt: null,
+        chainCreationTs: 1700000000,
+        chainCreationSeasonId: 1,
+        cursor: null,
+      },
+      provisionalProgress: {
         highestUnlockedZoneId: 2,
         highestClearedZoneId: 1,
         zoneStates: { "1": 2, "2": 1 },
       },
-    );
-    prismaMock.battleOutcomeLedger.findLatestForCharacter.mockResolvedValue({
-      battleId: "battle-1",
-      localSequence: 3,
-      battleNonce: null,
-      battleTs: 1700000100,
-      seasonId: 1,
-      zoneId: 2,
-      enemyArchetypeId: 104,
-      settlementStatus: "AWAITING_FIRST_SYNC",
-      sealedBatchId: null,
-      committedAt: null,
-    });
-    prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(
-      {
-        id: "batch-1",
+      latestBattle: {
+        battleId: "battle-1",
+        localSequence: 3,
+        battleNonce: null,
+        battleTs: 1700000100,
+        seasonId: 1,
+        zoneId: 2,
+        enemyArchetypeId: 104,
+        settlementStatus: "AWAITING_FIRST_SYNC",
+        sealedBatchId: null,
+        committedAt: null,
+      },
+      nextSettlementBatch: {
+        settlementBatchId: "batch-1",
         batchId: 1,
         startNonce: 1,
         endNonce: 3,
@@ -102,9 +81,9 @@ describe("GET /api/character", () => {
         failureCategory: null,
         failureCode: null,
       },
-    );
-    prismaMock.activeZoneRun.findByCharacterId.mockResolvedValue(null);
-    prismaMock.closedZoneRunSummary.findLatestForCharacter.mockResolvedValue(null);
+      activeZoneRun: null,
+      latestClosedZoneRun: null,
+    });
 
     const response = await GET(
       new Request("http://localhost/api/character?userId=user-1"),
@@ -126,7 +105,7 @@ describe("GET /api/character", () => {
   });
 
   it("returns null when the user has no character", async () => {
-    prismaMock.character.findByUserId.mockResolvedValue(null);
+    serviceMock.getFirstCharacterDetailForUser.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/character?userId=user-1"),
@@ -135,54 +114,55 @@ describe("GET /api/character", () => {
 
     expect(response.status).toBe(200);
     expect(json).toEqual({ character: null });
-    expect(prismaMock.character.findChainState).not.toHaveBeenCalled();
   });
 
   it("keeps local-only characters battle eligible while backlog waits for first sync settlement", async () => {
-    prismaMock.character.findByUserId.mockResolvedValue({
-      id: "character-1",
+    serviceMock.getFirstCharacterDetailForUser.mockResolvedValue({
+      characterId: "character-1",
       userId: "user-1",
       name: "Rookie",
+      classId: "soldier",
+      slotIndex: 0,
+      chainBootstrapReady: true,
       level: 1,
       exp: 0,
-      hp: 1200,
-      hpMax: 1200,
-      atk: 120,
-      def: 70,
-      spd: 100,
-      accuracyBP: 8000,
-      evadeBP: 1200,
+      syncPhase: "LOCAL_ONLY",
+      battleEligible: true,
+      stats: {
+        hp: 1200,
+        hpMax: 1200,
+        atk: 120,
+        def: 70,
+        spd: 100,
+        accuracyBP: 8000,
+        evadeBP: 1200,
+      },
       activeSkills: ["1001", "1002"],
       passiveSkills: ["2001", "2002"],
       unlockedSkillIds: ["1001", "1002"],
       inventory: [],
-    });
-    prismaMock.character.findChainState.mockResolvedValue(null);
-    prismaMock.characterProvisionalProgress.findByCharacterId.mockResolvedValue(
-      {
-        characterId: "character-1",
+      chain: null,
+      provisionalProgress: {
         highestUnlockedZoneId: 2,
         highestClearedZoneId: 1,
         zoneStates: { "1": 2, "2": 1 },
       },
-    );
-    prismaMock.battleOutcomeLedger.findLatestForCharacter.mockResolvedValue({
-      battleId: "battle-1",
-      localSequence: 1,
-      battleNonce: null,
-      battleTs: 1700000100,
-      seasonId: 1,
-      zoneId: 2,
-      enemyArchetypeId: 104,
-      settlementStatus: "AWAITING_FIRST_SYNC",
-      sealedBatchId: null,
-      committedAt: null,
+      latestBattle: {
+        battleId: "battle-1",
+        localSequence: 1,
+        battleNonce: null,
+        battleTs: 1700000100,
+        seasonId: 1,
+        zoneId: 2,
+        enemyArchetypeId: 104,
+        settlementStatus: "AWAITING_FIRST_SYNC",
+        sealedBatchId: null,
+        committedAt: null,
+      },
+      nextSettlementBatch: null,
+      activeZoneRun: null,
+      latestClosedZoneRun: null,
     });
-    prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(
-      null,
-    );
-    prismaMock.activeZoneRun.findByCharacterId.mockResolvedValue(null);
-    prismaMock.closedZoneRunSummary.findLatestForCharacter.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/character?userId=user-1"),

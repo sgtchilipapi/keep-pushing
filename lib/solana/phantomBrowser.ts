@@ -32,6 +32,9 @@ export interface PhantomSolanaProvider {
   signTransaction(
     transaction: Transaction | VersionedTransaction,
   ): Promise<Transaction | VersionedTransaction>;
+  signAndSendTransaction?(
+    transaction: Transaction | VersionedTransaction,
+  ): Promise<{ signature: string }>;
   on?(event: 'connect' | 'disconnect' | 'accountChanged', handler: (...args: unknown[]) => void): void;
   removeListener?(event: 'connect' | 'disconnect' | 'accountChanged', handler: (...args: unknown[]) => void): void;
 }
@@ -184,5 +187,29 @@ export async function signPreparedPlayerOwnedTransaction(
   return {
     signedMessageBase64,
     signedTransactionBase64: bytesToBase64(signedTransactionBytes),
+  };
+}
+
+export async function signAndSendPreparedPlayerOwnedTransaction(
+  provider: PhantomSolanaProvider,
+  prepared: PreparedPlayerOwnedTransaction,
+): Promise<{
+  transactionSignature: string;
+}> {
+  const transaction = deserializeLegacyOrVersionedTransactionBase64(
+    prepared.serializedTransactionBase64,
+  );
+
+  if (typeof provider.signAndSendTransaction !== "function") {
+    throw new Error("This Phantom version does not support signAndSendTransaction.");
+  }
+
+  const result = await provider.signAndSendTransaction(transaction);
+  if (typeof result.signature !== "string" || result.signature.length === 0) {
+    throw new Error("Phantom did not return a transaction signature.");
+  }
+
+  return {
+    transactionSignature: result.signature,
   };
 }

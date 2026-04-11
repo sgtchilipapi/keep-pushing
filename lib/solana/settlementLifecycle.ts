@@ -69,6 +69,12 @@ export interface SubmitSettlementBatchInput {
   signedTransactionBase64: string;
 }
 
+export interface AcknowledgeSettlementBatchInput {
+  settlementBatchId: string;
+  prepared: Parameters<typeof acceptSignedPlayerOwnedTransaction>[0]['prepared'];
+  transactionSignature: string;
+}
+
 type SettlementConnection = Pick<
   Connection,
   'getAccountInfo' | 'sendRawTransaction' | 'confirmTransaction' | 'getSignatureStatuses'
@@ -698,6 +704,80 @@ export async function submitSettlementBatch(
       transactionSignature,
     });
   }
+}
+
+export async function acknowledgeSettlementBatchClientSubmission(
+  input: AcknowledgeSettlementBatchInput,
+  deps: SettlementLifecycleDependencies = {},
+): Promise<SettlementLifecycleResult> {
+  assertNonEmptyString(input.settlementBatchId, 'settlementBatchId');
+  assertNonEmptyString(input.transactionSignature, 'transactionSignature');
+
+  const prismaClient = deps.prismaClient ?? prisma;
+  const now = (deps.now ?? (() => new Date()))();
+
+  let batch = await requireBatch(prismaClient, input.settlementBatchId);
+  await assertOldestUnresolvedBatch(prismaClient, batch);
+  if (batch.status === 'CONFIRMED') {
+    return reconcileSettlementBatch(batch.id, deps);
+  }
+
+  const relay = input.prepared.settlementRelay;
+  if (relay === undefined) {
+    throw new Error('ERR_INVALID_SETTLEMENT_SUBMISSION: settlement relay metadata was missing');
+  }
+  if (relay.batchId !== batch.batchId || relay.batchHash !== batch.batchHash) {
+    throw new Error('ERR_SETTLEMENT_BATCH_RELAY_MISMATCH: relay metadata did not match the stored batch');
+  }
+  if (
+    relay.startNonce !== batch.startNonce ||
+    relay.endNonce !== batch.endNonce ||
+    relay.startStateHash !== batch.startStateHash ||
+    relay.endStateHash !== batch.endStateHash
+  ) {
+    throw new Error('ERR_SETTLEMENT_PAYLOAD_RELAY_MISMATCH: relay cursor anchors did not match the stored batch');
+  }
+
+  if (batch.latestTransactionSignature === input.transactionSignature && batch.status === 'SUBMITTED') {
+    return reconcileSettlementBatch(batch.id, deps);
+  }
+
+  batch =
+    (await prismaClient.settlementBatch.updateStatus(
+      batch.id,
+      mergeBatchStatus(batch, {
+        status: 'SUBMITTED',
+        failureCategory: null,
+        failureCode: null,
+        latestMessageSha256Hex: input.prepared.messageSha256Hex,
+        latestTransactionSignature: input.transactionSignature,
+        preparedAt: batch.preparedAt ?? now,
+        submittedAt: now,
+      }),
+    )) ?? batch;
+
+  const priorAttempts = await prismaClient.settlementSubmissionAttempt.listByBatch(batch.id);
+  const latestAttempt = priorAttempts.at(-1) ?? null;
+  let attempt: SettlementSubmissionAttemptRecord;
+  if (
+    latestAttempt !== null &&
+    latestAttempt.transactionSignature === input.transactionSignature &&
+    (latestAttempt.status === 'BROADCAST' || latestAttempt.status === 'CONFIRMED')
+  ) {
+    attempt = latestAttempt;
+  } else {
+    attempt = await prismaClient.settlementSubmissionAttempt.create({
+      settlementBatchId: batch.id,
+      attemptNumber: (latestAttempt?.attemptNumber ?? 0) + 1,
+      status: 'BROADCAST',
+      messageSha256Hex: input.prepared.messageSha256Hex,
+      transactionSignature: input.transactionSignature,
+      submittedAt: now,
+    });
+  }
+
+  const reconciled = await reconcileSettlementBatch(batch.id, deps);
+  return reconciled.attempt ?? null ? reconciled : { ...reconciled, attempt };
 }
 
 export async function recoverUnresolvedSettlementBatches(

@@ -139,6 +139,29 @@ export type CharacterBattleReadyRecord = {
   passiveSkills: string[];
 };
 
+export type CharacterListRecord = {
+  id: string;
+  userId: string;
+  name: string;
+  nameNormalized: string;
+  classId: string;
+  slotIndex: number;
+  chainBootstrapReady: boolean;
+  level: number;
+  exp: number;
+  hp: number;
+  hpMax: number;
+  atk: number;
+  def: number;
+  spd: number;
+  accuracyBP: number;
+  evadeBP: number;
+  activeSkills: string[];
+  passiveSkills: string[];
+  unlockedSkillIds: string[];
+  inventory: Array<{ itemId: string; quantity: number }>;
+};
+
 export type UpdateCharacterChainIdentityInput = {
   playerAuthorityPubkey: string;
   chainCharacterIdHex: string;
@@ -1519,6 +1542,58 @@ export const prisma = {
         inventory: inventory.rows
       };
     },
+    async listByUserId(userId: string): Promise<CharacterListRecord[]> {
+      const characterResult = await pool.query(
+        `SELECT
+          id,
+          "userId",
+          name,
+          "nameNormalized",
+          "classId",
+          "slotIndex",
+          "chainBootstrapReady",
+          level,
+          exp,
+          hp,
+          "hpMax",
+          atk,
+          def,
+          spd,
+          "accuracyBP",
+          "evadeBP"
+        FROM "Character"
+        WHERE "userId" = $1
+        ORDER BY "slotIndex" ASC, "createdAt" ASC`,
+        [userId]
+      );
+
+      return Promise.all(
+        characterResult.rows.map(async (character) => {
+          const [skills, passives, unlocks, inventory] = await Promise.all([
+            pool.query('SELECT "skillId" FROM "EquippedSkill" WHERE "characterId" = $1 ORDER BY slot ASC', [
+              character.id
+            ]),
+            pool.query('SELECT "passiveId" FROM "EquippedPassive" WHERE "characterId" = $1 ORDER BY slot ASC', [
+              character.id
+            ]),
+            pool.query('SELECT "skillId" FROM "SkillUnlock" WHERE "characterId" = $1 ORDER BY "unlockedAt" ASC', [
+              character.id
+            ]),
+            pool.query('SELECT "itemId", quantity FROM "InventoryItem" WHERE "characterId" = $1 ORDER BY "itemId" ASC', [
+              character.id
+            ])
+          ]);
+
+          return {
+            ...character,
+            activeSkills: skills.rows.map((row) => row.skillId),
+            passiveSkills: passives.rows.map((row) => row.passiveId),
+            unlockedSkillIds: unlocks.rows.map((row) => row.skillId),
+            inventory: inventory.rows,
+          };
+        })
+      );
+    },
     async findUnique(id: string) {
       const result = await pool.query('SELECT id FROM "Character" WHERE id = $1 LIMIT 1', [id]);
       return result.rows[0] ?? null;
@@ -1930,6 +2005,28 @@ export const prisma = {
 
       return result.rows[0] ? mapActiveZoneRun(result.rows[0]) : null;
     },
+    async findByRunId(runId: string) {
+      const result = await pool.query<ActiveZoneRunRow>(
+        `SELECT
+          id,
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "state",
+          "currentNodeId",
+          "stateJson",
+          "createdAt",
+          "updatedAt"
+        FROM "ActiveZoneRun"
+        WHERE id = $1
+        LIMIT 1`,
+        [runId],
+      );
+
+      return result.rows[0] ? mapActiveZoneRun(result.rows[0]) : null;
+    },
     async updateByCharacterId(characterId: string, input: UpdateActiveZoneRunInput) {
       const result = await pool.query<ActiveZoneRunRow>(
         `UPDATE "ActiveZoneRun"
@@ -2051,6 +2148,31 @@ export const prisma = {
     },
   },
   closedZoneRunSummary: {
+    async findByRunId(runId: string) {
+      const result = await pool.query<ClosedZoneRunSummaryRow>(
+        `SELECT
+          id,
+          "zoneRunId",
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "terminalStatus",
+          "rewardedBattleCount",
+          "rewardedEncounterHistogramJson",
+          "zoneProgressDeltaJson",
+          "closedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "ClosedZoneRunSummary"
+        WHERE "zoneRunId" = $1
+        LIMIT 1`,
+        [runId],
+      );
+
+      return result.rows[0] ? mapClosedZoneRunSummary(result.rows[0]) : null;
+    },
     async findLatestForCharacter(characterId: string) {
       const result = await pool.query<ClosedZoneRunSummaryRow>(
         `SELECT
@@ -2266,6 +2388,36 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapBattleRecord(result.rows[0]) : null;
+    },
+    async listByZoneRunId(zoneRunId: string) {
+      const result = await pool.query<BattleRecordRow>(
+        `SELECT
+          id,
+          "battleId",
+          "characterId",
+          "zoneRunId",
+          "zoneId",
+          "nodeId",
+          "subnodeId",
+          "enemyArchetypeId",
+          seed,
+          "playerInitialJson",
+          "enemyInitialJson",
+          "playerFinalJson",
+          "enemyFinalJson",
+          "rewardEligible",
+          "winnerEntityId",
+          "roundsPlayed",
+          "eventsJson",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleRecord"
+        WHERE "zoneRunId" = $1
+        ORDER BY "createdAt" ASC`,
+        [zoneRunId],
+      );
+
+      return result.rows.map(mapBattleRecord);
     },
     async allocateNonceAndCreateWithSettlementLedger(
       input: CreatePersistedEncounterInput
@@ -2641,6 +2793,33 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapBattleOutcomeLedger(result.rows[0]) : null;
+    },
+    async listByZoneRunId(zoneRunId: string) {
+      const result = await pool.query<BattleOutcomeLedgerRow>(
+        `SELECT
+          id,
+          "characterId",
+          "battleId",
+          "zoneRunId",
+          "localSequence",
+          "battleNonce",
+          "battleTs",
+          "seasonId",
+          "zoneId",
+          "enemyArchetypeId",
+          "zoneProgressDeltaJson",
+          "settlementStatus",
+          "sealedBatchId",
+          "committedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "BattleOutcomeLedger"
+        WHERE "zoneRunId" = $1
+        ORDER BY "localSequence" ASC`,
+        [zoneRunId],
+      );
+
+      return result.rows.map(mapBattleOutcomeLedger);
     },
     async findEarliestForCharacter(characterId: string) {
       const result = await pool.query<BattleOutcomeLedgerRow>(

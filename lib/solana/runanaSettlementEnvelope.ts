@@ -122,7 +122,7 @@ export function buildCanonicalSettlementInstructionAccounts(
   const [primaryPageIndex, ...additionalPageIndices] = referencedPageIndices;
 
   return [
-    { role: 'playerAuthority', pubkey: playerAuthority, isSigner: false, isWritable: false },
+    { role: 'playerAuthority', pubkey: playerAuthority, isSigner: true, isWritable: false },
     {
       role: 'instructionsSysvar',
       pubkey: RUNANA_INSTRUCTIONS_SYSVAR_PUBKEY,

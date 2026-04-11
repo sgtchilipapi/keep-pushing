@@ -7,6 +7,8 @@ import {
 } from '@solana/web3.js';
 
 import type {
+  AcknowledgeSettlementRouteRequest,
+  AcknowledgeSettlementRouteResponse,
   PrepareSettlementRouteRequest,
   PrepareSettlementRouteResponse,
   SettlementCursorExpectation,
@@ -16,6 +18,7 @@ import type {
 import { prisma, type SettlementBatchRecord } from '../prisma';
 import {
   type SettlementLifecycleDependencies,
+  acknowledgeSettlementBatchClientSubmission,
   reconcileSettlementBatch,
   submitSettlementBatch,
   markSettlementBatchPrepared,
@@ -27,8 +30,6 @@ import {
   buildPreparedSettlementVersionedTransaction,
   type PreparedSettlementVersionedTransaction,
 } from './settlementTransactionAssembly';
-import { buildCanonicalSettlementMessages } from './runanaSettlementInstructions';
-import { buildCanonicalPlayerAuthorizationMessageText } from './settlementCanonical';
 import {
   createRunanaConnection,
   loadRunanaTrustedServerSigner,
@@ -57,7 +58,6 @@ type PrepareSettlementDependencies = SettlementLifecycleDependencies & {
     envelope: Awaited<ReturnType<typeof loadSettlementInstructionAccountEnvelope>>;
     payload: SettlementBatchPayloadV2;
     feePayer: PublicKey;
-    playerAuthorizationSignature: Uint8Array;
     serverSigner: Keypair;
     addressLookupTableAccounts?: AddressLookupTableAccount[];
     commitment?: Commitment;
@@ -77,19 +77,6 @@ function toPublicKey(value: string, field: string): PublicKey {
   } catch {
     throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be a valid public key`);
   }
-}
-
-function decodeEd25519SignatureBase64(signatureBase64: string): Uint8Array {
-  assertNonEmptyString(signatureBase64, 'playerAuthorizationSignatureBase64');
-
-  const signature = Buffer.from(signatureBase64, 'base64');
-  if (signature.length !== 64) {
-    throw new Error(
-      'ERR_INVALID_PLAYER_AUTHORIZATION_SIGNATURE: signature must decode to exactly 64 bytes',
-    );
-  }
-
-  return new Uint8Array(signature);
 }
 
 function expectedCursorFromBatch(batch: Awaited<ReturnType<typeof loadSettlementInstructionAccountEnvelope>>['characterBatchCursor']): SettlementCursorExpectation {
@@ -252,29 +239,6 @@ export async function prepareSolanaSettlement(
     characterRootPubkey: chainState.characterRootPubkey,
     batch: sealed.batch,
   });
-  const canonicalMessages = buildCanonicalSettlementMessages({
-    payload: sealed.payload,
-    playerAuthority: authority,
-    characterRoot: envelope.characterRoot.pubkey,
-    programId,
-    clusterId,
-  });
-  const playerAuthorizationMessageBase64 = Buffer.from(
-    canonicalMessages.playerAuthorizationMessage,
-  ).toString('base64');
-  const playerAuthorizationMessageUtf8 =
-    sealed.payload.signatureScheme === 1
-      ? buildCanonicalPlayerAuthorizationMessageText({
-          programId: programId.toBytes(),
-          clusterId,
-          playerAuthorityPubkey: authority.toBytes(),
-          characterRootPubkey: envelope.characterRoot.pubkey.toBytes(),
-          batchHash: Buffer.from(sealed.payload.batchHash, 'hex'),
-          batchId: sealed.payload.batchId,
-          signatureScheme: 1,
-        })
-      : Buffer.from(canonicalMessages.playerAuthorizationMessage).toString('utf8');
-
   if (nextBatch.kind === 'in_flight') {
     return {
       phase: 'submitted',
@@ -286,22 +250,6 @@ export async function prepareSolanaSettlement(
     };
   }
 
-  if (!input.playerAuthorizationSignatureBase64) {
-    return {
-      phase: 'authorize',
-      settlementBatchId: sealed.batch.id,
-      payload: sealed.payload,
-      expectedCursor,
-      permitDomain,
-      playerAuthorizationMessageBase64,
-      playerAuthorizationMessageUtf8,
-      playerAuthorizationMessageEncoding: 'utf8',
-    };
-  }
-
-  const playerAuthorizationSignature = decodeEd25519SignatureBase64(
-    input.playerAuthorizationSignatureBase64,
-  );
   const serverSigner = deps.serverSigner ?? loadRunanaTrustedServerSigner().signer;
   const addressLookupTableAccounts =
     deps.addressLookupTableAccounts ??
@@ -325,7 +273,6 @@ export async function prepareSolanaSettlement(
       envelope,
       payload: sealed.payload,
       feePayer,
-      playerAuthorizationSignature,
       serverSigner,
       addressLookupTableAccounts,
       commitment,
@@ -369,10 +316,10 @@ export async function prepareSolanaSettlement(
     payload: sealed.payload,
     expectedCursor,
     permitDomain,
-    playerAuthorizationMessageBase64,
-    playerAuthorizationMessageUtf8,
+    playerAuthorizationMessageBase64: '',
+    playerAuthorizationMessageUtf8: '',
     playerAuthorizationMessageEncoding: 'utf8',
-    playerAuthorizationSignatureBase64: input.playerAuthorizationSignatureBase64,
+    playerAuthorizationSignatureBase64: undefined,
     serverAttestationMessageBase64: preparedVersioned.serverAttestationMessageBase64,
     preparedTransaction,
   };
@@ -393,4 +340,31 @@ export async function submitSolanaSettlement(
     },
     deps,
   );
+}
+
+export async function acknowledgeSolanaSettlement(
+  input: AcknowledgeSettlementRouteRequest,
+  deps: SettlementLifecycleDependencies = {},
+): Promise<AcknowledgeSettlementRouteResponse> {
+  const result = await acknowledgeSettlementBatchClientSubmission(
+    {
+      settlementBatchId: input.settlementBatchId,
+      prepared: input.prepared,
+      transactionSignature: input.transactionSignature,
+    },
+    deps,
+  );
+
+  return result.state === 'CONFIRMED'
+    ? {
+        phase: 'confirmed',
+        settlementBatchId: result.batch.id,
+        transactionSignature: input.transactionSignature,
+        cursor: result.cursor ?? undefined,
+      }
+    : {
+        phase: 'submitted',
+        settlementBatchId: result.batch.id,
+        transactionSignature: input.transactionSignature,
+      };
 }

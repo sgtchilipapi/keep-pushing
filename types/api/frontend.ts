@@ -31,6 +31,10 @@ export type SettlementBatchStatus =
   | "CONFIRMED"
   | "FAILED";
 
+export type AccountMode = "anon" | "wallet-linked";
+export type SeasonPhase = "active" | "grace" | "ended";
+export type RunShareStatus = "PENDING" | "SYNCED" | "EXPIRED";
+
 export interface CharacterReadModel {
   characterId: string;
   userId: string;
@@ -122,8 +126,122 @@ export interface CharacterQueryResponse {
   character: CharacterReadModel | null;
 }
 
+export interface CharacterRosterItem {
+  characterId: string;
+  name: string;
+  classId: string;
+  slotIndex: number;
+  level: number;
+  syncStatus: CharacterSyncPhase;
+}
+
+export interface CharacterRosterResponse {
+  accountMode: AccountMode;
+  slotsTotal: number;
+  characters: CharacterRosterItem[];
+}
+
+export interface CurrentSeasonResponse {
+  seasonId: number;
+  seasonNumber: number;
+  seasonName: string;
+  seasonStartTs: number;
+  seasonEndTs: number;
+  commitGraceEndTs: number;
+  phase: SeasonPhase;
+}
+
+export interface CharacterClassCatalogItem {
+  classId: string;
+  displayName: string;
+  description: string;
+  artKey: string;
+  enabled: boolean;
+}
+
+export interface CharacterClassesResponse {
+  classes: CharacterClassCatalogItem[];
+}
+
+export interface CharacterDetailResponse {
+  character: CharacterReadModel;
+  season: CurrentSeasonResponse;
+}
+
+export interface SyncAttemptItem {
+  attemptId: string;
+  attemptNumber: number;
+  status: string;
+  transactionSignature: string | null;
+  submittedAt: string | null;
+  resolvedAt: string | null;
+  rpcError: string | null;
+}
+
+export interface CharacterSyncDetailResponse {
+  character: CharacterReadModel;
+  season: CurrentSeasonResponse;
+  sync: {
+    mode: "first_sync" | "settlement" | null;
+    pendingBatchId: string | null;
+    pendingBatchNumber: number | null;
+    attempts: SyncAttemptItem[];
+  };
+}
+
+export interface RunResultBattleItem {
+  battleId: string;
+  enemyArchetypeId: number;
+  enemyName: string;
+  nodeId: string | null;
+  subnodeId: string | null;
+  rewardEligible: boolean;
+  winnerEntityId: string;
+  roundsPlayed: number;
+  settlementStatus: BattleSettlementStatus | null;
+  committedAt: string | null;
+  battleTs: number | null;
+  createdAt: string;
+}
+
+export interface RunResultReadModel {
+  runId: string;
+  characterId: string;
+  characterName: string;
+  classId: string;
+  zoneId: number;
+  seasonId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: string;
+  shareStatus: RunShareStatus;
+  shareStatusLabel: string;
+  shareStatusDetail: string;
+  battleCount: number;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogram: Record<string, number>;
+  zoneProgressDelta: unknown;
+  closedAt: string | null;
+  resultUrl: string;
+  shareUrl: string;
+  battles: RunResultBattleItem[];
+}
+
+export interface RunResultResponse {
+  run: RunResultReadModel;
+}
+
+export interface RunShareResponse {
+  runId: string;
+  shareUrl: string;
+  resultUrl: string;
+  shareText: string;
+  shareStatus: RunShareStatus;
+}
+
 export interface AnonymousUserResponse {
   userId: string;
+  accountMode?: AccountMode;
 }
 
 export interface CreateCharacterResponse {

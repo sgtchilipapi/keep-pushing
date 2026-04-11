@@ -68,7 +68,7 @@ export interface PreparedPlayerOwnedTransaction {
   serializedTransactionBase64: string;
   messageSha256Hex: string;
   requiresPlayerSignature: true;
-  serverBroadcast: true;
+  serverBroadcast: boolean;
   characterCreationRelay?: CharacterCreationRelayMetadata;
   settlementRelay?: SettlementRelayMetadata;
 }
@@ -153,18 +153,26 @@ export interface SettlementPreparationBase {
   payload: SettlementBatchPayloadV2;
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
-  playerAuthorizationMessageBase64: string;
-  playerAuthorizationMessageUtf8: string;
-  playerAuthorizationMessageEncoding: "utf8";
 }
 
 export interface SettlementAuthorizationPhase extends SettlementPreparationBase {
   phase: "authorize";
+  playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
+  preparedTransaction?: PreparedPlayerOwnedTransaction;
 }
 
-export interface SettlementPreparedPhase extends SettlementPreparationBase {
+export interface SettlementPreparedPhase {
   phase: "sign_transaction";
-  playerAuthorizationSignatureBase64: string;
+  settlementBatchId: string;
+  payload: SettlementBatchPayloadV2;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
+  playerAuthorizationSignatureBase64?: string;
   serverAttestationMessageBase64: string;
   preparedTransaction: PreparedPlayerOwnedTransaction;
 }
@@ -185,6 +193,19 @@ export type PrepareSettlementRouteResponse =
 
 export interface SubmitSettlementRouteRequest extends SubmitSignedPlayerOwnedTransactionRequest {
   settlementBatchId: string;
+}
+
+export interface AcknowledgeSettlementRouteRequest {
+  settlementBatchId: string;
+  prepared: PreparedPlayerOwnedTransaction;
+  transactionSignature: string;
+}
+
+export interface AcknowledgeSettlementRouteResponse {
+  phase: "submitted" | "confirmed";
+  settlementBatchId: string;
+  transactionSignature: string;
+  cursor?: SettlementCursorExpectation;
 }
 
 export interface PrepareCharacterCreationRouteRequest {
@@ -261,18 +282,25 @@ export interface FirstSyncPreparationBase {
   payload: SettlementBatchPayloadV2;
   expectedCursor: SettlementCursorExpectation;
   permitDomain: SettlementPermitDomain;
-  playerAuthorizationMessageBase64: string;
-  playerAuthorizationMessageUtf8: string;
-  playerAuthorizationMessageEncoding: "utf8";
 }
 
 export interface FirstSyncAuthorizationPhase extends FirstSyncPreparationBase {
   phase: "authorize";
+  playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
+  preparedTransaction?: PreparedPlayerOwnedTransaction;
 }
 
-export interface FirstSyncPreparedPhase extends FirstSyncPreparationBase {
+export interface FirstSyncPreparedPhase {
   phase: "sign_transaction";
-  playerAuthorizationSignatureBase64: string;
+  payload: SettlementBatchPayloadV2;
+  expectedCursor: SettlementCursorExpectation;
+  permitDomain: SettlementPermitDomain;
+  playerAuthorizationMessageBase64: string;
+  playerAuthorizationMessageUtf8: string;
+  playerAuthorizationMessageEncoding: "utf8";
+  playerAuthorizationSignatureBase64?: string;
   serverAttestationMessageBase64: string;
   preparedTransaction: PreparedPlayerOwnedTransaction;
 }
@@ -294,3 +322,21 @@ export interface SubmitFirstSyncRouteResponse {
   chainCreatedAt: string;
   cursor: SettlementCursorExpectation;
 }
+
+export interface AcknowledgeFirstSyncRouteRequest {
+  prepared: PreparedPlayerOwnedTransaction;
+  transactionSignature: string;
+}
+
+export type AcknowledgeFirstSyncRouteResponse =
+  | {
+      phase: "submitted";
+      characterId: string;
+      chainCreationStatus: "SUBMITTED";
+      transactionSignature: string;
+      firstSettlementBatchId: string;
+      remainingSettlementBatchIds: string[];
+    }
+  | ({
+      phase: "confirmed";
+    } & SubmitFirstSyncRouteResponse);
