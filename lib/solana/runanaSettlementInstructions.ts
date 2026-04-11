@@ -108,29 +108,32 @@ function concat(parts: readonly Buffer[]): Buffer {
   return Buffer.concat(parts);
 }
 
-function serializeZoneProgressDelta(payload: SettlementBatchPayloadV2): Buffer {
+function serializeZoneProgressDelta(
+  entries: NonNullable<SettlementBatchPayloadV2['runSummaries']>[number]['zoneProgressDelta'],
+): Buffer {
   return concat([
-    u32(payload.zoneProgressDelta.length, 'payload.zoneProgressDelta.length'),
-    ...payload.zoneProgressDelta.map((entry, index) =>
+    u32(entries.length, 'zoneProgressDelta.length'),
+    ...entries.map((entry, index) =>
       concat([
-        u16(entry.zoneId, `payload.zoneProgressDelta[${index}].zoneId`),
-        u8(entry.newState, `payload.zoneProgressDelta[${index}].newState`),
+        u16(entry.zoneId, `zoneProgressDelta[${index}].zoneId`),
+        u8(entry.newState, `zoneProgressDelta[${index}].newState`),
       ]),
     ),
   ]);
 }
 
-function serializeEncounterHistogram(payload: SettlementBatchPayloadV2): Buffer {
+function serializeEncounterHistogram(
+  entries: NonNullable<SettlementBatchPayloadV2['runSummaries']>[number]['rewardedEncounterHistogram'],
+): Buffer {
   return concat([
-    u32(payload.encounterHistogram.length, 'payload.encounterHistogram.length'),
-    ...payload.encounterHistogram.map((entry, index) =>
+    u32(entries.length, 'rewardedEncounterHistogram.length'),
+    ...entries.map((entry, index) =>
       concat([
-        u16(entry.zoneId, `payload.encounterHistogram[${index}].zoneId`),
         u16(
           entry.enemyArchetypeId,
-          `payload.encounterHistogram[${index}].enemyArchetypeId`,
+          `rewardedEncounterHistogram[${index}].enemyArchetypeId`,
         ),
-        u16(entry.count, `payload.encounterHistogram[${index}].count`),
+        u16(entry.count, `rewardedEncounterHistogram[${index}].count`),
       ]),
     ),
   ]);
@@ -144,17 +147,56 @@ function serializeOptionalU32(value: number | undefined): Buffer {
   return concat([Buffer.from([1]), u32(value, 'payload.optionalLoadoutRevision')]);
 }
 
+function terminalStatusCode(
+  value: NonNullable<SettlementBatchPayloadV2['runSummaries']>[number]['terminalStatus'],
+): number {
+  switch (value) {
+    case 'COMPLETED':
+      return 1;
+    case 'FAILED':
+      return 2;
+    case 'ABANDONED':
+      return 3;
+    case 'EXPIRED':
+      return 4;
+    case 'SEASON_CUTOFF':
+      return 5;
+    default:
+      throw new Error(`ERR_INVALID_TERMINAL_STATUS: unsupported terminal status ${String(value)}`);
+  }
+}
+
+function serializeRunSummaries(payload: SettlementBatchPayloadV2): Buffer {
+  const runSummaries = payload.runSummaries ?? [];
+  return concat([
+    u32(runSummaries.length, 'payload.runSummaries.length'),
+    ...runSummaries.map((summary, index) =>
+      concat([
+        u64(summary.closedRunSequence, `payload.runSummaries[${index}].closedRunSequence`),
+        u16(summary.zoneId, `payload.runSummaries[${index}].zoneId`),
+        u16(summary.topologyVersion, `payload.runSummaries[${index}].topologyVersion`),
+        encodeRunanaHash(summary.topologyHash, `payload.runSummaries[${index}].topologyHash`),
+        u8(terminalStatusCode(summary.terminalStatus), `payload.runSummaries[${index}].terminalStatus`),
+        u16(summary.rewardedBattleCount, `payload.runSummaries[${index}].rewardedBattleCount`),
+        u64(summary.firstRewardedBattleTs, `payload.runSummaries[${index}].firstRewardedBattleTs`),
+        u64(summary.lastRewardedBattleTs, `payload.runSummaries[${index}].lastRewardedBattleTs`),
+        serializeEncounterHistogram(summary.rewardedEncounterHistogram),
+        serializeZoneProgressDelta(summary.zoneProgressDelta),
+      ]),
+    ),
+  ]);
+}
+
 function payloadToCanonicalBytes(payload: SettlementBatchPayloadV2) {
   return {
     characterId: encodeRunanaCharacterId(payload.characterId),
     batchId: payload.batchId,
-    startNonce: payload.startNonce,
-    endNonce: payload.endNonce,
+    startRunSequence: payload.startRunSequence,
+    endRunSequence: payload.endRunSequence,
+    runSummaries: payload.runSummaries,
     battleCount: payload.battleCount,
     startStateHash: encodeRunanaHash(payload.startStateHash, 'payload.startStateHash'),
     endStateHash: encodeRunanaHash(payload.endStateHash, 'payload.endStateHash'),
-    zoneProgressDelta: payload.zoneProgressDelta,
-    encounterHistogram: payload.encounterHistogram,
     optionalLoadoutRevision: payload.optionalLoadoutRevision,
     batchHash: encodeRunanaHash(payload.batchHash, 'payload.batchHash'),
     firstBattleTs: payload.firstBattleTs,
@@ -166,16 +208,17 @@ function payloadToCanonicalBytes(payload: SettlementBatchPayloadV2) {
 }
 
 export function serializeSettlementBatchPayloadV1(payload: SettlementBatchPayloadV2): Buffer {
+  const startRunSequence = payload.startRunSequence ?? payload.startNonce ?? 0;
+  const endRunSequence = payload.endRunSequence ?? payload.endNonce ?? 0;
   return concat([
     encodeRunanaCharacterId(payload.characterId),
     u64(payload.batchId, 'payload.batchId'),
-    u64(payload.startNonce, 'payload.startNonce'),
-    u64(payload.endNonce, 'payload.endNonce'),
+    u64(startRunSequence, 'payload.startRunSequence'),
+    u64(endRunSequence, 'payload.endRunSequence'),
     u16(payload.battleCount, 'payload.battleCount'),
     encodeRunanaHash(payload.startStateHash, 'payload.startStateHash'),
     encodeRunanaHash(payload.endStateHash, 'payload.endStateHash'),
-    serializeZoneProgressDelta(payload),
-    serializeEncounterHistogram(payload),
+    serializeRunSummaries(payload),
     serializeOptionalU32(payload.optionalLoadoutRevision),
     encodeRunanaHash(payload.batchHash, 'payload.batchHash'),
     u64(payload.firstBattleTs, 'payload.firstBattleTs'),

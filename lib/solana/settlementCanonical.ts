@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { PublicKey } from "@solana/web3.js";
 
 import type {
-  EncounterCountEntry,
+  RunEncounterCountEntry,
+  SettlementRunSummary,
   SettlementSignatureScheme,
-  ZoneProgressDeltaEntry,
 } from "../../types/settlement";
 
 type BytesLike = Uint8Array | readonly number[];
@@ -12,13 +12,14 @@ type BytesLike = Uint8Array | readonly number[];
 export interface SettlementBatchPayloadBytesV2 {
   characterId: BytesLike;
   batchId: number;
-  startNonce: number;
-  endNonce: number;
+  startRunSequence?: number;
+  endRunSequence?: number;
+  runSummaries?: readonly SettlementRunSummary[];
+  startNonce?: number;
+  endNonce?: number;
   battleCount: number;
   startStateHash: BytesLike;
   endStateHash: BytesLike;
-  zoneProgressDelta: readonly ZoneProgressDeltaEntry[];
-  encounterHistogram: readonly EncounterCountEntry[];
   optionalLoadoutRevision?: number;
   batchHash: BytesLike;
   firstBattleTs: number;
@@ -143,7 +144,7 @@ function encodeBase64Url(bytes: BytesLike): string {
     .replace(/=+$/g, "");
 }
 
-function encodeZoneProgressDelta(entries: readonly ZoneProgressDeltaEntry[]): Uint8Array {
+function encodeZoneProgressDelta(entries: SettlementRunSummary["zoneProgressDelta"]): Uint8Array {
   const parts: Uint8Array[] = [u32(entries.length, "zoneProgressDelta.length")];
 
   for (const entry of entries) {
@@ -154,11 +155,10 @@ function encodeZoneProgressDelta(entries: readonly ZoneProgressDeltaEntry[]): Ui
   return concatBytes(parts);
 }
 
-function encodeEncounterHistogram(entries: readonly EncounterCountEntry[]): Uint8Array {
+function encodeRunEncounterHistogram(entries: readonly RunEncounterCountEntry[]): Uint8Array {
   const parts: Uint8Array[] = [u32(entries.length, "encounterHistogram.length")];
 
   for (const entry of entries) {
-    parts.push(u16(entry.zoneId, "encounterHistogram.zoneId"));
     parts.push(u16(entry.enemyArchetypeId, "encounterHistogram.enemyArchetypeId"));
     parts.push(u16(entry.count, "encounterHistogram.count"));
   }
@@ -174,22 +174,65 @@ function encodeOptionalU32(value: number | undefined): Uint8Array {
   return concatBytes([Uint8Array.of(1), u32(value, "optionalLoadoutRevision")]);
 }
 
+function terminalStatusCode(status: SettlementRunSummary["terminalStatus"]): number {
+  switch (status) {
+    case "COMPLETED":
+      return 1;
+    case "FAILED":
+      return 2;
+    case "ABANDONED":
+      return 3;
+    case "EXPIRED":
+      return 4;
+    case "SEASON_CUTOFF":
+      return 5;
+    default:
+      throw new Error(`ERR_INVALID_TERMINAL_STATUS: unsupported terminal status ${String(status)}`);
+  }
+}
+
+function encodeTopologyHash(value: string): Uint8Array {
+  const normalized = value.startsWith("0x") ? value.slice(2) : value;
+  if (!/^[0-9a-fA-F]+$/.test(normalized) || normalized.length !== 64) {
+    throw new Error("ERR_INVALID_TOPOLOGY_HASH: topologyHash must be a 32-byte hex string");
+  }
+  return Uint8Array.from(Buffer.from(normalized, "hex"));
+}
+
+function encodeRunSummaries(entries: readonly SettlementRunSummary[] = []): Uint8Array {
+  const parts: Uint8Array[] = [u32(entries.length, "runSummaries.length")];
+
+  for (const entry of entries) {
+    parts.push(u64(entry.closedRunSequence, "runSummary.closedRunSequence"));
+    parts.push(u16(entry.zoneId, "runSummary.zoneId"));
+    parts.push(u16(entry.topologyVersion, "runSummary.topologyVersion"));
+    parts.push(encodeTopologyHash(entry.topologyHash));
+    parts.push(u8(terminalStatusCode(entry.terminalStatus), "runSummary.terminalStatus"));
+    parts.push(u16(entry.rewardedBattleCount, "runSummary.rewardedBattleCount"));
+    parts.push(u64(entry.firstRewardedBattleTs, "runSummary.firstRewardedBattleTs"));
+    parts.push(u64(entry.lastRewardedBattleTs, "runSummary.lastRewardedBattleTs"));
+    parts.push(encodeRunEncounterHistogram(entry.rewardedEncounterHistogram));
+    parts.push(encodeZoneProgressDelta(entry.zoneProgressDelta));
+  }
+
+  return concatBytes(parts);
+}
+
 export function encodeSettlementBatchPayloadPreimageV2(
   payload: SettlementBatchPayloadPreimageBytesV2,
 ): Uint8Array {
   return concatBytes([
     toBytes(payload.characterId, "characterId", 16),
     u64(payload.batchId, "batchId"),
-    u64(payload.startNonce, "startNonce"),
-    u64(payload.endNonce, "endNonce"),
+    u64(payload.startRunSequence ?? payload.startNonce ?? 0, "startRunSequence"),
+    u64(payload.endRunSequence ?? payload.endNonce ?? 0, "endRunSequence"),
     u16(payload.battleCount, "battleCount"),
     u64(payload.firstBattleTs, "firstBattleTs"),
     u64(payload.lastBattleTs, "lastBattleTs"),
     u32(payload.seasonId, "seasonId"),
     toBytes(payload.startStateHash, "startStateHash", 32),
     toBytes(payload.endStateHash, "endStateHash", 32),
-    encodeZoneProgressDelta(payload.zoneProgressDelta),
-    encodeEncounterHistogram(payload.encounterHistogram),
+    encodeRunSummaries(payload.runSummaries),
     encodeOptionalU32(payload.optionalLoadoutRevision),
     u16(payload.schemaVersion, "schemaVersion"),
     u8(payload.signatureScheme, "signatureScheme"),
@@ -204,15 +247,14 @@ export function encodeSettlementEndStateHashPreimageV2(
   return concatBytes([
     toBytes(payload.characterId, "characterId", 16),
     u64(payload.batchId, "batchId"),
-    u64(payload.startNonce, "startNonce"),
-    u64(payload.endNonce, "endNonce"),
+    u64(payload.startRunSequence ?? payload.startNonce ?? 0, "startRunSequence"),
+    u64(payload.endRunSequence ?? payload.endNonce ?? 0, "endRunSequence"),
     u16(payload.battleCount, "battleCount"),
     u64(payload.firstBattleTs, "firstBattleTs"),
     u64(payload.lastBattleTs, "lastBattleTs"),
     u32(payload.seasonId, "seasonId"),
     toBytes(payload.startStateHash, "startStateHash", 32),
-    encodeZoneProgressDelta(payload.zoneProgressDelta),
-    encodeEncounterHistogram(payload.encounterHistogram),
+    encodeRunSummaries(payload.runSummaries),
     encodeOptionalU32(payload.optionalLoadoutRevision),
     u16(payload.schemaVersion, "schemaVersion"),
     u8(payload.signatureScheme, "signatureScheme"),
@@ -230,16 +272,15 @@ export function encodeCanonicalServerAttestationMessage(
     toBytes(args.characterRootPubkey, "characterRootPubkey", 32),
     toBytes(payload.characterId, "characterId", 16),
     u64(payload.batchId, "batchId"),
-    u64(payload.startNonce, "startNonce"),
-    u64(payload.endNonce, "endNonce"),
+    u64(payload.startRunSequence ?? payload.startNonce ?? 0, "startRunSequence"),
+    u64(payload.endRunSequence ?? payload.endNonce ?? 0, "endRunSequence"),
     u16(payload.battleCount, "battleCount"),
     u64(payload.firstBattleTs, "firstBattleTs"),
     u64(payload.lastBattleTs, "lastBattleTs"),
     u32(payload.seasonId, "seasonId"),
     toBytes(payload.startStateHash, "startStateHash", 32),
     toBytes(payload.endStateHash, "endStateHash", 32),
-    encodeZoneProgressDelta(payload.zoneProgressDelta),
-    encodeEncounterHistogram(payload.encounterHistogram),
+    encodeRunSummaries(payload.runSummaries),
     encodeOptionalU32(payload.optionalLoadoutRevision),
     toBytes(payload.batchHash, "batchHash", 32),
     u16(payload.schemaVersion, "schemaVersion"),

@@ -132,9 +132,13 @@ function toExternalClosedSummary(input: {
   topologyVersion: number;
   topologyHash: string;
   terminalStatus: ZoneRunTerminalStatus;
+  settleable: boolean;
+  closedRunSequence: number | null;
   rewardedBattleCount: number;
   rewardedEncounterHistogram: Record<string, number>;
   zoneProgressDelta: unknown;
+  firstRewardedBattleTs: number | null;
+  lastRewardedBattleTs: number | null;
   closedAt: Date;
 }): ClosedZoneRunSummary {
   return {
@@ -145,11 +149,32 @@ function toExternalClosedSummary(input: {
     topologyVersion: input.topologyVersion,
     topologyHash: input.topologyHash,
     terminalStatus: input.terminalStatus,
+    settleable: input.settleable,
+    closedRunSequence: input.closedRunSequence,
     rewardedBattleCount: input.rewardedBattleCount,
     rewardedEncounterHistogram: { ...input.rewardedEncounterHistogram },
     zoneProgressDelta: input.zoneProgressDelta,
+    firstRewardedBattleTs: input.firstRewardedBattleTs,
+    lastRewardedBattleTs: input.lastRewardedBattleTs,
     closedAt: input.closedAt.toISOString(),
   };
+}
+
+function normalizedZoneProgressDeltaEntries(value: unknown): ZoneProgressDeltaEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is ZoneProgressDeltaEntry => {
+    if (typeof entry !== "object" || entry === null) {
+      return false;
+    }
+    const candidate = entry as Record<string, unknown>;
+    return (
+      Number.isInteger(candidate.zoneId) &&
+      (candidate.newState === 1 || candidate.newState === 2)
+    );
+  });
 }
 
 function hashToInt(parts: string[], maximumExclusive: number): number {
@@ -720,6 +745,17 @@ async function closeRun(args: {
   zoneProgressDelta: unknown;
   provisionalProgressUpdate?: UpdateCharacterProvisionalProgressInput | null;
 }): Promise<ClosedZoneRunSummary> {
+  const rewardedLedgerRows = await prisma.battleOutcomeLedger.listByZoneRunId(
+    args.snapshot.runId,
+  );
+  const zoneProgressDelta = normalizedZoneProgressDeltaEntries(args.zoneProgressDelta);
+  const rewardedBattleCount = Object.values(args.snapshot.enemyAppearanceCounts).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const settleable = rewardedBattleCount > 0 || zoneProgressDelta.length > 0;
+  const rewardedBattleTs = rewardedLedgerRows.map((row) => row.battleTs).sort((a, b) => a - b);
+
   const closedRecord = await prisma.activeZoneRun.closeWithSummary({
     characterId: args.snapshot.characterId,
     summary: {
@@ -730,9 +766,12 @@ async function closeRun(args: {
       topologyVersion: args.snapshot.topologyVersion,
       topologyHash: args.snapshot.topologyHash,
       terminalStatus: args.terminalStatus,
-      rewardedBattleCount: Object.values(args.snapshot.enemyAppearanceCounts).reduce((sum, count) => sum + count, 0),
+      settleable,
+      rewardedBattleCount,
       rewardedEncounterHistogram: args.snapshot.enemyAppearanceCounts,
-      zoneProgressDelta: args.zoneProgressDelta,
+      zoneProgressDelta,
+      firstRewardedBattleTs: rewardedBattleTs[0] ?? null,
+      lastRewardedBattleTs: rewardedBattleTs[rewardedBattleTs.length - 1] ?? null,
     },
     provisionalProgress: args.provisionalProgressUpdate,
   });
@@ -745,9 +784,13 @@ async function closeRun(args: {
     topologyVersion: closedRecord.topologyVersion,
     topologyHash: closedRecord.topologyHash,
     terminalStatus: closedRecord.terminalStatus,
+    settleable: closedRecord.settleable,
+    closedRunSequence: closedRecord.closedRunSequence,
     rewardedBattleCount: closedRecord.rewardedBattleCount,
     rewardedEncounterHistogram: closedRecord.rewardedEncounterHistogram,
     zoneProgressDelta: closedRecord.zoneProgressDelta,
+    firstRewardedBattleTs: closedRecord.firstRewardedBattleTs,
+    lastRewardedBattleTs: closedRecord.lastRewardedBattleTs,
     closedAt: closedRecord.closedAt,
   });
 }

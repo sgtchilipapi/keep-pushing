@@ -4,7 +4,10 @@ import { Pool, type PoolClient } from 'pg';
 
 import { allocateNextBattleNonce } from './combat/battleNonce';
 import { normalizeCharacterName } from './characterIdentity';
-import type { ZoneState } from '../types/settlement';
+import type {
+  SettlementRunSummary,
+  ZoneState,
+} from '../types/settlement';
 import type {
   ActiveZoneRunSnapshot,
   ActiveZoneRunState,
@@ -352,9 +355,13 @@ export type ClosedZoneRunSummaryRecord = {
   topologyVersion: number;
   topologyHash: string;
   terminalStatus: ZoneRunTerminalStatusRecord;
+  settleable: boolean;
+  closedRunSequence: number | null;
   rewardedBattleCount: number;
   rewardedEncounterHistogram: Record<string, number>;
   zoneProgressDelta: unknown;
+  firstRewardedBattleTs: number | null;
+  lastRewardedBattleTs: number | null;
   closedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -368,9 +375,12 @@ export type CreateClosedZoneRunSummaryInput = {
   topologyVersion: number;
   topologyHash: string;
   terminalStatus: ZoneRunTerminalStatusRecord;
+  settleable: boolean;
   rewardedBattleCount: number;
   rewardedEncounterHistogram: Record<string, number>;
   zoneProgressDelta: unknown;
+  firstRewardedBattleTs?: number | null;
+  lastRewardedBattleTs?: number | null;
   closedAt?: Date;
 };
 
@@ -419,6 +429,10 @@ export type SettlementBatchRecord = {
   id: string;
   characterId: string;
   batchId: number;
+  startRunSequence?: number;
+  endRunSequence?: number;
+  runCount?: number;
+  runSummaries?: SettlementRunSummary[];
   startNonce: number;
   endNonce: number;
   battleCount: number;
@@ -450,6 +464,10 @@ export type SettlementBatchRecord = {
 export type CreateSettlementBatchInput = {
   characterId: string;
   batchId: number;
+  startRunSequence?: number;
+  endRunSequence?: number;
+  runCount?: number;
+  runSummaries?: SettlementRunSummary[];
   startNonce: number;
   endNonce: number;
   battleCount: number;
@@ -629,9 +647,13 @@ type ClosedZoneRunSummaryRow = {
   topologyVersion: number;
   topologyHash: string;
   terminalStatus: ZoneRunTerminalStatusRecord;
+  settleable: boolean;
+  closedRunSequence: string | number | null;
   rewardedBattleCount: number;
   rewardedEncounterHistogramJson: unknown;
   zoneProgressDeltaJson: unknown;
+  firstRewardedBattleTs: string | number | null;
+  lastRewardedBattleTs: string | number | null;
   closedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -662,6 +684,10 @@ type SettlementBatchRow = {
   id: string;
   characterId: string;
   batchId: string | number;
+  startRunSequence: string | number;
+  endRunSequence: string | number;
+  runCount: number;
+  runSummariesJson: unknown;
   startNonce: string | number;
   endNonce: string | number;
   battleCount: number;
@@ -870,9 +896,19 @@ function mapClosedZoneRunSummary(row: ClosedZoneRunSummaryRow): ClosedZoneRunSum
     topologyVersion: row.topologyVersion,
     topologyHash: row.topologyHash,
     terminalStatus: row.terminalStatus,
+    settleable: row.settleable,
+    closedRunSequence: parseNullableSafeInteger(row.closedRunSequence, 'closedRunSequence'),
     rewardedBattleCount: row.rewardedBattleCount,
     rewardedEncounterHistogram: row.rewardedEncounterHistogramJson as Record<string, number>,
     zoneProgressDelta: row.zoneProgressDeltaJson,
+    firstRewardedBattleTs: parseNullableSafeInteger(
+      row.firstRewardedBattleTs,
+      'firstRewardedBattleTs',
+    ),
+    lastRewardedBattleTs: parseNullableSafeInteger(
+      row.lastRewardedBattleTs,
+      'lastRewardedBattleTs',
+    ),
     closedAt: row.closedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -1034,6 +1070,10 @@ function mapSettlementBatch(row: SettlementBatchRow): SettlementBatchRecord {
     id: row.id,
     characterId: row.characterId,
     batchId: parseRequiredSafeInteger(row.batchId, 'batchId'),
+    startRunSequence: parseRequiredSafeInteger(row.startRunSequence, 'startRunSequence'),
+    endRunSequence: parseRequiredSafeInteger(row.endRunSequence, 'endRunSequence'),
+    runCount: row.runCount,
+    runSummaries: row.runSummariesJson as SettlementRunSummary[],
     startNonce: parseRequiredSafeInteger(row.startNonce, 'startNonce'),
     endNonce: parseRequiredSafeInteger(row.endNonce, 'endNonce'),
     battleCount: row.battleCount,
@@ -2061,6 +2101,25 @@ export const prisma = {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        let nextClosedRunSequence: number | null = null;
+
+        if (args.summary.settleable) {
+          const latestSequenceResult = await client.query<{ closedRunSequence: string | number }>(
+            `SELECT "closedRunSequence"
+            FROM "ClosedZoneRunSummary"
+            WHERE "characterId" = $1 AND "settleable" = TRUE
+            ORDER BY "closedRunSequence" DESC NULLS LAST
+            LIMIT 1
+            FOR UPDATE`,
+            [args.characterId],
+          );
+          nextClosedRunSequence = latestSequenceResult.rows[0]
+            ? parseRequiredSafeInteger(
+                latestSequenceResult.rows[0].closedRunSequence,
+                'closedRunSequence',
+              ) + 1
+            : 1;
+        }
 
         const closedSummaryResult = await client.query<ClosedZoneRunSummaryRow>(
           `INSERT INTO "ClosedZoneRunSummary"
@@ -2073,13 +2132,17 @@ export const prisma = {
               "topologyVersion",
               "topologyHash",
               "terminalStatus",
+              "settleable",
+              "closedRunSequence",
               "rewardedBattleCount",
               "rewardedEncounterHistogramJson",
               "zoneProgressDeltaJson",
+              "firstRewardedBattleTs",
+              "lastRewardedBattleTs",
               "closedAt",
               "updatedAt"
             )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17)
           RETURNING
             id,
             "zoneRunId",
@@ -2089,9 +2152,13 @@ export const prisma = {
             "topologyVersion",
             "topologyHash",
             "terminalStatus",
+            "settleable",
+            "closedRunSequence",
             "rewardedBattleCount",
             "rewardedEncounterHistogramJson",
             "zoneProgressDeltaJson",
+            "firstRewardedBattleTs",
+            "lastRewardedBattleTs",
             "closedAt",
             "createdAt",
             "updatedAt"`,
@@ -2104,9 +2171,13 @@ export const prisma = {
             args.summary.topologyVersion,
             args.summary.topologyHash,
             args.summary.terminalStatus,
+            args.summary.settleable,
+            nextClosedRunSequence,
             args.summary.rewardedBattleCount,
             JSON.stringify(args.summary.rewardedEncounterHistogram),
             JSON.stringify(args.summary.zoneProgressDelta),
+            args.summary.firstRewardedBattleTs ?? null,
+            args.summary.lastRewardedBattleTs ?? null,
             args.summary.closedAt ?? new Date(),
             new Date(),
           ],
@@ -2159,9 +2230,13 @@ export const prisma = {
           "topologyVersion",
           "topologyHash",
           "terminalStatus",
+          "settleable",
+          "closedRunSequence",
           "rewardedBattleCount",
           "rewardedEncounterHistogramJson",
           "zoneProgressDeltaJson",
+          "firstRewardedBattleTs",
+          "lastRewardedBattleTs",
           "closedAt",
           "createdAt",
           "updatedAt"
@@ -2184,9 +2259,13 @@ export const prisma = {
           "topologyVersion",
           "topologyHash",
           "terminalStatus",
+          "settleable",
+          "closedRunSequence",
           "rewardedBattleCount",
           "rewardedEncounterHistogramJson",
           "zoneProgressDeltaJson",
+          "firstRewardedBattleTs",
+          "lastRewardedBattleTs",
           "closedAt",
           "createdAt",
           "updatedAt"
@@ -2198,6 +2277,45 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapClosedZoneRunSummary(result.rows[0]) : null;
+    },
+    async listNextSettleableForCharacter(characterId: string, limit: number) {
+      const result = await pool.query<ClosedZoneRunSummaryRow>(
+        `SELECT
+          id,
+          "zoneRunId",
+          "characterId",
+          "zoneId",
+          "seasonId",
+          "topologyVersion",
+          "topologyHash",
+          "terminalStatus",
+          "settleable",
+          "closedRunSequence",
+          "rewardedBattleCount",
+          "rewardedEncounterHistogramJson",
+          "zoneProgressDeltaJson",
+          "firstRewardedBattleTs",
+          "lastRewardedBattleTs",
+          "closedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "ClosedZoneRunSummary"
+        WHERE "characterId" = $1
+          AND "settleable" = TRUE
+          AND "closedRunSequence" IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "SettlementBatch" batch,
+                 jsonb_array_elements(batch."runSummariesJson") AS summary
+            WHERE batch."characterId" = "ClosedZoneRunSummary"."characterId"
+              AND ((summary ->> 'closedRunSequence')::bigint) = "ClosedZoneRunSummary"."closedRunSequence"
+          )
+        ORDER BY "closedRunSequence" ASC
+        LIMIT $2`,
+        [characterId, limit],
+      );
+
+      return result.rows.map(mapClosedZoneRunSummary);
     },
   },
   zoneRunActionLog: {
@@ -3023,6 +3141,10 @@ export const prisma = {
               id,
               "characterId",
               "batchId",
+              "startRunSequence",
+              "endRunSequence",
+              "runCount",
+              "runSummariesJson",
               "startNonce",
               "endNonce",
               "battleCount",
@@ -3039,11 +3161,15 @@ export const prisma = {
               "signatureScheme",
               "updatedAt"
             )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17,$18)
+          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22)
           RETURNING
             id,
             "characterId",
             "batchId",
+            "startRunSequence",
+            "endRunSequence",
+            "runCount",
+            "runSummariesJson",
             "startNonce",
             "endNonce",
             "battleCount",
@@ -3074,6 +3200,10 @@ export const prisma = {
             createRowId(),
             input.characterId,
             input.batchId,
+            input.startRunSequence,
+            input.endRunSequence,
+            input.runCount,
+            JSON.stringify(input.runSummaries),
             input.startNonce,
             input.endNonce,
             input.battleCount,
@@ -3124,6 +3254,10 @@ export const prisma = {
           id,
           "characterId",
           "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
           "startNonce",
           "endNonce",
           "battleCount",
@@ -3164,6 +3298,10 @@ export const prisma = {
           id,
           "characterId",
           "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
           "startNonce",
           "endNonce",
           "battleCount",
@@ -3204,6 +3342,10 @@ export const prisma = {
           id,
           "characterId",
           "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
           "startNonce",
           "endNonce",
           "battleCount",
@@ -3245,6 +3387,10 @@ export const prisma = {
           id,
           "characterId",
           "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
           "startNonce",
           "endNonce",
           "battleCount",
@@ -3299,6 +3445,10 @@ export const prisma = {
           id,
           "characterId",
           "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
           "startNonce",
           "endNonce",
           "battleCount",

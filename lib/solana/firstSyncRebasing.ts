@@ -6,7 +6,7 @@ import {
   prisma,
   type BattleOutcomeLedgerRecord,
   type CharacterChainState,
-  type RebasedBattleNonceAssignment,
+  type ClosedZoneRunSummaryRecord,
 } from '../prisma';
 import { prepareFirstSyncCharacterAnchor, type PreparedFirstSyncCharacterAnchor } from './firstSyncCharacterAnchor';
 import { fetchProgramConfigAccount, fetchSeasonPolicyAccount } from './runanaAccounts';
@@ -36,12 +36,14 @@ export interface PreparedFirstSyncRebase {
     playerAuthorityPubkey: string;
     chainCharacterIdHex: string;
     characterRootPubkey: string;
-    chainCreationStatus: CharacterChainState['chainCreationStatus'];
+  chainCreationStatus: CharacterChainState['chainCreationStatus'];
   };
   genesisCursor: SettlementSealingCursor;
-  archivedBattleIds: string[];
-  rebasedBattles: BattleOutcomeLedgerRecord[];
+  archivedRunIds?: string[];
+  pendingRuns?: ClosedZoneRunSummaryRecord[];
   batchDrafts: SealedSettlementBatchDraft[];
+  archivedBattleIds?: string[];
+  rebasedBattles: BattleOutcomeLedgerRecord[];
 }
 
 export interface FirstSyncRebasingDependencies {
@@ -174,26 +176,28 @@ function currentUnixTimestamp(now: Date): number {
 
 function buildBatchDrafts(args: {
   cursor: SettlementSealingCursor;
-  battles: BattleOutcomeLedgerRecord[];
-  maxBattlesPerBatch: number;
+  runs: ClosedZoneRunSummaryRecord[];
+  maxRunsPerBatch: number;
   maxHistogramEntriesPerBatch: number;
   characterIdHex: string;
 }): SealedSettlementBatchDraft[] {
   const drafts: SealedSettlementBatchDraft[] = [];
   let cursor = args.cursor;
-  let remaining = [...args.battles].sort((left, right) => left.battleNonce! - right.battleNonce!);
+  let remaining = [...args.runs].sort(
+    (left, right) => (left.closedRunSequence ?? Number.MAX_SAFE_INTEGER) - (right.closedRunSequence ?? Number.MAX_SAFE_INTEGER),
+  );
 
   while (remaining.length > 0) {
     const draft = sealSettlementBatchDraft({
       characterIdHex: args.characterIdHex,
       cursor,
-      pendingBattles: remaining,
-      maxBattlesPerBatch: args.maxBattlesPerBatch,
+      pendingRuns: remaining,
+      maxRunsPerBatch: args.maxRunsPerBatch,
       maxHistogramEntriesPerBatch: args.maxHistogramEntriesPerBatch,
     });
     drafts.push(draft);
-    const sealed = new Set(draft.sealedBattleIds);
-    remaining = remaining.filter((battle) => !sealed.has(battle.id));
+    const sealed = new Set(draft.sealedRunIds ?? []);
+    remaining = remaining.filter((run) => !sealed.has(run.id));
     cursor = {
       lastCommittedEndNonce: draft.payload.endNonce,
       lastCommittedStateHash: draft.payload.endStateHash,
@@ -223,57 +227,131 @@ export async function prepareFirstSyncRebase(
     generateCharacterIdHex,
   });
 
-  const [programConfig, awaitingBattles] = await Promise.all([
+  const [programConfig, pendingRuns] = await Promise.all([
     fetchProgramConfigAccount(connection as Connection, deriveProgramConfigPda(programId), commitment),
-    prisma.battleOutcomeLedger.listAwaitingFirstSyncForCharacter(anchor.characterId, 10_000),
+    prisma.closedZoneRunSummary?.listNextSettleableForCharacter?.(anchor.characterId, 10_000) ??
+      Promise.resolve([]),
   ]);
 
-  assertCondition(
-    awaitingBattles.length > 0,
-    'ERR_NO_FIRST_SYNC_BACKLOG',
-    'character has no awaiting-first-sync battles to settle',
-  );
+  if (pendingRuns.length === 0) {
+    const awaitingBattles = await prisma.battleOutcomeLedger.listAwaitingFirstSyncForCharacter(
+      anchor.characterId,
+      10_000,
+    );
+    assertCondition(
+      awaitingBattles.length > 0,
+      'ERR_NO_FIRST_SYNC_BACKLOG',
+      'character has no settleable backlog to settle',
+    );
 
-  const battlesBySeason = new Map<number, BattleOutcomeLedgerRecord[]>();
-  for (const battle of awaitingBattles) {
-    const list = battlesBySeason.get(battle.seasonId) ?? [];
-    list.push(battle);
-    battlesBySeason.set(battle.seasonId, list);
+    const battlesBySeason = new Map<number, BattleOutcomeLedgerRecord[]>();
+    for (const battle of awaitingBattles) {
+      const list = battlesBySeason.get(battle.seasonId) ?? [];
+      list.push(battle);
+      battlesBySeason.set(battle.seasonId, list);
+    }
+
+    const currentTs = currentUnixTimestamp(now());
+    const archivedBattleIds: string[] = [];
+    for (const seasonId of battlesBySeason.keys()) {
+      const seasonPolicy = await fetchSeasonPolicyAccount(
+        connection as Connection,
+        deriveSeasonPolicyPda(seasonId, programId),
+        commitment,
+      );
+      if (currentTs > Number(seasonPolicy.commitGraceEndTs)) {
+        archivedBattleIds.push(...(battlesBySeason.get(seasonId) ?? []).map((battle) => battle.id));
+      }
+    }
+
+    if (archivedBattleIds.length > 0) {
+      await prisma.battleOutcomeLedger.markArchivedLocalOnly(archivedBattleIds);
+    }
+
+    const remainingBattles = awaitingBattles
+      .filter((battle) => !archivedBattleIds.includes(battle.id))
+      .sort((left, right) => left.localSequence - right.localSequence);
+    assertCondition(
+      remainingBattles.length > 0,
+      'ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES',
+      'all first-sync backlog was archived as stale local-only history',
+    );
+
+    const assignments = remainingBattles.map((battle, index) => ({
+      id: battle.id,
+      battleNonce: index + 1,
+    }));
+    const rebasedBattles = await prisma.battleOutcomeLedger.rebaseAwaitingFirstSyncBattleNonces(
+      anchor.characterId,
+      assignments,
+    );
+
+    const characterRootPubkey = new PublicKey(reservedIdentity.characterRootPubkey);
+    const genesisCursor: SettlementSealingCursor = {
+      lastCommittedEndNonce: 0,
+      lastCommittedStateHash: computeGenesisStateHashHex(
+        characterRootPubkey,
+        reservedIdentity.chainCharacterIdHex,
+      ),
+      lastCommittedBatchId: 0,
+      lastCommittedBattleTs: anchor.characterCreationTs,
+      lastCommittedSeasonId: anchor.seasonIdAtCreation,
+    };
+
+    const batchDrafts = rebasedBattles.length
+      ? [
+          sealSettlementBatchDraft({
+            characterIdHex: reservedIdentity.chainCharacterIdHex,
+            cursor: genesisCursor,
+            pendingBattles: rebasedBattles,
+            maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+            maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
+          }),
+        ]
+      : [];
+
+    return {
+      anchor,
+      reservedIdentity,
+      genesisCursor,
+      batchDrafts,
+      archivedRunIds: [],
+      pendingRuns: [],
+      archivedBattleIds,
+      rebasedBattles,
+    };
+  }
+
+  const runsBySeason = new Map<number, ClosedZoneRunSummaryRecord[]>();
+  for (const run of pendingRuns) {
+    const list = runsBySeason.get(run.seasonId) ?? [];
+    list.push(run);
+    runsBySeason.set(run.seasonId, list);
   }
 
   const currentTs = currentUnixTimestamp(now());
-  const archivedBattleIds: string[] = [];
-  for (const seasonId of battlesBySeason.keys()) {
+  const archivedSeasonIds: number[] = [];
+  for (const seasonId of runsBySeason.keys()) {
     const seasonPolicy = await fetchSeasonPolicyAccount(
       connection as Connection,
       deriveSeasonPolicyPda(seasonId, programId),
       commitment,
     );
     if (currentTs > Number(seasonPolicy.commitGraceEndTs)) {
-      archivedBattleIds.push(...(battlesBySeason.get(seasonId) ?? []).map((battle) => battle.id));
+      archivedSeasonIds.push(seasonId);
     }
   }
 
-  if (archivedBattleIds.length > 0) {
-    await prisma.battleOutcomeLedger.markArchivedLocalOnly(archivedBattleIds);
-  }
-
-  const remainingBattles = awaitingBattles
-    .filter((battle) => !archivedBattleIds.includes(battle.id))
-    .sort((left, right) => left.localSequence - right.localSequence);
+  const remainingRuns = pendingRuns
+    .filter((run) => !archivedSeasonIds.includes(run.seasonId))
+    .sort(
+      (left, right) =>
+        (left.closedRunSequence ?? Number.MAX_SAFE_INTEGER) - (right.closedRunSequence ?? Number.MAX_SAFE_INTEGER),
+    );
   assertCondition(
-    remainingBattles.length > 0,
-    'ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES',
-    'all awaiting-first-sync backlog was archived as stale local-only history',
-  );
-
-  const assignments: RebasedBattleNonceAssignment[] = remainingBattles.map((battle, index) => ({
-    id: battle.id,
-    battleNonce: index + 1,
-  }));
-  const rebasedBattles = await prisma.battleOutcomeLedger.rebaseAwaitingFirstSyncBattleNonces(
-    anchor.characterId,
-    assignments,
+    remainingRuns.length > 0,
+    'ERR_NO_ELIGIBLE_FIRST_SYNC_RUNS',
+    'all first-sync closed-run backlog was archived as stale local-only history',
   );
 
   const characterRootPubkey = new PublicKey(reservedIdentity.characterRootPubkey);
@@ -290,8 +368,8 @@ export async function prepareFirstSyncRebase(
 
   const batchDrafts = buildBatchDrafts({
     cursor: genesisCursor,
-    battles: rebasedBattles,
-    maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+    runs: remainingRuns,
+    maxRunsPerBatch: programConfig.maxRunsPerBatch,
     maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
     characterIdHex: reservedIdentity.chainCharacterIdHex,
   });
@@ -300,8 +378,12 @@ export async function prepareFirstSyncRebase(
     anchor,
     reservedIdentity,
     genesisCursor,
-    archivedBattleIds,
-    rebasedBattles,
+    archivedRunIds: pendingRuns
+      .filter((run) => archivedSeasonIds.includes(run.seasonId))
+      .map((run) => run.id),
+    pendingRuns: remainingRuns,
     batchDrafts,
+    archivedBattleIds: [],
+    rebasedBattles: [],
   };
 }

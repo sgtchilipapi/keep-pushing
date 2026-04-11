@@ -65,9 +65,13 @@ export interface ClosedZoneRunSummary {
   topologyVersion: number;
   topologyHash: string;
   terminalStatus: ZoneRunTerminalStatus;
+  settleable?: boolean;
+  closedRunSequence?: number | null;
   rewardedBattleCount: number;
   rewardedEncounterHistogram: Record<string, number>;
   zoneProgressDelta: unknown;
+  firstRewardedBattleTs?: number | null;
+  lastRewardedBattleTs?: number | null;
   closedAt: string;
 }
 

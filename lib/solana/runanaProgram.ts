@@ -17,6 +17,7 @@ const CHARACTER_ZONE_PROGRESS_SEED = 'character_zone_progress';
 const CHARACTER_BATCH_CURSOR_SEED = 'character_batch_cursor';
 const ZONE_REGISTRY_SEED = 'zone_registry';
 const ZONE_ENEMY_SET_SEED = 'zone_enemy_set';
+const CLASS_REGISTRY_SEED = 'class_registry';
 const ENEMY_ARCHETYPE_SEED = 'enemy_archetype';
 const SEASON_POLICY_SEED = 'season_policy';
 
@@ -133,16 +134,51 @@ export function deriveSeasonPolicyPda(
   )[0];
 }
 
-export function deriveZoneRegistryPda(zoneId: number, programId = RUNANA_PROGRAM_ID): PublicKey {
+export function deriveZoneRegistryPda(
+  zoneId: number,
+  topologyVersionOrProgramId: number | PublicKey = 0,
+  maybeProgramId = RUNANA_PROGRAM_ID,
+): PublicKey {
+  const topologyVersion =
+    typeof topologyVersionOrProgramId === 'number' ? topologyVersionOrProgramId : 0;
+  const programId =
+    typeof topologyVersionOrProgramId === 'number'
+      ? maybeProgramId
+      : topologyVersionOrProgramId;
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(ZONE_REGISTRY_SEED), u16Bytes(zoneId, 'zoneId')],
+    [
+      Buffer.from(ZONE_REGISTRY_SEED),
+      u16Bytes(zoneId, 'zoneId'),
+      u16Bytes(topologyVersion, 'topologyVersion'),
+    ],
     programId,
   )[0];
 }
 
-export function deriveZoneEnemySetPda(zoneId: number, programId = RUNANA_PROGRAM_ID): PublicKey {
+export function deriveZoneEnemySetPda(
+  zoneId: number,
+  topologyVersionOrProgramId: number | PublicKey = 0,
+  maybeProgramId = RUNANA_PROGRAM_ID,
+): PublicKey {
+  const topologyVersion =
+    typeof topologyVersionOrProgramId === 'number' ? topologyVersionOrProgramId : 0;
+  const programId =
+    typeof topologyVersionOrProgramId === 'number'
+      ? maybeProgramId
+      : topologyVersionOrProgramId;
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(ZONE_ENEMY_SET_SEED), u16Bytes(zoneId, 'zoneId')],
+    [
+      Buffer.from(ZONE_ENEMY_SET_SEED),
+      u16Bytes(zoneId, 'zoneId'),
+      u16Bytes(topologyVersion, 'topologyVersion'),
+    ],
+    programId,
+  )[0];
+}
+
+export function deriveClassRegistryPda(classId: number, programId = RUNANA_PROGRAM_ID): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(CLASS_REGISTRY_SEED), u16Bytes(classId, 'classId')],
     programId,
   )[0];
 }
@@ -190,21 +226,48 @@ function sortedUnique(values: number[]): number[] {
 }
 
 export function referencedZoneIdsFromSettlementPayload(payload: SettlementBatchPayloadV2): number[] {
-  return sortedUnique(payload.encounterHistogram.map((entry) => entry.zoneId));
+  return sortedUnique((payload.runSummaries ?? []).map((entry) => entry.zoneId));
 }
 
 export function referencedEnemyArchetypeIdsFromSettlementPayload(
   payload: SettlementBatchPayloadV2,
 ): number[] {
-  return sortedUnique(payload.encounterHistogram.map((entry) => entry.enemyArchetypeId));
+  return sortedUnique(
+    (payload.runSummaries ?? []).flatMap((summary) =>
+      summary.rewardedEncounterHistogram.map((entry) => entry.enemyArchetypeId),
+    ),
+  );
+}
+
+export function referencedZoneVersionPairsFromSettlementPayload(
+  payload: SettlementBatchPayloadV2,
+): Array<{ zoneId: number; topologyVersion: number }> {
+  const seen = new Set<string>();
+  const pairs: Array<{ zoneId: number; topologyVersion: number }> = [];
+
+  for (const summary of payload.runSummaries ?? []) {
+    const key = `${summary.zoneId}:${summary.topologyVersion}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    pairs.push({ zoneId: summary.zoneId, topologyVersion: summary.topologyVersion });
+  }
+
+  return pairs.sort(
+    (left, right) =>
+      left.zoneId - right.zoneId || left.topologyVersion - right.topologyVersion,
+  );
 }
 
 export function referencedZonePageIndicesFromSettlementPayload(
   payload: SettlementBatchPayloadV2,
 ): number[] {
   return sortedUnique([
-    ...payload.encounterHistogram.map((entry) => Math.floor(entry.zoneId / RUNANA_ZONE_PAGE_WIDTH)),
-    ...payload.zoneProgressDelta.map((entry) => Math.floor(entry.zoneId / RUNANA_ZONE_PAGE_WIDTH)),
+    ...(payload.runSummaries ?? []).map((entry) => Math.floor(entry.zoneId / RUNANA_ZONE_PAGE_WIDTH)),
+    ...(payload.runSummaries ?? []).flatMap((entry) =>
+      entry.zoneProgressDelta.map((delta) => Math.floor(delta.zoneId / RUNANA_ZONE_PAGE_WIDTH)),
+    ),
   ]);
 }
 

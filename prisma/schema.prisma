@@ -285,9 +285,13 @@ model ClosedZoneRunSummary {
   topologyVersion               Int
   topologyHash                  String
   terminalStatus                ZoneRunTerminalStatus
+  settleable                    Boolean               @default(false)
+  closedRunSequence             BigInt?
   rewardedBattleCount           Int
   rewardedEncounterHistogramJson Json
   zoneProgressDeltaJson         Json
+  firstRewardedBattleTs         BigInt?
+  lastRewardedBattleTs          BigInt?
   createdAt                     DateTime              @default(now())
   updatedAt                     DateTime              @updatedAt
   closedAt                      DateTime
@@ -295,6 +299,7 @@ model ClosedZoneRunSummary {
 
   @@index([characterId, createdAt])
   @@index([characterId, zoneId, terminalStatus])
+  @@index([characterId, settleable, closedRunSequence])
 }
 
 model ZoneRunActionLog {
@@ -330,6 +335,10 @@ model SettlementBatch {
   id                        String                     @id @default(cuid())
   characterId               String
   batchId                   BigInt
+  startRunSequence          BigInt
+  endRunSequence            BigInt
+  runCount                  Int
+  runSummariesJson          Json
   startNonce                BigInt
   endNonce                  BigInt
   battleCount               Int
@@ -363,6 +372,7 @@ model SettlementBatch {
   @@unique([characterId, batchId])
   @@unique([characterId, batchHash])
   @@index([characterId, status, batchId])
+  @@index([characterId, startRunSequence, endRunSequence])
   @@index([characterId, startNonce, endNonce])
 }
 

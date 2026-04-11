@@ -174,9 +174,14 @@ function batchDraftToCreateInput(args: {
   characterId: string;
   draft: Awaited<ReturnType<typeof prepareFirstSyncRebase>>['batchDrafts'][number];
 }) {
+  const runSummaries = args.draft.payload.runSummaries ?? [];
   return {
     characterId: args.characterId,
     batchId: args.draft.payload.batchId,
+    startRunSequence: args.draft.payload.startRunSequence,
+    endRunSequence: args.draft.payload.endRunSequence,
+    runCount: runSummaries.length,
+    runSummaries,
     startNonce: args.draft.payload.startNonce,
     endNonce: args.draft.payload.endNonce,
     battleCount: args.draft.payload.battleCount,
@@ -185,8 +190,14 @@ function batchDraftToCreateInput(args: {
     seasonId: args.draft.payload.seasonId,
     startStateHash: args.draft.payload.startStateHash,
     endStateHash: args.draft.payload.endStateHash,
-    zoneProgressDelta: args.draft.payload.zoneProgressDelta,
-    encounterHistogram: args.draft.payload.encounterHistogram,
+    zoneProgressDelta: runSummaries.flatMap((summary) => summary.zoneProgressDelta),
+    encounterHistogram: runSummaries.flatMap((summary) =>
+      summary.rewardedEncounterHistogram.map((entry) => ({
+        zoneId: summary.zoneId,
+        enemyArchetypeId: entry.enemyArchetypeId,
+        count: entry.count,
+      })),
+    ),
     optionalLoadoutRevision: args.draft.payload.optionalLoadoutRevision ?? null,
     batchHash: args.draft.payload.batchHash,
     schemaVersion: args.draft.payload.schemaVersion,

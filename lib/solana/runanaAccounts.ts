@@ -26,6 +26,7 @@ export interface ProgramConfigAccountState extends DecodedRunanaAccountBase {
   trustedServerSigner: PublicKey;
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
+  maxRunsPerBatch: number;
   maxHistogramEntriesPerBatch: number;
   updatedAtSlot: bigint;
 }
@@ -36,6 +37,8 @@ export interface CharacterRootAccountState extends DecodedRunanaAccountBase {
   authority: PublicKey;
   characterId: Buffer;
   characterCreationTs: bigint;
+  classId: number;
+  name: string;
 }
 
 export interface CharacterStatsAccountState extends DecodedRunanaAccountBase {
@@ -88,15 +91,32 @@ export interface ZoneRegistryAccountState extends DecodedRunanaAccountBase {
   version: number;
   bump: number;
   zoneId: number;
+  topologyVersion: number;
+  totalSubnodeCount: number;
+  topologyHash: Buffer;
   expMultiplierNum: number;
   expMultiplierDen: number;
+}
+
+export interface ZoneEnemyRuleAccountEntry {
+  enemyArchetypeId: number;
+  maxPerRun: number;
 }
 
 export interface ZoneEnemySetAccountState extends DecodedRunanaAccountBase {
   version: number;
   bump: number;
   zoneId: number;
+  topologyVersion: number;
+  enemyRules: ZoneEnemyRuleAccountEntry[];
   allowedEnemyArchetypeIds: number[];
+}
+
+export interface ClassRegistryAccountState extends DecodedRunanaAccountBase {
+  version: number;
+  bump: number;
+  classId: number;
+  enabled: boolean;
 }
 
 export interface EnemyArchetypeRegistryAccountState extends DecodedRunanaAccountBase {
@@ -116,6 +136,7 @@ type AnyRunanaDecodedAccount =
   | CharacterSettlementBatchCursorAccountState
   | ZoneRegistryAccountState
   | ZoneEnemySetAccountState
+  | ClassRegistryAccountState
   | EnemyArchetypeRegistryAccountState;
 
 class AccountDataReader {
@@ -184,6 +205,28 @@ class AccountDataReader {
     return values;
   }
 
+  readFixedAscii(length: number, field: string): string {
+    const bytes = this.readBytes(length);
+    const zeroIndex = bytes.indexOf(0);
+    const raw = bytes.subarray(0, zeroIndex === -1 ? bytes.length : zeroIndex);
+    if (raw.some((value) => value > 0x7f)) {
+      throw new Error(`ERR_INVALID_ASCII_${field.toUpperCase()}: ${field} must be ASCII`);
+    }
+    return Buffer.from(raw).toString('utf8');
+  }
+
+  readZoneEnemyRuleVec(): ZoneEnemyRuleAccountEntry[] {
+    const length = this.readU32();
+    const rules: ZoneEnemyRuleAccountEntry[] = [];
+    for (let index = 0; index < length; index += 1) {
+      rules.push({
+        enemyArchetypeId: this.readU16(),
+        maxPerRun: this.readU16(),
+      });
+    }
+    return rules;
+  }
+
   assertFullyRead(accountName: string): void {
     if (this.offset !== this.data.length) {
       throw new Error(`ERR_ACCOUNT_DATA_REMAINDER: ${accountName} decoder left unread bytes`);
@@ -222,6 +265,7 @@ export function decodeProgramConfigAccount(
     trustedServerSigner: reader.readPubkey(),
     settlementPaused: reader.readBool(),
     maxBattlesPerBatch: reader.readU16(),
+    maxRunsPerBatch: reader.readU16(),
     maxHistogramEntriesPerBatch: reader.readU16(),
     updatedAtSlot: reader.readU64(),
   };
@@ -244,6 +288,8 @@ export function decodeCharacterRootAccount(
     authority: reader.readPubkey(),
     characterId: reader.readBytes(16),
     characterCreationTs: reader.readU64(),
+    classId: reader.readU16(),
+    name: reader.readFixedAscii(16, 'name'),
   };
 
   reader.assertFullyRead('CharacterRootAccount');
@@ -368,6 +414,9 @@ export function decodeZoneRegistryAccount(
     version: reader.readU8(),
     bump: reader.readU8(),
     zoneId: reader.readU16(),
+    topologyVersion: reader.readU16(),
+    totalSubnodeCount: reader.readU16(),
+    topologyHash: reader.readBytes(32),
     expMultiplierNum: reader.readU16(),
     expMultiplierDen: reader.readU16(),
   };
@@ -388,8 +437,11 @@ export function decodeZoneEnemySetAccount(
     version: reader.readU8(),
     bump: reader.readU8(),
     zoneId: reader.readU16(),
-    allowedEnemyArchetypeIds: reader.readVecU16(),
+    topologyVersion: reader.readU16(),
+    enemyRules: reader.readZoneEnemyRuleVec(),
+    allowedEnemyArchetypeIds: [],
   };
+  decoded.allowedEnemyArchetypeIds = decoded.enemyRules.map((entry) => entry.enemyArchetypeId);
 
   reader.assertRemainingZeroPadding('ZoneEnemySetAccount');
   return decoded;
@@ -411,6 +463,25 @@ export function decodeEnemyArchetypeRegistryAccount(
   };
 
   reader.assertFullyRead('EnemyArchetypeRegistryAccount');
+  return decoded;
+}
+
+export function decodeClassRegistryAccount(
+  pubkey: PublicKey,
+  accountInfo: AccountInfo<Buffer>,
+): ClassRegistryAccountState {
+  const reader = new AccountDataReader(accountInfo.data);
+  reader.readDiscriminator('ClassRegistryAccount');
+
+  const decoded: ClassRegistryAccountState = {
+    ...decodeAccountBase(pubkey, accountInfo),
+    version: reader.readU8(),
+    bump: reader.readU8(),
+    classId: reader.readU16(),
+    enabled: reader.readBool(),
+  };
+
+  reader.assertFullyRead('ClassRegistryAccount');
   return decoded;
 }
 

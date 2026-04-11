@@ -8,7 +8,7 @@ Status:
 
 - design-locked,
 - playable core loop now implemented across server execution, local DB persistence, and the app dashboard for manual testing,
-- run-native settlement and on-chain validation redesign not implemented yet,
+- run-native settlement and on-chain validation redesign implemented for the current MVP contract,
 - intended to become the canonical direction for zone traversal and run-native settlement work.
 
 This document now also contains the unified implementation checklist across:
@@ -719,62 +719,62 @@ Execution rule:
 
 ### 11.7 Phase 6: run-native sealing pipeline
 
-- [ ] Replace battle-native settlement selection with closed-run-native selection.
-- [ ] Allocate `closed_run_sequence` at run close for settleable runs only.
-- [ ] Ensure zero-value closed runs receive no settlement sequence.
-- [ ] Implement oldest-contiguous greedy-fit batch construction over settleable run sequences.
-- [ ] Enforce single-season batches.
-- [ ] Enforce no run splitting across batches.
-- [ ] Generate sealed run summaries from `ClosedZoneRunSummary` records only.
-- [ ] Omit terminal losing combats from sealed rewarded summaries.
-- [ ] Remove dependence on top-level batch `zone_progress_delta`.
-- [ ] Derive batch progression intent from success-only run summaries.
+- [x] Replace battle-native settlement selection with closed-run-native selection.
+- [x] Allocate `closed_run_sequence` at run close for settleable runs only.
+- [x] Ensure zero-value closed runs receive no settlement sequence.
+- [x] Implement oldest-contiguous greedy-fit batch construction over settleable run sequences.
+- [x] Enforce single-season batches.
+- [x] Enforce no run splitting across batches.
+- [x] Generate sealed run summaries from `ClosedZoneRunSummary` records only.
+- [x] Omit terminal losing combats from sealed rewarded summaries.
+- [x] Remove dependence on top-level batch `zone_progress_delta`.
+- [x] Derive batch progression intent from success-only run summaries.
 
 ### 11.8 Phase 7: on-chain account and payload redesign
 
-- [ ] Extend on-chain character creation to include `name` and `class_id` at first sync.
-- [ ] Add on-chain class registry accounts keyed by class id with admin-controlled enablement.
-- [ ] Add on-chain EXP-to-level derivation as program-constant logic.
-- [ ] Version zone metadata accounts by `zone_id + topology_version`.
-- [ ] Version zone enemy-rule accounts by `zone_id + topology_version`.
-- [ ] Extend zone metadata accounts to include:
+- [x] Extend on-chain character creation to include `name` and `class_id` at first sync.
+- [x] Add on-chain class registry accounts keyed by class id with admin-controlled enablement.
+- [x] Add on-chain EXP-to-level derivation as program-constant logic.
+- [x] Version zone metadata accounts by `zone_id + topology_version`.
+- [x] Version zone enemy-rule accounts by `zone_id + topology_version`.
+- [x] Extend zone metadata accounts to include:
   - total subnode count,
   - topology version,
   - topology hash.
-- [ ] Replace/extend zone enemy legality storage from raw archetype ids to rule entries:
+- [x] Replace/extend zone enemy legality storage from raw archetype ids to rule entries:
   - `enemy_archetype_id`,
   - `max_per_run`.
-- [ ] Redesign the settlement payload to add:
+- [x] Redesign the settlement payload to add:
   - `start_run_sequence`,
   - `end_run_sequence`,
   - `run_summaries`.
-- [ ] Remove the old top-level battle aggregate histogram from the canonical run-native payload.
-- [ ] Remove the old top-level zone progress delta from the canonical run-native payload.
-- [ ] Add `max_runs_per_batch` to program policy/config.
-- [ ] Keep a batch-wide total histogram-row cap across all run summaries.
+- [x] Remove the old top-level battle aggregate histogram from the canonical run-native payload.
+- [x] Remove the old top-level zone progress delta from the canonical run-native payload.
+- [x] Add `max_runs_per_batch` to program policy/config.
+- [x] Keep a batch-wide total histogram-row cap across all run summaries.
 
 ### 11.9 Phase 8: on-chain validator rewrite for run-native settlement
 
-- [ ] Update cursor continuity to use run-sequence ranges.
-- [ ] Validate batch-id, run-sequence, state-hash, season, and time continuity.
-- [ ] Validate single-season batches.
-- [ ] Validate batch run-count cap.
-- [ ] Validate batch-wide total histogram-row cap.
-- [ ] For every run summary, validate referenced zone/version accounts.
-- [ ] For every rewarded histogram row, validate archetype legality for the zone/version.
-- [ ] Enforce per-archetype `max_per_run`.
-- [ ] Enforce `rewarded_battle_count == rewarded histogram sum`.
-- [ ] Enforce `rewarded_battle_count <= zone.total_subnode_count`.
-- [ ] Enforce that only successful runs may carry `zone_progress_delta`.
-- [ ] Enforce that incomplete runs carry no zone progression delta.
-- [ ] Derive EXP only from rewarded encounter rows.
-- [ ] Keep throughput validation, counting rewarded combats only.
+- [x] Update cursor continuity to use run-sequence ranges.
+- [x] Validate batch-id, run-sequence, state-hash, season, and time continuity.
+- [x] Validate single-season batches.
+- [x] Validate batch run-count cap.
+- [x] Validate batch-wide total histogram-row cap.
+- [x] For every run summary, validate referenced zone/version accounts.
+- [x] For every rewarded histogram row, validate archetype legality for the zone/version.
+- [x] Enforce per-archetype `max_per_run`.
+- [x] Enforce `rewarded_battle_count == rewarded histogram sum`.
+- [x] Enforce `rewarded_battle_count <= zone.total_subnode_count`.
+- [x] Enforce that only successful runs may carry `zone_progress_delta`.
+- [x] Enforce that incomplete runs carry no zone progression delta.
+- [x] Derive EXP only from rewarded encounter rows.
+- [x] Keep throughput validation, counting rewarded combats only.
 
 ### 11.10 Phase 9: migration of surrounding services and tooling
 
-- [ ] Update settlement preparation/submit services to use run-native payloads.
-- [ ] Update first-sync services to use signer-based one-approval transport.
-- [ ] Update local validators/dry-run validators to match the new payload and account model.
+- [x] Update settlement preparation/submit services to use run-native payloads.
+- [x] Update first-sync services to use signer-based one-approval transport.
+- [x] Update local validators/dry-run validators to match the new payload and account model.
 - [ ] Update admin/bootstrap tooling for versioned zone metadata and enemy-rule accounts.
 - [x] Update read-model builders and dashboards to show active runs and closed-run settlement state.
 - [ ] Update remaining operator docs and runbooks to point to the reconciled zone-run path as canonical gameplay.

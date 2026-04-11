@@ -2,9 +2,20 @@ export type ZoneState = 0 | 1 | 2;
 export type ProgressZoneState = 1 | 2;
 export type SettlementSchemaVersion = 2;
 export type SettlementSignatureScheme = 0 | 1;
+export type RunTerminalStatus =
+  | "COMPLETED"
+  | "FAILED"
+  | "ABANDONED"
+  | "EXPIRED"
+  | "SEASON_CUTOFF";
 
 export interface EncounterCountEntry {
   zoneId: number;
+  enemyArchetypeId: number;
+  count: number;
+}
+
+export interface RunEncounterCountEntry {
   enemyArchetypeId: number;
   count: number;
 }
@@ -14,9 +25,26 @@ export interface ZoneProgressDeltaEntry {
   newState: ProgressZoneState;
 }
 
+export interface SettlementRunSummary {
+  closedRunSequence: number;
+  zoneId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: RunTerminalStatus;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogram: RunEncounterCountEntry[];
+  zoneProgressDelta: ZoneProgressDeltaEntry[];
+  firstRewardedBattleTs: number;
+  lastRewardedBattleTs: number;
+}
+
 export interface SettlementBatchPayloadV2 {
   characterId: string;
   batchId: number;
+  startRunSequence?: number;
+  endRunSequence?: number;
+  runSummaries?: SettlementRunSummary[];
+  // Compatibility mirrors for older retry/sync surfaces.
   startNonce: number;
   endNonce: number;
   battleCount: number;
@@ -43,6 +71,7 @@ export type SettlementEndStateHashPreimageV2 = Omit<
 export interface ProgramConfigState {
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
+  maxRunsPerBatch?: number;
   maxHistogramEntriesPerBatch: number;
   trustedServerSigner: string;
 }
@@ -58,6 +87,8 @@ export interface CharacterRootState {
   characterId: string;
   authority: string;
   characterCreationTs: number;
+  name?: string;
+  classId?: number;
 }
 
 export interface CharacterStatsState {
@@ -81,8 +112,16 @@ export interface CharacterSettlementBatchCursorState {
 
 export interface ZoneRegistryEntry {
   zoneId: number;
+  topologyVersion?: number;
+  topologyHash?: string;
+  totalSubnodeCount?: number;
   expMultiplierNum: number;
   expMultiplierDen: number;
+}
+
+export interface ZoneEnemyRuleEntry {
+  enemyArchetypeId: number;
+  maxPerRun: number;
 }
 
 export interface EnemyArchetypeRegistryEntry {
@@ -102,8 +141,8 @@ export interface SettlementValidationContext {
   cursor: CharacterSettlementBatchCursorState;
   programConfig: ProgramConfigState;
   seasonPolicy: SeasonPolicyState;
-  zoneRegistry: Map<number, ZoneRegistryEntry>;
-  zoneEnemySet: Map<number, Set<number>>;
+  zoneRegistry: Map<string | number, ZoneRegistryEntry>;
+  zoneEnemySet: Map<string | number, ZoneEnemyRuleEntry[] | Set<number>>;
   enemyArchetypes: Map<number, EnemyArchetypeRegistryEntry>;
 }
 

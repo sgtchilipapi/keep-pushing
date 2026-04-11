@@ -68,9 +68,14 @@ function toRequiredChainState(characterId: string, chainState: Awaited<ReturnTyp
 }
 
 function batchDraftToCreateInput(characterId: string, draft: SealedSettlementBatchDraft) {
+  const runSummaries = draft.payload.runSummaries ?? [];
   return {
     characterId,
     batchId: draft.payload.batchId,
+    startRunSequence: draft.payload.startRunSequence,
+    endRunSequence: draft.payload.endRunSequence,
+    runCount: runSummaries.length,
+    runSummaries,
     startNonce: draft.payload.startNonce,
     endNonce: draft.payload.endNonce,
     battleCount: draft.payload.battleCount,
@@ -79,8 +84,14 @@ function batchDraftToCreateInput(characterId: string, draft: SealedSettlementBat
     seasonId: draft.payload.seasonId,
     startStateHash: draft.payload.startStateHash,
     endStateHash: draft.payload.endStateHash,
-    zoneProgressDelta: draft.payload.zoneProgressDelta,
-    encounterHistogram: draft.payload.encounterHistogram,
+    zoneProgressDelta: runSummaries.flatMap((summary) => summary.zoneProgressDelta),
+    encounterHistogram: runSummaries.flatMap((summary) =>
+      summary.rewardedEncounterHistogram.map((entry) => ({
+        zoneId: summary.zoneId,
+        enemyArchetypeId: entry.enemyArchetypeId,
+        count: entry.count,
+      })),
+    ),
     optionalLoadoutRevision: draft.payload.optionalLoadoutRevision ?? null,
     batchHash: draft.payload.batchHash,
     schemaVersion: draft.payload.schemaVersion,
@@ -119,27 +130,29 @@ function buildSequentialBatchDrafts(args: {
     lastCommittedBattleTs: number;
     lastCommittedSeasonId: number;
   };
-  battles: Parameters<typeof sealSettlementBatchDraft>[0]['pendingBattles'];
-  maxBattlesPerBatch: number;
+  runs: Parameters<typeof sealSettlementBatchDraft>[0]['pendingRuns'];
+  maxRunsPerBatch: number;
   maxHistogramEntriesPerBatch: number;
   characterIdHex: string;
 }): SealedSettlementBatchDraft[] {
   const drafts: SealedSettlementBatchDraft[] = [];
   let cursor = args.cursor;
-  let remaining = [...args.battles].sort((left, right) => left.battleNonce! - right.battleNonce!);
+  let remaining = [...(args.runs ?? [])].sort(
+    (left, right) => (left.closedRunSequence ?? Number.MAX_SAFE_INTEGER) - (right.closedRunSequence ?? Number.MAX_SAFE_INTEGER),
+  );
 
   while (remaining.length > 0) {
     const draft = sealSettlementBatchDraft({
       characterIdHex: args.characterIdHex,
       cursor,
-      pendingBattles: remaining,
-      maxBattlesPerBatch: args.maxBattlesPerBatch,
+      pendingRuns: remaining,
+      maxRunsPerBatch: args.maxRunsPerBatch,
       maxHistogramEntriesPerBatch: args.maxHistogramEntriesPerBatch,
     });
-    const sealedBattleIds = new Set(draft.sealedBattleIds);
+    const sealedRunIds = new Set(draft.sealedRunIds ?? []);
 
     drafts.push(draft);
-    remaining = remaining.filter((battle) => !sealedBattleIds.has(battle.id));
+    remaining = remaining.filter((run) => !sealedRunIds.has(run.id));
     cursor = {
       lastCommittedEndNonce: draft.payload.endNonce,
       lastCommittedStateHash: draft.payload.endStateHash,
@@ -167,59 +180,130 @@ async function materializeInitialSettlementBacklog(args: {
   assertCursorSnapshotAvailable(args.characterId, args.chainState);
   const chainState = args.chainState;
 
-  const awaitingBattles = await prisma.battleOutcomeLedger.listAwaitingFirstSyncForCharacter(
-    args.characterId,
-    10_000,
-  );
-  if (awaitingBattles.length === 0) {
-    return false;
-  }
-
   const programConfig = await fetchProgramConfigAccount(
     args.connection,
     deriveProgramConfigPda(args.programId),
     args.commitment,
   );
-  const currentTs = currentUnixTimestamp(args.now);
-  const battlesBySeason = new Map<number, typeof awaitingBattles>();
+  const pendingRuns =
+    (await prisma.closedZoneRunSummary?.listNextSettleableForCharacter?.(
+      args.characterId,
+      10_000,
+    )) ?? [];
+  if (pendingRuns.length === 0) {
+    const awaitingBattles = await prisma.battleOutcomeLedger.listAwaitingFirstSyncForCharacter(
+      args.characterId,
+      10_000,
+    );
+    if (awaitingBattles.length === 0) {
+      return false;
+    }
 
-  for (const battle of awaitingBattles) {
-    const existing = battlesBySeason.get(battle.seasonId) ?? [];
-    existing.push(battle);
-    battlesBySeason.set(battle.seasonId, existing);
+    const currentTs = currentUnixTimestamp(args.now);
+    const battlesBySeason = new Map<number, typeof awaitingBattles>();
+    for (const battle of awaitingBattles) {
+      const existing = battlesBySeason.get(battle.seasonId) ?? [];
+      existing.push(battle);
+      battlesBySeason.set(battle.seasonId, existing);
+    }
+
+    const archivedBattleIds: string[] = [];
+    for (const seasonId of battlesBySeason.keys()) {
+      const seasonPolicy = await fetchSeasonPolicyAccount(
+        args.connection,
+        deriveSeasonPolicyPda(seasonId, args.programId),
+        args.commitment,
+      );
+      if (currentTs > Number(seasonPolicy.commitGraceEndTs)) {
+        archivedBattleIds.push(...(battlesBySeason.get(seasonId) ?? []).map((battle) => battle.id));
+      }
+    }
+
+    if (archivedBattleIds.length > 0) {
+      await prisma.battleOutcomeLedger.markArchivedLocalOnly(archivedBattleIds);
+    }
+
+    const remainingBattles = awaitingBattles
+      .filter((battle) => !archivedBattleIds.includes(battle.id))
+      .sort((left, right) => left.localSequence - right.localSequence);
+    assertCondition(
+      remainingBattles.length > 0,
+      'ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES',
+      'all awaiting-first-sync backlog was archived as stale local-only history',
+    );
+
+    const rebasedBattles = await prisma.battleOutcomeLedger.rebaseAwaitingFirstSyncBattleNonces(
+      args.characterId,
+      remainingBattles.map((battle, index) => ({
+        id: battle.id,
+        battleNonce: chainState.lastReconciledEndNonce + index + 1,
+      })),
+    );
+    const drafts = buildSequentialBatchDrafts({
+      cursor: {
+        lastCommittedEndNonce: chainState.lastReconciledEndNonce,
+        lastCommittedStateHash: chainState.lastReconciledStateHash,
+        lastCommittedBatchId: chainState.lastReconciledBatchId,
+        lastCommittedBattleTs: chainState.lastReconciledBattleTs,
+        lastCommittedSeasonId: chainState.lastReconciledSeasonId,
+      },
+      runs: [],
+      maxRunsPerBatch: programConfig.maxRunsPerBatch,
+      maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
+      characterIdHex: chainState.chainCharacterIdHex!,
+    });
+
+    if (drafts.length === 0) {
+      const draft = sealSettlementBatchDraft({
+        characterIdHex: chainState.chainCharacterIdHex!,
+        cursor: {
+          lastCommittedEndNonce: chainState.lastReconciledEndNonce,
+          lastCommittedStateHash: chainState.lastReconciledStateHash,
+          lastCommittedBatchId: chainState.lastReconciledBatchId,
+          lastCommittedBattleTs: chainState.lastReconciledBattleTs,
+          lastCommittedSeasonId: chainState.lastReconciledSeasonId,
+        },
+        pendingBattles: rebasedBattles,
+        maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+        maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
+      });
+      await prisma.settlementBatch.createSealed(batchDraftToCreateInput(args.characterId, draft));
+      return true;
+    }
+    return false;
   }
 
-  const archivedBattleIds: string[] = [];
-  for (const seasonId of battlesBySeason.keys()) {
+  const currentTs = currentUnixTimestamp(args.now);
+  const runsBySeason = new Map<number, typeof pendingRuns>();
+
+  for (const run of pendingRuns) {
+    const existing = runsBySeason.get(run.seasonId) ?? [];
+    existing.push(run);
+    runsBySeason.set(run.seasonId, existing);
+  }
+
+  const archivedSeasonIds: number[] = [];
+  for (const seasonId of runsBySeason.keys()) {
     const seasonPolicy = await fetchSeasonPolicyAccount(
       args.connection,
       deriveSeasonPolicyPda(seasonId, args.programId),
       args.commitment,
     );
     if (currentTs > Number(seasonPolicy.commitGraceEndTs)) {
-      archivedBattleIds.push(...(battlesBySeason.get(seasonId) ?? []).map((battle) => battle.id));
+      archivedSeasonIds.push(seasonId);
     }
   }
 
-  if (archivedBattleIds.length > 0) {
-    await prisma.battleOutcomeLedger.markArchivedLocalOnly(archivedBattleIds);
-  }
-
-  const remainingBattles = awaitingBattles
-    .filter((battle) => !archivedBattleIds.includes(battle.id))
-    .sort((left, right) => left.localSequence - right.localSequence);
+  const remainingRuns = pendingRuns
+    .filter((run) => !archivedSeasonIds.includes(run.seasonId))
+    .sort(
+      (left, right) =>
+        (left.closedRunSequence ?? Number.MAX_SAFE_INTEGER) - (right.closedRunSequence ?? Number.MAX_SAFE_INTEGER),
+    );
   assertCondition(
-    remainingBattles.length > 0,
-    'ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES',
-    'all awaiting-first-sync backlog was archived as stale local-only history',
-  );
-
-  const rebasedBattles = await prisma.battleOutcomeLedger.rebaseAwaitingFirstSyncBattleNonces(
-    args.characterId,
-    remainingBattles.map((battle, index) => ({
-      id: battle.id,
-      battleNonce: chainState.lastReconciledEndNonce + index + 1,
-    })),
+    remainingRuns.length > 0,
+    'ERR_NO_ELIGIBLE_FIRST_SYNC_RUNS',
+    'all pending closed-run backlog was archived as stale local-only history',
   );
   const drafts = buildSequentialBatchDrafts({
     cursor: {
@@ -229,8 +313,8 @@ async function materializeInitialSettlementBacklog(args: {
       lastCommittedBattleTs: chainState.lastReconciledBattleTs,
       lastCommittedSeasonId: chainState.lastReconciledSeasonId,
     },
-    battles: rebasedBattles,
-    maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+    runs: remainingRuns,
+    maxRunsPerBatch: programConfig.maxRunsPerBatch,
     maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
     characterIdHex: chainState.chainCharacterIdHex!,
   });
@@ -353,9 +437,9 @@ export async function loadOrSealNextSettlementBatchForCharacter(
     fetchProgramConfigAccount(connection, deriveProgramConfigPda(programId), commitment),
   ]);
 
-  const pendingBattles = await prisma.battleOutcomeLedger.listNextPendingForCharacter(
+  const pendingRuns = await prisma.closedZoneRunSummary.listNextSettleableForCharacter(
     characterId,
-    Math.max(programConfig.maxBattlesPerBatch * 4, 256),
+    Math.max(programConfig.maxRunsPerBatch * 4, 256),
   );
   const draft = sealSettlementBatchDraft({
     characterIdHex: chainState.chainCharacterIdHex,
@@ -366,8 +450,8 @@ export async function loadOrSealNextSettlementBatchForCharacter(
       lastCommittedBattleTs: Number(liveCursor.lastCommittedBattleTs),
       lastCommittedSeasonId: liveCursor.lastCommittedSeasonId,
     },
-    pendingBattles,
-    maxBattlesPerBatch: programConfig.maxBattlesPerBatch,
+    pendingRuns,
+    maxRunsPerBatch: programConfig.maxRunsPerBatch,
     maxHistogramEntriesPerBatch: programConfig.maxHistogramEntriesPerBatch,
   });
 

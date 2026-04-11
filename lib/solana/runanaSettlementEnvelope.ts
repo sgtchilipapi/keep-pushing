@@ -40,6 +40,7 @@ import {
   referencedEnemyArchetypeIdsFromSettlementPayload,
   referencedZoneIdsFromSettlementPayload,
   referencedZonePageIndicesFromSettlementPayload,
+  referencedZoneVersionPairsFromSettlementPayload,
   RUNANA_INSTRUCTIONS_SYSVAR_PUBKEY,
   RUNANA_PROGRAM_ID,
 } from './runanaProgram';
@@ -68,6 +69,7 @@ export interface SettlementInstructionAccountEnvelope {
   enemyArchetypeRegistries: EnemyArchetypeRegistryAccountState[];
   referencedPageIndices: number[];
   referencedZoneIds: number[];
+  referencedZoneVersionPairs: Array<{ zoneId: number; topologyVersion: number }>;
   referencedEnemyArchetypeIds: number[];
   instructionAccounts: SettlementInstructionAccountRole[];
   remainingAccounts: SettlementInstructionAccountRole[];
@@ -118,6 +120,7 @@ export function buildCanonicalSettlementInstructionAccounts(
   );
 
   const referencedZoneIds = referencedZoneIdsFromSettlementPayload(args.payload);
+  const referencedZoneVersionPairs = referencedZoneVersionPairsFromSettlementPayload(args.payload);
   const referencedEnemyArchetypeIds = referencedEnemyArchetypeIdsFromSettlementPayload(args.payload);
   const [primaryPageIndex, ...additionalPageIndices] = referencedPageIndices;
 
@@ -172,15 +175,15 @@ export function buildCanonicalSettlementInstructionAccounts(
       isSigner: false,
       isWritable: true,
     })),
-    ...referencedZoneIds.map((zoneId) => ({
-      role: `zoneRegistry:${zoneId}`,
-      pubkey: deriveZoneRegistryPda(zoneId, programId),
+    ...referencedZoneVersionPairs.map(({ zoneId, topologyVersion }) => ({
+      role: `zoneRegistry:${zoneId}:${topologyVersion}`,
+      pubkey: deriveZoneRegistryPda(zoneId, topologyVersion, programId),
       isSigner: false,
       isWritable: false,
     })),
-    ...referencedZoneIds.map((zoneId) => ({
-      role: `zoneEnemySet:${zoneId}`,
-      pubkey: deriveZoneEnemySetPda(zoneId, programId),
+    ...referencedZoneVersionPairs.map(({ zoneId, topologyVersion }) => ({
+      role: `zoneEnemySet:${zoneId}:${topologyVersion}`,
+      pubkey: deriveZoneEnemySetPda(zoneId, topologyVersion, programId),
       isSigner: false,
       isWritable: false,
     })),
@@ -223,6 +226,7 @@ export async function loadSettlementInstructionAccountEnvelope(
   );
 
   const referencedZoneIds = referencedZoneIdsFromSettlementPayload(payload);
+  const referencedZoneVersionPairs = referencedZoneVersionPairsFromSettlementPayload(payload);
   const referencedEnemyArchetypeIds = referencedEnemyArchetypeIdsFromSettlementPayload(payload);
   const additionalPageIndices = referencedPageIndices.slice(1);
   const primaryPageIndex = referencedPageIndices[0];
@@ -241,8 +245,12 @@ export async function loadSettlementInstructionAccountEnvelope(
   const additionalPagePubkeys = additionalPageIndices.map((pageIndex) =>
     deriveCharacterZoneProgressPagePda(characterRootPubkey, pageIndex, programId),
   );
-  const zoneRegistryPubkeys = referencedZoneIds.map((zoneId) => deriveZoneRegistryPda(zoneId, programId));
-  const zoneEnemySetPubkeys = referencedZoneIds.map((zoneId) => deriveZoneEnemySetPda(zoneId, programId));
+  const zoneRegistryPubkeys = referencedZoneVersionPairs.map(({ zoneId, topologyVersion }) =>
+    deriveZoneRegistryPda(zoneId, topologyVersion, programId),
+  );
+  const zoneEnemySetPubkeys = referencedZoneVersionPairs.map(({ zoneId, topologyVersion }) =>
+    deriveZoneEnemySetPda(zoneId, topologyVersion, programId),
+  );
   const enemyArchetypePubkeys = referencedEnemyArchetypeIds.map((enemyArchetypeId) =>
     deriveEnemyArchetypeRegistryPda(enemyArchetypeId, programId),
   );
@@ -466,6 +474,7 @@ export async function loadSettlementInstructionAccountEnvelope(
     enemyArchetypeRegistries,
     referencedPageIndices,
     referencedZoneIds,
+    referencedZoneVersionPairs,
     referencedEnemyArchetypeIds,
     instructionAccounts,
     remainingAccounts: instructionAccounts.slice(9),
