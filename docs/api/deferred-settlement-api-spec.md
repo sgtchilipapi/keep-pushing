@@ -2,48 +2,155 @@
 
 ## Purpose
 
-This document describes the local-first deferred-settlement flow as a frontend-facing API spec.
-It starts from anonymous user creation, covers local character creation and local battle simulation,
-then walks through atomic first sync and the transition into normal post-sync settlement.
+This document describes the reconciled MVP API surface for:
 
-This spec reflects the current implementation.
+- automatic anonymous account bootstrap
+- wallet linking
+- local-first character creation
+- canonical zone-run execution
+- run-scoped result/share surfaces
+- atomic first sync
+- later deferred settlement
+
+This spec supersedes the older two-phase opaque prepared-transaction flow. The canonical transport direction is now:
+
+- play first, DB persisted first, sync later,
+- server computes runs and settlement data,
+- server attests settlement payloads,
+- player authorizes by signing the Solana transaction itself,
+- client builds or finalizes the transaction locally and submits it,
+- client acknowledges the `txid` back to the backend for reconciliation.
+
+Companion references:
+
+- [SSOT.md](/home/paps/projects/keep-pushing/docs/architecture/SSOT.md)
+- [user-flow-spec-gap-analysis.md](/home/paps/projects/keep-pushing/docs/architecture/user-flow-spec-gap-analysis.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
+## Canonical Lifecycle Summary
+
+1. App first open auto-creates an anonymous server-backed account and session.
+2. Player creates a local-first character immediately with `name` and `classId`.
+3. Player enters canonical `/api/zone-runs/*` gameplay.
+4. Runs close into durable closed-run summaries.
+5. First sync creates the on-chain character and settles the earliest eligible closed-run batch.
+6. Later sync settles one oldest-contiguous eligible closed-run batch per sync tap.
+7. Public share/result pages are layered on top of durable `runId` records.
+
+Important reconciled rules:
+
+- anonymous users are real backend users, not fake local-only placeholders,
+- anon users may have exactly 1 character,
+- wallet-linked users may have up to 3 characters,
+- `name` and `classId` are chosen at local-first creation time,
+- `name` and `classId` are mirrored on-chain during first sync character creation,
+- grace is sync/closure-only for seasonal progression,
+- no run is ever split across two settlement batches.
+
+## Session And Identity Model
+
+### Account Modes
+
+- `anon`
+- `wallet-linked`
+
+### Session Model
+
+- anonymous and wallet-linked users both use the same cookie-backed server session model
+- `POST /api/auth/anon` is the canonical anonymous bootstrap endpoint
+- the client should call it automatically on first open if no valid session exists
+
+### Wallet Linking Model
+
+- wallet linking upgrades the current user account in the normal case
+- if the connected wallet belongs to a different known account, the UI may offer:
+  - continue with wallet account
+  - stay anon
 
 ## Master API Table
 
-| Endpoint | Purpose | Request | Success Response | Key Errors | State Transition |
-| --- | --- | --- | --- | --- | --- |
-| `POST /api/auth/anon` | Create a backend-only user identity for prototype and local-first flows. | Empty JSON body: `{}` | `201` with `{ "userId": string }` | Standard HTTP validation/runtime errors only | No character yet; frontend stores `userId` for later character creation. |
-| `GET /api/character?userId=<userId>` | Load the current frontend read model for a backend user. | Query param `userId` | `200` with `{ "character": null }` or `{ "character": CharacterReadModel }` | `400` when `userId` is missing | Read only. Source of truth for chain status, provisional progress, latest battle, and next settlement batch. |
-| `POST /api/character/create` | Create the local-first backend character. | `{ "userId": string, "name"?: string }` | `201` with core gameplay character payload: ids, name, level, stats, skills | Validation errors, duplicate/ownership errors if applicable | Creates `Character` plus `CharacterProvisionalProgress`; chain status starts at `NOT_STARTED`. |
-| `POST /api/combat/encounter` | Simulate and persist a real encounter for a stored character. | `{ "characterId": string, "zoneId": number }` | `201` with `{ "battleId", "characterId", "zoneId", "enemyArchetypeId", "seed", "battleNonce", "seasonId", "battleTs", "settlementStatus", "battleResult" }` | `ERR_CHARACTER_NOT_FOUND`, `ERR_ZONE_LOCKED`, `ERR_SEASON_NOT_ACTIVE` | Persists `BattleRecord` plus `BattleOutcomeLedger`; status becomes `AWAITING_FIRST_SYNC` for local-first characters or `PENDING` for chain-confirmed characters. |
-| `POST /api/solana/character/first-sync/prepare` | Phase 1 of first sync: derive the first eligible batch and request player authorization. | `{ "characterId": string, "authority": base58, "feePayer"?: base58 }` without player signature | `200` with `{ "phase": "authorize", "payload", "expectedCursor", "permitDomain", "playerAuthorizationMessageBase64" }` | `ERR_NO_FIRST_SYNC_BACKLOG`, `ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES`, `ERR_CHARACTER_ALREADY_CONFIRMED`, `ERR_PLAYER_MUST_PAY` | Character may move into reserved/pending identity state; eligible backlog is selected and sealed for first sync. |
-| `POST /api/solana/character/first-sync/prepare` | Phase 2 of first sync: build the atomic player-signed transaction. | Same request plus `playerAuthorizationSignatureBase64` | `200` with `{ "phase": "sign_transaction", ...authorizeFields, "serverAttestationMessageBase64", "preparedTransaction" }` | Signature validation failures, relay mismatch/build errors | Produces the opaque transaction bundle for `create_character + settlement batch 1`; frontend must sign, not mutate. |
-| `POST /api/solana/character/first-sync/submit` | Broadcast the signed atomic first-sync transaction and reconcile local state. | `{ "prepared": PreparedTransaction, "signedMessageBase64": string, "signedTransactionBase64": string }` | `200` with `{ "characterId", "chainCreationStatus": "CONFIRMED", "transactionSignature", "chainCharacterIdHex", "characterRootPubkey", "firstSettlementBatchId", "remainingSettlementBatchIds", "chainCreatedAt", "cursor" }` | `ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH`, `ERR_SIGNED_*`, on-chain simulation/broadcast failures | Character becomes `SUBMITTED` then `CONFIRMED` on success; first batch becomes `CONFIRMED`; local-first ledger rows become `COMMITTED`. |
-| `POST /api/solana/settlement/prepare` | Prepare a later post-sync settlement batch for an already confirmed character. | `{ "characterId": string, "authority": base58, "feePayer"?: base58, "relayRequestId"?: string }`, optionally with `playerAuthorizationSignatureBase64` on phase 2 | `200` with either authorize-phase or sign-transaction-phase settlement payload | Normal settlement prepare errors, cursor mismatch errors, signature validation errors | Readies the next pending batch after first sync; only valid once the character is chain-enabled. |
-| `POST /api/solana/settlement/submit` | Broadcast a signed post-sync settlement transaction. | `{ "settlementBatchId": string, "prepared": PreparedTransaction, "signedMessageBase64": string, "signedTransactionBase64": string }` | `200` with settlement submission/reconciliation result | Signed payload mismatch, cursor mismatch, on-chain submission failures | Advances an existing `PENDING` or prepared batch to `SUBMITTED` and then `CONFIRMED` after reconciliation. |
+| Endpoint | Purpose | Request | Success Response | Notes |
+| --- | --- | --- | --- | --- |
+| `POST /api/auth/anon` | Auto-bootstrap anonymous server-backed user/session. | `{}` | `201` with account/session summary | Called automatically on first open when no session exists. |
+| `POST /api/auth/wallet/challenge` | Begin wallet link/sign-in flow. | `{ "walletAddress": string }` | `{ "challengeId": string, "message": string, "expiresAt": string }` | One-time challenge with expiry. |
+| `POST /api/auth/wallet/verify` | Verify wallet signature and link/restore session. | `{ "challengeId": string, "walletAddress": string, "signature": string }` | `{ "session": ..., "userSummary": ..., "accountMode": ... }` | Cookie session remains canonical. |
+| `GET /api/classes` | Return enabled class catalog for UI. | none | `{ "classes": [...] }` | Backed by on-chain-enabled class registry plus off-chain display metadata. |
+| `GET /api/seasons/current` | Return current season presentation + timing. | none | `{ "seasonId", "seasonNumber", "seasonName", "seasonStartTs", "seasonEndTs", "commitGraceEndTs", "phase" }` | Server combines chain timing with presentation metadata. |
+| `GET /api/characters` | Return session user's roster. | none | `{ "accountMode", "slotsTotal", "characters": [...] }` | Server owns slot assignment. |
+| `POST /api/characters` | Create local-first playable character immediately. | `{ "name": string, "classId": string, "slotIndex"?: number }` | `201` with character summary/read model | On-chain character does not exist yet. |
+| `GET /api/characters/:characterId` | Character detail/read model. | none | `{ "character", "progression", "season", "sync" }` | Session-scoped. |
+| `GET /api/characters/:characterId/sync` | Per-character sync/read model. | none | `{ "character", "progression", "syncSummary", "pendingBatches" }` | Retry flows anchor here. |
+| `POST /api/zone-runs/start` | Start active run. | `{ "characterId": string, "zoneId": number }` | full active-run snapshot | Canonical gameplay write path. |
+| `GET /api/zone-runs/active?characterId=...` | Resume/reload active run. | query param | full active-run snapshot or `null` | Reload-safe. |
+| `POST /api/zone-runs/choose-branch` | Choose next legal branch at node boundary. | `{ "runId": string, "branchId": string }` | full active-run snapshot | Requires `Idempotency-Key`. |
+| `POST /api/zone-runs/advance` | Consume one subnode and resolve no-combat/combat. | `{ "runId": string }` | full active-run snapshot + optional battle payload | Requires `Idempotency-Key`. |
+| `POST /api/zone-runs/use-skill` | Use out-of-combat pause skill. | `{ "runId": string, "skillId": string }` | full active-run snapshot | Pause-state only. |
+| `POST /api/zone-runs/continue` | Exit post-battle pause. | `{ "runId": string }` | full active-run snapshot | Requires `Idempotency-Key`. |
+| `POST /api/zone-runs/abandon` | Abandon current run. | `{ "runId": string }` | closed-run summary + character summary | Requires `Idempotency-Key`. |
+| `GET /api/runs/:runId` | Read closed run/result page data. | none | `{ "run", "character", "result", "status" }` | Canonical in-app result route. |
+| `POST /api/runs/:runId/share` | Generate share payload and public URL. | none | `{ "shareUrl", "shareText", "status" }` | Share remains valid even if later expired. |
+| `POST /api/solana/character/first-sync/prepare` | Prepare atomic first sync for unsynced character. | `{ "characterId": string, "authority": string }` | structured first-sync contract | No separate player authorization phase. |
+| `POST /api/solana/character/first-sync/ack` | Acknowledge first-sync transaction submission. | `{ "characterId": string, "settlementBatchId": string, "txid": string }` | `{ "settlementBatchId", "attemptId", "status" }` | Client calls immediately after submit. |
+| `POST /api/solana/settlement/prepare` | Prepare next post-sync batch for settled character. | `{ "characterId": string, "authority": string }` | structured settlement contract | One batch per sync tap. |
+| `POST /api/solana/settlement/ack` | Acknowledge post-sync batch transaction submission. | `{ "characterId": string, "settlementBatchId": string, "txid": string }` | `{ "settlementBatchId", "attemptId", "status" }` | Retries target the same unresolved batch. |
 
-### Read Model Shape
+## Canonical Read Models
 
-`CharacterReadModel` in the table above currently includes:
+### Character Summary
 
-- core gameplay fields: `characterId`, `userId`, `name`, `level`, `exp`, `stats`, `activeSkills`, `passiveSkills`, `unlockedSkillIds`, `inventory`
-- `chain`: authority, reserved/on-chain ids, chain creation status, tx signature, creation timestamps, and reconciled cursor
-- `provisionalProgress`: highest unlocked zone, highest cleared zone, and zone-state map
-- `latestBattle`: latest persisted ledger-facing battle summary
-- `nextSettlementBatch`: next unconfirmed batch summary or `null`
+Minimum summary surface:
 
-## Terminology
+- `characterId`
+- `name`
+- `classId`
+- `level`
+- `syncStatus`
 
-| Term | Meaning |
-| --- | --- |
-| `userId` | Backend user identity. Not a wallet address. |
-| `characterId` | Backend character UUID used by gameplay APIs. |
-| `authority` | Player wallet public key in base58. |
-| `chainCharacterIdHex` | Reserved/on-chain character identifier, encoded as 16-byte hex. |
-| `characterRootPubkey` | PDA of the on-chain character root account. |
-| `localSequence` | Monotonic local battle order before or after chain sync. |
-| `battleNonce` | Canonical settlement nonce. For local-first encounter responses this currently mirrors the local sequence until first sync rebases the backlog. |
-| `first sync` | Atomic transaction that creates the on-chain character and submits settlement batch 1 in the same transaction. |
+### Character Read Model
+
+Canonical fields:
+
+- core identity:
+  - `characterId`
+  - `name`
+  - `classId`
+  - `slotIndex`
+- gameplay state:
+  - `level`
+  - `exp`
+  - `stats`
+  - `activeSkills`
+  - `passiveSkills`
+- progression state:
+  - highest unlocked zone
+  - highest cleared zone
+  - active run summary
+- chain state:
+  - authority pubkey
+  - chain creation status
+  - chain character id
+  - character root pubkey
+  - reconciled cursor
+- sync state:
+  - next unresolved batch summary
+  - latest confirmed settlement summary
+
+### Run Read Model
+
+Canonical fields:
+
+- `runId`
+- `characterId`
+- `zoneId`
+- `seasonId`
+- `terminalStatus`
+- `status`:
+  - `Pending`
+  - `Synced`
+  - `Expired`
+- result summary
+- share state
+- public-share eligibility
 
 ## Status Enums
 
@@ -51,39 +158,38 @@ This spec reflects the current implementation.
 
 | Value | Meaning |
 | --- | --- |
-| `NOT_STARTED` | Character exists only in backend storage. |
-| `PENDING` | First-sync identity has been reserved in the DB, but nothing has been broadcast yet. |
-| `SUBMITTED` | Signed on-chain first-sync transaction has been broadcast and is awaiting confirmation. |
-| `CONFIRMED` | Character exists on chain and reconciled cursor state is persisted locally. |
-| `FAILED` | First-sync submission failed and can be retried. |
+| `NOT_STARTED` | Character exists only in backend storage and has never synced on-chain. |
+| `PENDING` | First-sync data is prepared or reserved, but no acknowledged confirmed chain creation exists yet. |
+| `SUBMITTED` | First-sync transaction was submitted and is awaiting reconciliation. |
+| `CONFIRMED` | Character exists on-chain and reconciled cursor state is persisted. |
+| `FAILED` | The latest first-sync attempt failed and may be retried. |
 
-### Battle Ledger Status
-
-| Value | Meaning |
-| --- | --- |
-| `AWAITING_FIRST_SYNC` | Local-first battle is persisted and eligible to be rebased into first sync. |
-| `LOCAL_ONLY_ARCHIVED` | Battle remains local history only and will never be sent on chain. |
-| `PENDING` | Chain-enabled battle is waiting for the normal settlement pipeline. |
-| `SEALED` | Battle has been assigned to a settlement batch. |
-| `COMMITTED` | Settlement was confirmed and applied. |
-
-### Settlement Batch Status
+### Closed Run Settlement Status
 
 | Value | Meaning |
 | --- | --- |
-| `SEALED` | Batch exists and has a fixed payload, but no signed tx has been prepared yet. |
-| `PREPARED` | Backend accepted a prepared transaction for submission. |
-| `SUBMITTED` | Signed tx was broadcast and is awaiting reconciliation. |
-| `CONFIRMED` | Batch confirmed on chain and local state is reconciled. |
-| `FAILED` | Submission failed and may require retry or rebuild. |
+| `PENDING` | Run is closed and eligible for settlement but not yet confirmed. |
+| `SYNCED` | The run's rewarded outcome has been reconciled on-chain. |
+| `EXPIRED` | The run missed grace and remains history only. |
 
-## Endpoints
+### Internal Settlement Batch Status
+
+| Value | Meaning |
+| --- | --- |
+| `SEALED` | Batch exists with stable closed-run membership and payload surface. |
+| `PREPARED` | Backend prepared structured client-build data for the batch. |
+| `SUBMITTED` | Client submitted the transaction and acknowledged the `txid`; reconciliation is pending. |
+| `CONFIRMED` | Batch confirmed on-chain and local state is reconciled. |
+| `FAILED` | Latest attempt failed; same unresolved batch remains retryable. |
+| `EXPIRED` | Batch can no longer settle because grace or season rules were crossed. |
+
+## Endpoint Details
 
 ### `POST /api/auth/anon`
 
-Creates a backend-only anonymous user.
+Creates the anonymous user and establishes the canonical cookie session.
 
-Request body:
+Request:
 
 ```json
 {}
@@ -93,112 +199,113 @@ Success `201`:
 
 ```json
 {
-  "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43"
+  "session": {
+    "accountMode": "anon"
+  },
+  "userSummary": {
+    "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43",
+    "accountMode": "anon",
+    "characterCount": 0
+  }
 }
 ```
 
-### `GET /api/character?userId=<userId>`
+### `POST /api/auth/wallet/challenge`
 
-Returns the current character plus sync/settlement read model.
-
-Query parameters:
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| `userId` | `string` | yes | Backend user id returned by `/api/auth/anon`. |
-
-Success when missing `200`:
+Request:
 
 ```json
 {
-  "character": null
+  "walletAddress": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM"
 }
 ```
 
-Success when present `200`:
+Success `200`:
+
+```json
+{
+  "challengeId": "7b3dc1c3-4cb8-46b4-b39e-1198e15fbc85",
+  "message": "RUNANA|wallet-link|...",
+  "expiresAt": "2026-04-11T12:00:00.000Z"
+}
+```
+
+### `POST /api/auth/wallet/verify`
+
+Request:
+
+```json
+{
+  "challengeId": "7b3dc1c3-4cb8-46b4-b39e-1198e15fbc85",
+  "walletAddress": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM",
+  "signature": "..."
+}
+```
+
+Success `200`:
+
+```json
+{
+  "session": {
+    "accountMode": "wallet-linked"
+  },
+  "userSummary": {
+    "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43",
+    "accountMode": "wallet-linked",
+    "characterCount": 1
+  },
+  "accountMode": "wallet-linked"
+}
+```
+
+### `POST /api/characters`
+
+Creates the immediately playable backend character.
+
+Rules:
+
+- anon users may create exactly 1 character
+- wallet-linked users may create up to 3 characters
+- names must be globally unique at create time
+- names must satisfy `3-16 ASCII alnum/space`
+- classes must resolve to enabled canonical class ids
+- this does not create the on-chain character yet
+
+Request:
+
+```json
+{
+  "name": "Local First Manual",
+  "classId": "soldier",
+  "slotIndex": 0
+}
+```
+
+Success `201`:
 
 ```json
 {
   "character": {
     "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-    "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43",
     "name": "Local First Manual",
+    "classId": "soldier",
+    "slotIndex": 0,
     "level": 1,
-    "exp": 0,
-    "stats": {
-      "hp": 1200,
-      "hpMax": 1200,
-      "atk": 120,
-      "def": 70,
-      "spd": 100,
-      "accuracyBP": 8000,
-      "evadeBP": 1200
-    },
-    "activeSkills": ["1001", "1002"],
-    "passiveSkills": ["2001", "2002"],
-    "unlockedSkillIds": ["1001", "1002"],
-    "inventory": [],
-    "chain": {
-      "playerAuthorityPubkey": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM",
-      "chainCharacterIdHex": "6f3a6c32d673a656a509ca3c586bcba1",
-      "characterRootPubkey": "ArC7LLDz3VrQJa5qFAroeVYhQ9AiQLShzVnGZLSrihoK",
-      "chainCreationStatus": "CONFIRMED",
-      "chainCreationTxSignature": "43NKfpmsUZESAMrMYVVjpKoQyfVcZJ1AQrjUhNz3eKoEq6csoQ48x1WhHWurEFmf5Tys9fiSzZWsW9jTsEEbt7HH",
-      "chainCreatedAt": "2026-04-04T16:21:58.733Z",
-      "chainCreationTs": 1775288608,
-      "chainCreationSeasonId": 1,
-      "cursor": {
-        "lastReconciledEndNonce": 1,
-        "lastReconciledStateHash": "476e7c8b0e5a6b9110bec97a013c2591797efef1c48d7407dee031068f4b8052",
-        "lastReconciledBatchId": 1,
-        "lastReconciledBattleTs": 1775317466,
-        "lastReconciledSeasonId": 1,
-        "lastReconciledAt": "2026-04-04T16:21:58.733Z"
-      }
-    },
-    "provisionalProgress": {
-      "highestUnlockedZoneId": 3,
-      "highestClearedZoneId": 2,
-      "zoneStates": {
-        "1": 2,
-        "2": 2,
-        "3": 1
-      }
-    },
-    "latestBattle": {
-      "battleId": "e01f1ce1-ecbb-4403-b1be-81f0239bd677",
-      "localSequence": 1,
-      "battleNonce": 1,
-      "battleTs": 1775317466,
-      "seasonId": 1,
-      "zoneId": 1,
-      "enemyArchetypeId": 104,
-      "settlementStatus": "COMMITTED",
-      "sealedBatchId": "1760fdde-96f7-40b8-8eb5-7f540bedf6c2",
-      "committedAt": "2026-04-04T16:21:58.733Z"
-    },
-    "nextSettlementBatch": null
+    "syncStatus": "NOT_STARTED"
   }
 }
 ```
 
-### `POST /api/character/create`
+### `POST /api/zone-runs/start`
 
-Creates the local-first backend character.
+Starts the canonical zone-run execution session.
 
-Request body:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `userId` | `string` | yes | Backend user id. |
-| `name` | `string` | no | Character display name. Defaults to `Rookie`. |
-
-Example request:
+Request:
 
 ```json
 {
-  "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43",
-  "name": "Local First Manual"
+  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
+  "zoneId": 1
 }
 ```
 
@@ -206,349 +313,251 @@ Success `201`:
 
 ```json
 {
-  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "userId": "18f08d21-4b0b-4f65-b53a-86f0f0479e43",
-  "name": "Local First Manual",
-  "level": 1,
-  "stats": {
-    "hp": 1200,
-    "hpMax": 1200,
-    "atk": 120,
-    "def": 70,
-    "spd": 100,
-    "accuracyBP": 8000,
-    "evadeBP": 1200
+  "runId": "f7e08c58-c1ef-4f72-8042-7ca0724f8d8d",
+  "snapshot": {
+    "runId": "f7e08c58-c1ef-4f72-8042-7ca0724f8d8d",
+    "zoneId": 1,
+    "seasonId": 1,
+    "nodeId": "start",
+    "subnodeId": "s1",
+    "postBattlePause": false
+  }
+}
+```
+
+### `GET /api/runs/:runId`
+
+Returns the canonical in-app run result/read model after closure.
+
+Success `200`:
+
+```json
+{
+  "run": {
+    "runId": "f7e08c58-c1ef-4f72-8042-7ca0724f8d8d",
+    "zoneId": 1,
+    "terminalStatus": "SUCCESS",
+    "status": "Pending"
   },
-  "activeSkills": ["1001", "1002"],
-  "passiveSkills": ["2001", "2002"],
-  "unlockedSkillIds": ["1001", "1002"]
-}
-```
-
-Backend side effects:
-
-- creates `Character`
-- creates `CharacterProvisionalProgress`
-- leaves chain state at `NOT_STARTED`
-
-### `POST /api/combat/encounter`
-
-Runs a persisted encounter against a zone enemy.
-
-Request body:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `characterId` | `string` | yes | Backend character UUID. |
-| `zoneId` | `number` | yes | Requested zone. |
-
-Important:
-
-- the client no longer provides a seed
-- the backend generates the seed internally
-- the generated seed is returned in the response for replay/debug use
-
-Example request:
-
-```json
-{
-  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "zoneId": 1
-}
-```
-
-Success `201`:
-
-```json
-{
-  "battleId": "e01f1ce1-ecbb-4403-b1be-81f0239bd677",
-  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "zoneId": 1,
-  "enemyArchetypeId": 104,
-  "seed": 77,
-  "battleNonce": 1,
-  "seasonId": 1,
-  "battleTs": 1775317466,
-  "settlementStatus": "AWAITING_FIRST_SYNC",
-  "battleResult": {
-    "battleId": "e01f1ce1-ecbb-4403-b1be-81f0239bd677",
-    "seed": 77,
-    "playerInitial": {
-      "entityId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-      "side": "PLAYER",
-      "name": "Local First Manual",
-      "hp": 1200,
-      "hpMax": 1200,
-      "atk": 120,
-      "def": 70,
-      "spd": 100,
-      "accuracyBP": 8000,
-      "evadeBP": 1200,
-      "activeSkillIds": ["1001", "1002"],
-      "passiveSkillIds": ["2001", "2002"]
-    },
-    "enemyInitial": {
-      "entityId": "104",
-      "side": "ENEMY",
-      "name": "Nano Leech",
-      "hp": 860,
-      "hpMax": 860,
-      "atk": 102,
-      "def": 54,
-      "spd": 138,
-      "accuracyBP": 8750,
-      "evadeBP": 1825,
-      "activeSkillIds": ["1003", "1005"],
-      "passiveSkillIds": ["2001", "2002"]
-    },
-    "events": [],
-    "winnerEntityId": "104",
-    "roundsPlayed": 7
+  "character": {
+    "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
+    "name": "Local First Manual",
+    "classId": "soldier",
+    "level": 1
+  },
+  "result": {
+    "rewardedBattleCount": 2,
+    "shareReady": true
   }
 }
 ```
 
-Response fields:
+### `POST /api/runs/:runId/share`
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `battleId` | `string` | Battle replay id. |
-| `enemyArchetypeId` | `number` | Canonical enemy definition id. |
-| `seed` | `number` | Generated server-side RNG seed for deterministic replay. |
-| `battleNonce` | `number` | Current battle order identifier. In local-first flow this initially mirrors local sequence until rebasing. |
-| `settlementStatus` | `PENDING \| AWAITING_FIRST_SYNC` | Whether the battle is ready for normal settlement or deferred first sync. |
-| `battleResult` | `BattleResult` | Full deterministic replay payload. |
+Generates canonical share payload and public share URL.
 
-Local-first behavior:
-
-- writes replay/history into `BattleRecord`
-- writes settlement-facing row into `BattleOutcomeLedger`
-- updates provisional world progress
-- returns `settlementStatus = "AWAITING_FIRST_SYNC"`
-
-Confirmed-character behavior:
-
-- validates unlocked zone against on-chain world progress
-- allocates the canonical next nonce
-- returns `settlementStatus = "PENDING"`
-
-## Deferred Settlement Narrative
-
-### Step 1: User Exists, Character Does Not
-
-The player first gets a backend `userId` from `POST /api/auth/anon`.
-The frontend can then call `GET /api/character?userId=<userId>` to see whether a character already exists.
-
-### Step 2: Create the Local Character
-
-The frontend calls `POST /api/character/create`.
-This creates a playable backend character immediately, with starter stats, starter skills, and provisional zone progress.
-No on-chain character exists yet.
-
-At this point:
-
-- `chain.chainCreationStatus = NOT_STARTED`
-- `provisionalProgress` exists
-- `latestBattle = null`
-- `nextSettlementBatch = null`
-
-### Step 3: Play Local Battles Immediately
-
-The frontend calls `POST /api/combat/encounter` with `characterId` and `zoneId`.
-The backend generates the seed internally, selects a zone enemy deterministically from that seed, simulates the fight, persists the replay, and persists the ledger row.
-
-For local-first battles:
-
-- `latestBattle.settlementStatus = AWAITING_FIRST_SYNC`
-- `nextSettlementBatch` is still `null` until the first-sync preparation path seals a batch
-
-The frontend should treat these battles as real, persisted history, even though they are not on chain yet.
-
-### Step 4: Prepare First Sync, Authorize Phase
-
-When the player chooses to sync, the frontend calls:
+Success `200`:
 
 ```json
-POST /api/solana/character/first-sync/prepare
 {
-  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "authority": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM",
-  "feePayer": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM"
+  "shareUrl": "https://example.com/runs/f7e08c58-c1ef-4f72-8042-7ca0724f8d8d",
+  "shareText": "Local First Manual cleared Zone 1",
+  "status": "Pending"
 }
 ```
 
-The backend does all of the following:
+### `POST /api/solana/character/first-sync/prepare`
 
-- loads the earliest relevant local battle
-- derives `characterCreationTs` from the local character `createdAt`
-- derives `seasonIdAtCreation`
-- reserves `chainCharacterIdHex`
-- derives `characterRootPubkey`
-- loads all `AWAITING_FIRST_SYNC` backlog
-- archives stale closed-grace battles as `LOCAL_ONLY_ARCHIVED`
-- rebases eligible battles onto canonical nonces starting at `1`
-- computes the genesis cursor and the first settlement payload
+Prepares the atomic first sync for a local-first character.
 
-The response is `phase = "authorize"` and contains:
+Canonical backend work:
 
-- `payload`
-- `expectedCursor`
-- `permitDomain`
-- `playerAuthorizationMessageBase64`
+- verify the character still needs first sync
+- load the oldest-contiguous eligible closed runs
+- derive the first settlement batch
+- reserve or confirm on-chain identity fields
+- build the `create_character` argument surface using backend `name` + `classId`
+- sign the server attestation payload
+- return structured data for the client to build the transaction locally
 
-The frontend must ask the wallet to sign only the returned message bytes.
-
-### Step 5: Prepare First Sync, Sign-Transaction Phase
-
-The frontend sends the player signature back to the same prepare endpoint:
+Request:
 
 ```json
 {
   "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "authority": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM",
-  "feePayer": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM",
-  "playerAuthorizationSignatureBase64": "..."
+  "authority": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM"
 }
 ```
 
-The backend then:
-
-- builds `create_character`
-- builds server attestation ed25519 verification
-- builds player authorization ed25519 verification
-- builds `apply_battle_settlement_batch_v1`
-- assembles a versioned transaction with lookup tables
-- returns `preparedTransaction`
-
-At this point the frontend should treat `preparedTransaction` as opaque.
-Do not edit any relay metadata inside it.
-
-### Step 6: Submit First Sync
-
-The wallet signs `preparedTransaction.serializedTransactionBase64`.
-The frontend then submits:
+Success `200`:
 
 ```json
-POST /api/solana/character/first-sync/submit
-{
-  "prepared": { "...exact preparedTransaction..." },
-  "signedMessageBase64": "...",
-  "signedTransactionBase64": "..."
-}
-```
-
-On success, the backend:
-
-- broadcasts the atomic transaction
-- waits for confirmation
-- fetches the live on-chain character cursor
-- updates the character row to `CONFIRMED`
-- marks the sealed ledger rows as `COMMITTED`
-- marks the first settlement batch as `CONFIRMED`
-
-The response returns:
-
-- `transactionSignature`
-- `chainCharacterIdHex`
-- `characterRootPubkey`
-- `firstSettlementBatchId`
-- `remainingSettlementBatchIds`
-- reconciled `cursor`
-
-### Step 7: Read Model After Successful First Sync
-
-After success, `GET /api/character?userId=<userId>` becomes the main source of truth for the frontend.
-Typical changes:
-
-- `chain.chainCreationStatus` becomes `CONFIRMED`
-- `chain.characterRootPubkey` is populated
-- `chain.cursor` is populated
-- `latestBattle.settlementStatus` becomes `COMMITTED`
-- `nextSettlementBatch` becomes `null` unless additional unconfirmed batches remain
-
-## First Sync Error Model
-
-The most important error families the frontend should handle:
-
-| Endpoint | Error Prefix | Meaning |
-| --- | --- | --- |
-| `GET /api/character` | normal HTTP 400 | missing `userId` query parameter |
-| `POST /api/combat/encounter` | `ERR_CHARACTER_NOT_FOUND` | unknown backend character |
-| `POST /api/combat/encounter` | `ERR_ZONE_LOCKED` | zone is not yet available |
-| `POST /api/combat/encounter` | `ERR_SEASON_NOT_ACTIVE` | current configured season cannot accept encounters |
-| `POST /api/solana/character/first-sync/prepare` | `ERR_NO_FIRST_SYNC_BACKLOG` | no deferred local battles exist |
-| `POST /api/solana/character/first-sync/prepare` | `ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES` | backlog exists, but all of it was archived as stale local-only history |
-| `POST /api/solana/character/first-sync/prepare` | `ERR_CHARACTER_ALREADY_CONFIRMED` | first sync is no longer needed |
-| `POST /api/solana/character/first-sync/submit` | `ERR_FIRST_SYNC_BATCH_RELAY_MISMATCH` | prepared transaction and persisted batch no longer agree |
-| `POST /api/solana/character/first-sync/submit` | `ERR_SIGNED_*` | wallet submitted bytes that do not match the prepared transaction |
-
-## Post-Sync Normal Settlement
-
-Once `chain.chainCreationStatus = CONFIRMED`, later battles no longer use deferred settlement.
-
-The encounter flow still begins with:
-
-```json
-POST /api/combat/encounter
 {
   "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
-  "zoneId": 1
+  "settlementBatchId": "1760fdde-96f7-40b8-8eb5-7f540bedf6c2",
+  "phase": "sign_transaction",
+  "chainCharacterIdHex": "6f3a6c32d673a656a509ca3c586bcba1",
+  "characterRootPubkey": "ArC7LLDz3VrQJa5qFAroeVYhQ9AiQLShzVnGZLSrihoK",
+  "createCharacterArgs": {
+    "name": "Local First Manual",
+    "classId": "soldier",
+    "initialUnlockedZoneId": 1
+  },
+  "payload": {
+    "batchId": 1
+  },
+  "serverAttestation": {
+    "messageBase64": "...",
+    "signatureBase64": "...",
+    "signerPubkey": "..."
+  },
+  "accountMetas": {
+    "programAccounts": [],
+    "remainingAccounts": []
+  }
 }
 ```
 
-But now the response has:
+Client behavior:
 
-- `settlementStatus = "PENDING"`
-- canonical progression is enforced against on-chain state
+- build the transaction locally,
+- include the server ed25519 verification pre-instruction,
+- sign once in the wallet,
+- submit directly from the client,
+- call the ack endpoint immediately with the resulting `txid`.
 
-Later settlement uses:
+### `POST /api/solana/character/first-sync/ack`
 
-- `POST /api/solana/settlement/prepare`
-- `POST /api/solana/settlement/submit`
+Request:
 
-That path mirrors the same authorize -> sign_transaction -> submit pattern, but it no longer creates the character.
+```json
+{
+  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
+  "settlementBatchId": "1760fdde-96f7-40b8-8eb5-7f540bedf6c2",
+  "txid": "43NKfpmsUZESAMrMYVVjpKoQyfVcZJ1AQrjUhNz3eKoEq6csoQ48x1WhHWurEFmf5Tys9fiSzZWsW9jTsEEbt7HH"
+}
+```
 
-## Frontend Modeling Guidance
+Success `200`:
 
-Recommended frontend top-level state buckets:
+```json
+{
+  "settlementBatchId": "1760fdde-96f7-40b8-8eb5-7f540bedf6c2",
+  "attemptId": "b5165cc0-d9d8-4b69-b773-8cfb57af6f88",
+  "status": "SUBMITTED"
+}
+```
 
-| Bucket | Source | Notes |
+### `POST /api/solana/settlement/prepare`
+
+Prepares the next post-sync settlement batch for a chain-confirmed character.
+
+Rules:
+
+- exactly one oldest-contiguous eligible batch per sync tap,
+- no run splitting,
+- unresolved failed batch remains the same retry target until resolved or expired.
+
+Request:
+
+```json
+{
+  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
+  "authority": "2JLY94AmCGnZFV3pJJoMwrtaQ4gMGdm7qmK7zMSVuoRM"
+}
+```
+
+Success `200` with work:
+
+```json
+{
+  "settlementBatchId": "6bba6a34-f177-4f92-9448-57d91b5c48c7",
+  "phase": "sign_transaction",
+  "payload": {
+    "batchId": 7
+  },
+  "runIds": [
+    "f7e08c58-c1ef-4f72-8042-7ca0724f8d8d"
+  ],
+  "serverAttestation": {
+    "messageBase64": "...",
+    "signatureBase64": "...",
+    "signerPubkey": "..."
+  },
+  "accountMetas": {
+    "programAccounts": [],
+    "remainingAccounts": []
+  }
+}
+```
+
+Success `200` with no work:
+
+```json
+{
+  "settlementBatchId": null,
+  "status": "NOOP",
+  "runIds": []
+}
+```
+
+### `POST /api/solana/settlement/ack`
+
+Request:
+
+```json
+{
+  "characterId": "b05bb2e8-c01d-42b3-8d7e-fc03982a22b8",
+  "settlementBatchId": "6bba6a34-f177-4f92-9448-57d91b5c48c7",
+  "txid": "5T4x..."
+}
+```
+
+Success `200`:
+
+```json
+{
+  "settlementBatchId": "6bba6a34-f177-4f92-9448-57d91b5c48c7",
+  "attemptId": "8e244296-3478-4c0b-9650-9472df2c1d97",
+  "status": "SUBMITTED"
+}
+```
+
+## Error Model
+
+Important error families:
+
+| Endpoint | Error | Meaning |
 | --- | --- | --- |
-| User | `/api/auth/anon` | Holds backend `userId`. |
-| Character | `GET /api/character` | Main page-level read model. |
-| Encounter Result | `/api/combat/encounter` | Immediate battle replay + latest ledger state. |
-| First Sync Prepare | `/api/solana/character/first-sync/prepare` | Two-phase payload. |
-| First Sync Submit | `/api/solana/character/first-sync/submit` | Broadcast result + final reconciled cursor. |
-| Normal Settlement | `/api/solana/settlement/*` | Used only after chain confirmation. |
+| `POST /api/characters` | `ERR_NAME_INVALID` | Name failed format validation. |
+| `POST /api/characters` | `ERR_NAME_TAKEN` | Name already belongs to another character. |
+| `POST /api/characters` | `ERR_CLASS_DISABLED` | Class id is not enabled. |
+| `POST /api/characters` | `ERR_SLOT_UNAVAILABLE` | Requested slot cannot be used in the current account mode. |
+| `POST /api/zone-runs/start` | `ERR_ZONE_LOCKED` | Zone is not available to the character. |
+| `POST /api/zone-runs/start` | `ERR_RUN_ALREADY_ACTIVE` | Character already has an active run. |
+| `POST /api/solana/character/first-sync/prepare` | `ERR_CHARACTER_ALREADY_CONFIRMED` | First sync is not needed anymore. |
+| `POST /api/solana/character/first-sync/prepare` | `ERR_NO_ELIGIBLE_FIRST_SYNC_RUNS` | No closed runs are eligible for first sync. |
+| `POST /api/solana/settlement/prepare` | `ERR_NO_PENDING_SETTLEMENT` | No eligible unresolved settlement batch exists. |
+| `POST /api/solana/*/ack` | `ERR_BATCH_MISMATCH` | The acknowledged tx does not match the unresolved batch state. |
+| `POST /api/solana/*/ack` | `ERR_SIGNED_TX_MISMATCH` | Submitted transaction does not match expected client-build contract. |
 
-Recommended UI decisions:
+## Player-Facing Sync Guidance
 
-- show a `Sync to chain` CTA when:
-  - `chain.chainCreationStatus` is `NOT_STARTED`, `PENDING`, or `FAILED`
-  - and `latestBattle.settlementStatus` is `AWAITING_FIRST_SYNC` or `SEALED`
-- show a `Retry sync` CTA when:
-  - `chain.chainCreationStatus = FAILED`
-  - or `nextSettlementBatch.status = FAILED`
-- show `On-chain ready` when:
-  - `chain.chainCreationStatus = CONFIRMED`
+- normal season:
+  - gameplay and sharing remain emotionally primary,
+  - sync remains a dedicated per-character surface,
+  - one sync action attempts one batch.
+- grace period:
+  - no new season gameplay should count,
+  - at-risk unsynced progress must surface clearly,
+  - expired runs remain viewable and shareable but cannot settle.
 
-## Future Work
+## Notes For Implementation
 
-### SSO Identity And Session-Bound Character Ownership
-
-The current implementation still pivots on caller-supplied `userId` for user-bound reads and writes such as
-`GET /api/character` and `POST /api/character/create`.
-
-Future work should replace that with a proper authenticated user model:
-
-- add SSO-backed identity creation and account linking
-- issue and verify backend sessions
-- derive the acting backend user from authenticated server context instead of request body or query string `userId`
-- bind character creation and character reads to that authenticated user
-- keep anonymous bootstrap only if it can later upgrade safely into a linked SSO account
-
-This should be treated as a distinct deliverable:
-
-- `SSO identity + session auth + user-bound character APIs`
-
-That work is separate from deferred settlement itself, but it is the right follow-up if the frontend is moving from prototype flows toward production account ownership.
+- the current direct encounter route may remain only as a non-canonical sandbox/testing path,
+- canonical gameplay and canonical settlement generation must come from closed zone runs,
+- internal backend statuses may remain richer than player-facing labels,
+- player-facing statuses should continue to map to:
+  - `Pending`
+  - `Synced`
+  - `Expired`

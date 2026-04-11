@@ -1,5 +1,17 @@
 # Frontend Battle And Sync UX Spec
 
+Status:
+
+- historical frontend plan for the pre-reconciliation battle/sync contract
+- useful for implementation history and UI context
+- not the authoritative MVP contract anymore
+
+Canonical current references:
+
+- [user-flow-spec-gap-analysis.md](/home/paps/projects/keep-pushing/docs/architecture/user-flow-spec-gap-analysis.md)
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 ## Purpose
 
 This document defines the frontend product shape for the current local-first battle flow.

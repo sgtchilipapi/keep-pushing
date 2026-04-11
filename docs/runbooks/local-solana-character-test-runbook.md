@@ -2,6 +2,11 @@
 
 Status: Reproducible local runbook for Dockerized `keep-pushing` plus host-run Solana validator, real character creation, real encounter execution, and settlement submission.
 
+Reconciliation note:
+
+- this runbook documents the current local/manual harness and current battle-native implementation path
+- it is not the canonical reconciled MVP API/product contract
+
 This document captures the working manual test environment that was validated against:
 - real Postgres
 - real `keep-pushing` backend

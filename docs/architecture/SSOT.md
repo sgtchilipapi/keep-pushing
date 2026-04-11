@@ -67,6 +67,8 @@ For Solana settlement in MVP, trust boundaries are explicitly split:
 - The **on-chain program enforces bounded legality/economic constraints**.
 - For **player-owned on-chain actions**, the **player wallet** is the canonical transaction fee payer and transaction signer.
 - The server may prepare and broadcast player-signed transactions, but **broadcast origin is not an on-chain validity condition**.
+- For reconciled MVP UX, wallet-required Solana flows should prefer a **single-approval player experience** where the player authorizes by signing the transaction itself, not by signing a separate settlement-permit message.
+- For reconciled MVP UX, settlement should prefer **client-built or client-finalized, client-submitted transactions** where feasible, while preserving server authority over simulation and attestation.
 
 Security objective:
 
@@ -87,6 +89,13 @@ Explicit non-goal for MVP:
 Canonical implementation details for this trust model are defined in:
 
 - `/docs/architecture/solana/solana-battle-outcome-validation-mvp-unified-plan.md`
+- `/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md`
+- `/docs/api/deferred-settlement-api-spec.md`
+
+Product-facing reconciled companion docs are:
+
+- `/docs/architecture/user-flow-spec-gap-analysis.md`
+- `/docs/architecture/reconciliation-inconsistencies.md`
 
 ---
 
@@ -119,6 +128,20 @@ Player-facing lifecycle rule:
 Security caveat (must remain explicit):
 
 - Without independent external timestamp anchoring, anti-predating is mitigation-bound and not absolute proof of historical truth.
+
+## 2.3.2 Reconciled MVP Lifecycle Summary
+
+The reconciled MVP lifecycle is:
+
+- players enter through an automatically created anonymous server-backed account,
+- gameplay is **play first, DB persisted first, sync later**,
+- the canonical gameplay loop is **zone-run based**, not direct one-request-one-battle gameplay,
+- the first on-chain sync creates the on-chain character and settles the earliest eligible closed-run batch,
+- later settlement continues from closed-run-native batches,
+- on-chain settlement remains server-attested,
+- player authorization for settlement should come from the **real transaction signer** rather than a separate player permit message,
+- public run-result sharing is a product-layer concern layered on top of the canonical run record model,
+- after `season_end_ts`, the grace window is for **syncing or closing already-earned progress**, not for continuing normal season gameplay.
 
 ## 2.4 Vertical Slice Development
 

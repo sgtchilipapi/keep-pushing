@@ -2,6 +2,11 @@
 
 Status: Reusable local runbook for starting the full `keep-pushing` app stack needed by the current frontend dashboard at `/`.
 
+Reconciliation note:
+
+- this runbook describes the current dashboard/testing flow
+- canonical MVP product and API behavior now lives in the architecture/API docs, not this runbook
+
 ## Summary
 
 Quickest fresh start:

@@ -2,6 +2,17 @@
 
 Status: Locked implementation plan for backend integration against the current `runana-program` codebase.
 
+Reconciliation note:
+
+- this document remains useful for the current battle-native implementation
+- it is not the authoritative target contract for the reconciled MVP direction
+
+Canonical current references:
+
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [user-flow-spec-gap-analysis.md](/home/paps/projects/keep-pushing/docs/architecture/user-flow-spec-gap-analysis.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 Current-program-over-doc precedence:
 - If future-facing docs disagree with the implemented Anchor program, backend integration follows the current program interface first and records the mismatch explicitly.
 - This document is the concrete execution plan derived from repo inspection. It does not replace [backend-spec-plan.md](/home/paps/projects/keep-pushing/docs/plans/backend/backend-spec-plan.md), which remains the original implementation brief.

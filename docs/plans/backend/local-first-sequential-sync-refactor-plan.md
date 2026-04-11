@@ -1,5 +1,15 @@
 # Local-First Sequential Sync Refactor Plan
 
+Status:
+
+- exploratory historical refactor plan
+- not the authoritative reconciled MVP contract
+
+Canonical current references:
+
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 ## Summary
 
 Refactor sync back to the intended local-first model:

@@ -1,5 +1,15 @@
 # Split First-Sync Redesign Without Program Changes
 
+Status:
+
+- historical alternative considered to reduce Phantom warnings without changing the current program
+- superseded by the reconciled one-approval signer-based transport direction
+
+Canonical current references:
+
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 ## Summary
 
 Redesign first sync into two sequential transactions without changing `runana-program`:

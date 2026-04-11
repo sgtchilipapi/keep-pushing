@@ -1,5 +1,15 @@
 # Phantom-Only Wallet Integration Plan
 
+Status:
+
+- historical wallet-integration plan for the older two-phase prepare/sign/submit flow
+- not the authoritative MVP transport contract anymore
+
+Canonical current references:
+
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 ## Summary
 
 Add a minimal Phantom browser-wallet integration to the current dashboard so the app can replace the manual signing flow for:

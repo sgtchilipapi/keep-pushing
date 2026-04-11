@@ -1,5 +1,16 @@
 # Backend Battle Plan: Local-First Combat With Atomic First Sync
 
+Status note:
+
+- implemented historical plan for the earlier atomic first-sync path
+- still useful as implementation history
+- not the authoritative reconciled MVP transport contract anymore
+
+Canonical current references:
+
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+- [solana-zone-run-execution-and-settlement-plan.md](/home/paps/projects/keep-pushing/docs/architecture/solana/solana-zone-run-execution-and-settlement-plan.md)
+
 This document defines the Model 2 plan for allowing a character to battle before on-chain creation and then perform a first on-chain sync that creates the character and settles the first backlog batch atomically.
 
 Current-program-over-doc precedence:

@@ -11,6 +11,14 @@ Status:
 - run-native settlement and on-chain validation redesign not implemented yet,
 - intended to become the canonical direction for zone traversal and run-native settlement work.
 
+This document now also contains the unified implementation checklist across:
+
+- product/player-facing UX
+- backend/API work
+- settlement transport rewrite
+- on-chain redesign
+- migration and test work
+
 Core direction:
 
 - gameplay becomes zone-run based instead of one-request-one-battle,
@@ -18,6 +26,32 @@ Core direction:
 - on-chain validation remains bounded-legality and reward-bound focused,
 - settlement continuity becomes run-native instead of battle-native,
 - batches contain whole closed runs and never split a run.
+
+Authoritative companion docs:
+
+- [SSOT.md](/home/paps/projects/keep-pushing/docs/architecture/SSOT.md)
+- [user-flow-spec-gap-analysis.md](/home/paps/projects/keep-pushing/docs/architecture/user-flow-spec-gap-analysis.md)
+- [reconciliation-inconsistencies.md](/home/paps/projects/keep-pushing/docs/architecture/reconciliation-inconsistencies.md)
+- [deferred-settlement-api-spec.md](/home/paps/projects/keep-pushing/docs/api/deferred-settlement-api-spec.md)
+
+## 1.1) Reconciled MVP decisions
+
+The following reconciliations are locked for the unified MVP plan:
+
+- preserve the **run-native zone-run direction**,
+- preserve the **play first, DB persisted first, sync later** first-sync architecture,
+- treat anonymous users as **real server-backed users** from first open,
+- allow exactly **1 anon character** and up to **3 wallet-linked characters**,
+- keep roster slot ownership **server-side**,
+- choose `name` and `classId` during local-first character creation,
+- mirror `name` and `classId` on-chain when first sync creates the Solana character,
+- keep server attestation for settlement,
+- replace separate player settlement-permit signing with **player transaction-signer authorization**,
+- target **one wallet approval** for first sync and later settlement,
+- prefer **client-built or client-finalized, client-submitted** Solana transactions,
+- use `/api/zone-runs/*` for canonical gameplay execution,
+- allow `/api/runs/:runId` style read/share routes as product-layer result surfaces,
+- treat grace as **sync/closure-only**, not as continued normal season gameplay.
 
 ## 2) Canonical server run model
 
@@ -324,6 +358,17 @@ Canonical gameplay API direction:
 
 Recommended server API family:
 
+- account/session:
+  - `POST /api/auth/anon`
+  - `POST /api/auth/wallet/challenge`
+  - `POST /api/auth/wallet/verify`
+- character/class/season:
+  - `GET /api/classes`
+  - `GET /api/characters`
+  - `POST /api/characters`
+  - `GET /api/characters/:characterId`
+  - `GET /api/characters/:characterId/sync`
+  - `GET /api/seasons/current`
 - `POST /api/zone-runs/start`
 - `GET /api/zone-runs/active`
 - `POST /api/zone-runs/choose-branch`
@@ -331,11 +376,20 @@ Recommended server API family:
 - `POST /api/zone-runs/use-skill`
 - `POST /api/zone-runs/continue`
 - `POST /api/zone-runs/abandon`
+- run result/share:
+  - `GET /api/runs/:runId`
+  - `POST /api/runs/:runId/share`
+- first sync and later settlement:
+  - `POST /api/solana/character/first-sync/prepare`
+  - `POST /api/solana/character/first-sync/ack`
+  - `POST /api/solana/settlement/prepare`
+  - `POST /api/solana/settlement/ack`
 
 Compatibility note:
 
 - the current direct encounter route may remain available for dev/test workflows,
 - production gameplay and settlement generation should migrate to zone-run-backed execution.
+- the old opaque prepared-transaction submit flow is no longer canonical once the reconciled one-approval client-submit flow lands.
 
 ## 10) Required implementation invariants
 
@@ -348,7 +402,10 @@ These invariants must hold before implementation is considered complete:
 - zero-value closed runs never enter settlement continuity,
 - every successful zone clear can be derived from a successful run summary,
 - every reward-bearing settlement batch can be replayed from sealed run summaries plus referenced registries,
-- topology truth remains server-side while chain legality remains bounded and deterministic.
+- topology truth remains server-side while chain legality remains bounded and deterministic,
+- first sync remains atomic from the player's perspective,
+- player wallet approval for first sync and later settlement is one-prompt-target behavior,
+- grace period is settlement/closure-only for seasonal progression semantics.
 
 ## 10.1) Current execution strategy
 
@@ -379,34 +436,62 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 
 Use the checklist in this practical order:
 
-1. Finish the gameplay-core backend contract.
+1. Freeze and publish the reconciled account, session, roster, sync, and first-sync transport contracts.
+
+2. Finish the gameplay-core backend contract.
    This means completing the remaining server-side traversal, closure, progression, and closed-run semantics needed for a stable local gameplay loop.
 
-2. Pull forward the front-end/manual-QA enablers.
+3. Pull forward the front-end/manual-QA enablers.
    This includes any read-model, route-contract, debug-page, dashboard, or operator-doc work needed so a real player can start a run, advance it, branch, pause, continue, abandon, resume, and see the resulting state clearly.
 
-3. Complete gameplay-focused hardening before settlement work.
+4. Complete gameplay-focused hardening before settlement work.
    Add the remaining tests that validate branching runs, no-combat traversal, reroll/cap exhaustion behavior, carryover behavior, continue/pause flow, and successful-run-only progression.
 
-4. Run real manual end-to-end play sessions.
+5. Run real manual end-to-end play sessions.
    Confirm backend behavior, DB persistence, front-end UX, and gameplay pacing together before changing the settlement model further.
 
-5. Only after manual confirmation, resume the settlement path.
+6. Only after manual confirmation, resume the settlement path.
    At that point complete settleable/zero-value closed-run classification, then the run-native sealing pipeline, then the on-chain account/payload redesign, then the validator rewrite.
 
-6. Finish the migration/tooling tail last.
+7. Finish the migration/tooling tail last.
    After the run-native settlement architecture is stable, finish surrounding service migrations, bootstrap/admin tooling, validator tooling, and final performance/hardening checks.
 
 Execution grouping for the existing phases:
 
-- Execute Phases 0 through 5 first as the main gameplay-core track.
+- Execute Phases 0A through 5 first, including Phase 4A, as the main gameplay-core track.
 - Pull forward the gameplay-relevant parts of Phase 9 and Phase 10 as needed to make manual testing possible.
-- Defer Phases 6 through 8 until the core loop has been manually validated in the app.
+- Defer Phases 6A through 8 until the core loop has been manually validated in the app.
 - Finish the remaining Phase 9 and Phase 10 items after the settlement/on-chain model is stable.
+
+### 11.0A Phase 0A: freeze reconciled product and transport contracts
+
+- [x] Freeze the anonymous-server-user + cookie-session model as the canonical entry path.
+- [x] Freeze roster limits and slot authority:
+  - anon users: exactly 1 character,
+  - wallet-linked users: up to 3 characters,
+  - slot placement remains server-owned.
+- [x] Freeze local-first character creation contract:
+  - choose `name` and `classId` immediately,
+  - validate unique name at create time,
+  - persist playable backend character before chain sync.
+- [x] Freeze first-sync character bootstrap contract:
+  - first sync creates the on-chain character,
+  - first sync mirrors `name` and `classId` on-chain.
+- [x] Freeze settlement transport contract:
+  - server attestation stays,
+  - player auth becomes real transaction signer,
+  - separate player settlement-permit message is removed,
+  - first sync and later settlement target one wallet approval.
+- [x] Freeze grace-period semantics as sync/closure-only for seasonal progression.
+- [x] Freeze `/api/zone-runs/*` as the canonical gameplay write surface and `/api/runs/:runId` as the canonical result/share read surface.
+- [x] Publish the reconciled companion docs in `keep-pushing`:
+  - `/docs/architecture/user-flow-spec-gap-analysis.md`
+  - `/docs/architecture/reconciliation-inconsistencies.md`
+- [x] Mark the zone-run plan checklist as the single authoritative implementation checklist for this workstream.
 
 ### 11.1 Phase 0: freeze contracts and content model
 
-- [ ] Confirm this document as the implementation source of truth for the zone-run workstream.
+- [x] Confirm this document as the implementation source of truth for the zone-run workstream.
 - [x] Define canonical topology authoring types for:
   - zone topology version,
   - node ids,
@@ -441,6 +526,13 @@ Execution grouping for the existing phases:
   - branch point state,
   - post-battle pause state,
   - carryover combat snapshot.
+- [ ] Persist backend character identity fields needed before first sync:
+  - `name`,
+  - `class_id`,
+  - slot assignment,
+  - chain bootstrap readiness state.
+- [ ] Persist durable settlement batch records and settlement attempt records for first sync and later settlement retries.
+- [ ] Persist unique-name reservation records with expiry/revalidation lifecycle.
 - [x] Persist closure state on `ClosedZoneRunSummary`:
   - terminal status,
   - settleable flag,
@@ -478,6 +570,9 @@ Execution grouping for the existing phases:
 
 ### 11.5 Phase 4: dedicated API surface and read models
 
+- [ ] Add automatic anon bootstrap and wallet-link auth endpoints.
+- [ ] Add session-backed character roster/read APIs.
+- [ ] Add class catalog and season summary APIs.
 - [x] Add `POST /api/zone-runs/start`.
 - [x] Add `GET /api/zone-runs/active`.
 - [x] Add `POST /api/zone-runs/choose-branch`.
@@ -488,7 +583,49 @@ Execution grouping for the existing phases:
 - [x] Make every mutating action idempotent.
 - [x] Make every mutating action return the full updated active-run snapshot.
 - [x] Add a lightweight active-run summary to the character read model.
+- [ ] Add durable run-result read models keyed by `runId`.
+- [ ] Add public-by-link share/result pages and per-character sync read models.
 - [x] Keep the legacy direct encounter route available as non-canonical sandbox behavior.
+
+### 11.5A Phase 4A: player-facing product surfaces
+
+- [ ] Build the reconciled landing/onboarding experience:
+  - silent anon bootstrap,
+  - `Try the Game` primary CTA,
+  - wallet connect secondary in header/settings,
+  - disabled `coming soon` auth options only.
+- [ ] Build the reconciled roster surface:
+  - anon single-slot behavior,
+  - wallet-linked three-slot behavior,
+  - compact sync/grace risk indicators.
+- [ ] Build the reconciled character creation page:
+  - class-card selection,
+  - name validation,
+  - unique-name failure states,
+  - redirect to character page on success.
+- [ ] Build the reconciled character page:
+  - identity and progression first,
+  - season summary,
+  - sync summary,
+  - `Start Run` strategic CTA.
+- [ ] Build the run setup page:
+  - unlocked-zone selection,
+  - locked-zone teaser cards,
+  - season number/name display,
+  - countdown to season end or grace end.
+- [ ] Build the active run player surface around the canonical zone-run APIs:
+  - local previous/current/immediate-next map window only,
+  - reload/resume handling,
+  - post-battle pause controls.
+- [ ] Build the run result and share surfaces:
+  - runId-based result page,
+  - public-by-link share page,
+  - clear `Pending` / `Synced` / `Expired` status copy.
+- [ ] Build the dedicated per-character sync page:
+  - progression first,
+  - sync state second,
+  - oldest unresolved batch as primary retry target.
+- [ ] Build grace-period urgency states across roster, character page, result page, and sync page.
 
 ### 11.6 Phase 5: progression and closure semantics
 
@@ -500,6 +637,17 @@ Execution grouping for the existing phases:
   - at least one reward-eligible win, or
   - a success-only zone progress delta.
 - [ ] Ensure zero-value closed runs remain history/audit only and do not enter settlement continuity.
+
+### 11.6A Phase 6A: first-sync and settlement transport rewrite
+
+- [ ] Preserve the play-first, sync-later first-sync architecture while rewriting the wallet UX.
+- [ ] Replace the separate player settlement-permit flow with player transaction-signer authorization.
+- [ ] Change first-sync prepare to return structured client-build data instead of an opaque prepared transaction.
+- [ ] Change later settlement prepare to return structured client-build data instead of an opaque prepared transaction.
+- [ ] Replace first-sync submit with first-sync acknowledgement and reconciliation.
+- [ ] Replace later settlement submit with settlement acknowledgement and reconciliation.
+- [ ] Keep one sync tap equal to one oldest-contiguous eligible batch.
+- [ ] Ensure failed unresolved batches retry as the same batch identity.
 
 ### 11.7 Phase 6: run-native sealing pipeline
 
@@ -516,6 +664,9 @@ Execution grouping for the existing phases:
 
 ### 11.8 Phase 7: on-chain account and payload redesign
 
+- [ ] Extend on-chain character creation to include `name` and `class_id` at first sync.
+- [ ] Add on-chain class registry accounts keyed by class id with admin-controlled enablement.
+- [ ] Add on-chain EXP-to-level derivation as program-constant logic.
 - [ ] Version zone metadata accounts by `zone_id + topology_version`.
 - [ ] Version zone enemy-rule accounts by `zone_id + topology_version`.
 - [ ] Extend zone metadata accounts to include:
@@ -554,13 +705,18 @@ Execution grouping for the existing phases:
 ### 11.10 Phase 9: migration of surrounding services and tooling
 
 - [ ] Update settlement preparation/submit services to use run-native payloads.
+- [ ] Update first-sync services to use signer-based one-approval transport.
 - [ ] Update local validators/dry-run validators to match the new payload and account model.
 - [ ] Update admin/bootstrap tooling for versioned zone metadata and enemy-rule accounts.
 - [x] Update read-model builders and dashboards to show active runs and closed-run settlement state.
-- [ ] Update API docs and operator docs to point to the zone-run path as canonical gameplay.
+- [ ] Update remaining operator docs and runbooks to point to the reconciled zone-run path as canonical gameplay.
+- [x] Move runana planning docs into `keep-pushing` and keep only one authoritative documentation root.
+- [x] Mark older conflicting frontend/backend plans as non-authoritative where they still document pre-reconciliation flows.
 
 ### 11.11 Phase 10: test matrix and hardening
 
+- [ ] Add tests for anon bootstrap, wallet-link upgrade, and roster slot semantics.
+- [ ] Add tests for local-first character creation with `name` + `classId`.
 - [ ] Add tests for successful branching runs with merges.
 - [ ] Add tests for no-combat subnode traversal.
 - [ ] Add tests for cap exhaustion reroll and empty-filtered-pool traversal fallback.
@@ -574,4 +730,5 @@ Execution grouping for the existing phases:
 - [ ] Add tests for illegal zone/version references and illegal archetype caps.
 - [ ] Add tests for successful-run-only zone progression.
 - [ ] Add tests for throughput counting rewarded combats only.
+- [ ] Add tests for first-sync and later settlement one-wallet-approval transport expectations.
 - [ ] Benchmark worst-case run-summary batch compute and account envelope size before rollout.
