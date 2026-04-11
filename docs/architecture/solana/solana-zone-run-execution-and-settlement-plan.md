@@ -434,34 +434,101 @@ Follow this checklist in order. Do not start a later group until the earlier gro
 
 ### 11.0 Overview order for execution
 
-Use the checklist in this practical order:
+Assessment:
 
-1. Freeze and publish the reconciled account, session, roster, sync, and first-sync transport contracts.
+- the detailed phase checklist below is still useful for subsystem tracking,
+- but it is no longer the best primary execution order,
+- because one shippable player journey is currently split across persistence, API, frontend, sync, and test phases.
 
-2. Finish the gameplay-core backend contract.
-   This means completing the remaining server-side traversal, closure, progression, and closed-run semantics needed for a stable local gameplay loop.
+So the checklist should be executed in **ordered delivery slices** first, while the phase sections below remain the detailed task inventory.
 
-3. Pull forward the front-end/manual-QA enablers.
-   This includes any read-model, route-contract, debug-page, dashboard, or operator-doc work needed so a real player can start a run, advance it, branch, pause, continue, abandon, resume, and see the resulting state clearly.
+### 11.0B Ordered delivery slices
 
-4. Complete gameplay-focused hardening before settlement work.
-   Add the remaining tests that validate branching runs, no-combat traversal, reroll/cap exhaustion behavior, carryover behavior, continue/pause flow, and successful-run-only progression.
+Execute the detailed checklist below using this slice order:
 
-5. Run real manual end-to-end play sessions.
-   Confirm backend behavior, DB persistence, front-end UX, and gameplay pacing together before changing the settlement model further.
+1. `Slice 0: contract freeze and foundations`
+   Lock the reconciled product/API/transport contracts and finish the remaining content-model/foundation tasks that unblock all later work.
+   Primary source phases:
+   - Phase 0A
+   - Phase 0
+   - the remaining pre-first-sync persistence items in Phase 1
 
-6. Only after manual confirmation, resume the settlement path.
-   At that point complete settleable/zero-value closed-run classification, then the run-native sealing pipeline, then the on-chain account/payload redesign, then the validator rewrite.
+2. `Slice 1: onboarding, roster, and character identity`
+   Deliver the first complete player path from first open through roster, character creation, and character page.
+   This slice should end with a real player being able to:
+   - enter as anon,
+   - see the correct slot model,
+   - create a named/classed character,
+   - land on the character page with season and sync context.
+   Primary source phases:
+   - Phase 1 character identity persistence items
+   - Phase 4 auth/character/class/season APIs
+   - Phase 4A landing, roster, create, and character page work
+   - Phase 10 account/roster/create tests
 
-7. Finish the migration/tooling tail last.
-   After the run-native settlement architecture is stable, finish surrounding service migrations, bootstrap/admin tooling, validator tooling, and final performance/hardening checks.
+3. `Slice 2: run setup, active run, closure, and result/share`
+   Deliver the first complete playable gameplay slice from character page into run setup, active run, closed run, and result/share surfaces.
+   This slice should end with a real player being able to:
+   - start a zone run,
+   - play it through,
+   - close it,
+   - see the result,
+   - generate a share link.
+   Primary source phases:
+   - Phase 2
+   - Phase 3
+   - Phase 4 run/result/share APIs and read models
+   - Phase 4A run setup, active run, and result/share surfaces
+   - Phase 5 progression/closure semantics
+   - gameplay-focused parts of Phase 10
 
-Execution grouping for the existing phases:
+4. `Slice 3: sync visibility and one-tap player sync UX`
+   Deliver the complete player-visible sync loop before the on-chain run-native redesign is fully complete.
+   This slice should end with a real player being able to:
+   - understand pending sync work,
+   - open a dedicated sync page,
+   - prepare a batch,
+   - sign once,
+   - submit,
+   - acknowledge,
+   - retry the same unresolved batch.
+   Primary source phases:
+   - remaining Phase 1 settlement-batch persistence items
+   - Phase 4 sync read models
+   - Phase 4A sync and grace urgency surfaces
+   - Phase 6A transport rewrite
+   - sync-focused parts of Phase 10
 
-- Execute Phases 0A through 5 first, including Phase 4A, as the main gameplay-core track.
-- Pull forward the gameplay-relevant parts of Phase 9 and Phase 10 as needed to make manual testing possible.
-- Defer Phases 6A through 8 until the core loop has been manually validated in the app.
-- Finish the remaining Phase 9 and Phase 10 items after the settlement/on-chain model is stable.
+5. `Slice 4: run-native settlement architecture`
+   After the gameplay loop and player sync UX are manually proven, complete the actual run-native settlement model.
+   This slice should end with:
+   - settleable/zero-value classification,
+   - run-native sealing,
+   - on-chain account and payload redesign,
+   - validator rewrite.
+   Primary source phases:
+   - Phase 5 remaining settlement eligibility items
+   - Phase 6
+   - Phase 7
+   - Phase 8
+   - run-native validation parts of Phase 10
+
+6. `Slice 5: migration, tooling, and final hardening`
+   Finish the operational tail only after the run-native model is stable.
+   This slice should end with:
+   - updated supporting services,
+   - updated runbooks and operator docs,
+   - admin/bootstrap tooling alignment,
+   - performance and batch-envelope confidence.
+   Primary source phases:
+   - Phase 9 remaining items
+   - final hardening and benchmark items in Phase 10
+
+Execution rule:
+
+- use slices as the real shipping order,
+- use phases below as the detailed backlog within each slice,
+- do not begin Slice 4 until Slices 1 through 3 are stable enough for real manual playtesting.
 
 ### 11.0A Phase 0A: freeze reconciled product and transport contracts
 
