@@ -111,6 +111,104 @@ function truncateMiddle(value: string | null | undefined, edge = 8): string {
   return `${value.slice(0, edge)}...${value.slice(-edge)}`;
 }
 
+function nextLevelExpTarget(level: number): number {
+  return Math.max(100, level * 100);
+}
+
+function WalletIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <path
+        d="M4 7.5A2.5 2.5 0 0 1 6.5 5h10A2.5 2.5 0 0 1 19 7.5V8h1a1 1 0 0 1 1 1v6a4 4 0 0 1-4 4H6.5A2.5 2.5 0 0 1 4 16.5z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16 12h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <circle cx="16" cy="12" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SyncIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <path
+        d="M18 8A6.5 6.5 0 0 0 6.5 6.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.5 6.5V10H10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 16A6.5 6.5 0 0 0 17.5 17.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M17.5 17.5V14H14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function InfoIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <circle cx="12" cy="8" r="1.2" fill="currentColor" />
+      <path
+        d="M12 11v5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function HeartIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <path
+        d="M12 20s-7-4.6-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.4-7 10-7 10z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function settlementTone(
   status: string | null | undefined,
 ): "neutral" | "warning" | "success" | "danger" | "info" {
@@ -621,17 +719,21 @@ function WalletToolbar(props: WalletToolbarProps) {
   return (
     <div className={styles.menuWrap}>
       <details className={styles.menu}>
-        <summary className={styles.menuSummary}>
-          <span>Session</span>
-          <StatusBadge
-            label={walletStatusLabel}
-            tone={
-              props.connectionStatus === "connected"
-                ? "success"
-                : walletAvailabilityTone(props.availability)
-            }
-          />
-          {actionLabel ? <StatusBadge label={actionLabel} tone="info" /> : null}
+        <summary
+          className={styles.menuSummary}
+          aria-label={actionLabel ? `${walletStatusLabel}. ${actionLabel}` : walletStatusLabel}
+          title={walletStatusLabel}
+        >
+          <span
+            className={[
+              styles.iconButton,
+              props.connectionStatus === "connected" ? styles.iconButtonActive : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            <WalletIcon className={styles.iconSvg} />
+          </span>
         </summary>
 
         <div className={styles.menuContent}>
@@ -1557,22 +1659,11 @@ function CharacterSyncButton(props: CharacterSyncButtonProps) {
   }
 
   return (
-    <div className={styles.stack}>
-      {stepMessage ? <div className={styles.infoBox}>{stepMessage}</div> : null}
-      {props.walletAvailability === "not_installed" ? (
-        <div className={styles.infoBox}>Install Phantom to use sync.</div>
-      ) : null}
-      {props.walletConnectionStatus !== "connected" ? (
-        <div className={styles.infoBox}>Connect Phantom to use sync.</div>
-      ) : null}
-      {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
-      {error ? <div className={styles.errorBox}>{error}</div> : null}
-      {success ? <div className={styles.successBox}>{success}</div> : null}
-
-      <div className={styles.buttonRow}>
+    <div className={styles.syncControlStack}>
+      <div className={styles.syncControlRow}>
         <button
           type="button"
-          className={`${styles.button} ${styles.buttonPrimary}`}
+          className={`${styles.iconButton} ${styles.iconButtonPrimary}`}
           onClick={() => void handleSync()}
           disabled={
             pending ||
@@ -1580,10 +1671,37 @@ function CharacterSyncButton(props: CharacterSyncButtonProps) {
             !canSync ||
             Boolean(mismatchMessage)
           }
+          aria-label="Sync character to Solana"
+          title="Sync character to Solana"
         >
-          {pending ? "Syncing..." : "Sync"}
+          <SyncIcon className={styles.iconSvg} />
         </button>
+
+        <details className={styles.inlinePopover}>
+          <summary
+            className={styles.iconButton}
+            aria-label="What sync does"
+            title="What sync does"
+          >
+            <InfoIcon className={styles.iconSvg} />
+          </summary>
+          <div className={styles.inlinePopoverCard}>
+            Sync writes your local character state to the Solana network so later
+            settlement and progression can reconcile against chain state.
+          </div>
+        </details>
       </div>
+
+      {stepMessage ? <div className={styles.syncFeedback}>{stepMessage}</div> : null}
+      {props.walletAvailability === "not_installed" ? (
+        <div className={styles.syncFeedback}>Install Phantom to use sync.</div>
+      ) : null}
+      {props.walletConnectionStatus !== "connected" ? (
+        <div className={styles.syncFeedback}>Connect Phantom to use sync.</div>
+      ) : null}
+      {mismatchMessage ? <div className={styles.syncFeedbackError}>{mismatchMessage}</div> : null}
+      {error ? <div className={styles.syncFeedbackError}>{error}</div> : null}
+      {success ? <div className={styles.syncFeedbackSuccess}>{success}</div> : null}
     </div>
   );
 }
@@ -2104,7 +2222,7 @@ export default function GameClient() {
       <main className={styles.page}>
         <div className={styles.shell}>
           <header className={styles.header}>
-            <h1 className={styles.title}>RUNANA</h1>
+            <h1 className={styles.title}>RUNARA</h1>
           </header>
 
           <div className={styles.panelGrid}>
@@ -2190,37 +2308,53 @@ export default function GameClient() {
           <div className={styles.dashboardGrid}>
             <div className={styles.panelGrid}>
               <section className={styles.panel}>
-                <div className={styles.stack}>
-                  <div className={styles.stack}>
-                    <h2 className={styles.panelTitle}>{character.name}</h2>
-                  </div>
-                </div>
-
-                <div className={styles.keyValueGrid}>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Level</span>
-                    <span className={styles.levelValue}>{character.level}</span>
-                  </div>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>Experience</span>
-                    <span className={styles.keyValue}>{character.exp}</span>
-                  </div>
-                  <div className={styles.keyValueItem}>
-                    <span className={styles.keyLabel}>HP</span>
-                    <span className={styles.keyValue}>
-                      {character.stats.hp}/{character.stats.hpMax}
+                <div className={styles.characterSummaryGrid}>
+                  <div className={styles.characterSummaryCell}>
+                    <span className={styles.characterSummaryValue}>
+                      Name: {character.name}
                     </span>
                   </div>
-                </div>
+                  <div className={styles.characterSummaryCell}>
+                    <span className={styles.characterSummaryValue}>
+                      Class: Placeholder
+                    </span>
+                  </div>
+                  <div
+                    className={`${styles.characterSummaryCell} ${styles.characterSummaryActions}`}
+                  >
+                    <CharacterSyncButton
+                      character={character}
+                      walletAvailability={walletAvailability}
+                      walletConnectionStatus={walletConnectionStatus}
+                      walletPublicKey={walletPublicKey}
+                      setWalletActionStatus={setWalletActionStatus}
+                      onRefresh={() => refreshCharacter(character.userId)}
+                    />
+                  </div>
 
-                <CharacterSyncButton
-                  character={character}
-                  walletAvailability={walletAvailability}
-                  walletConnectionStatus={walletConnectionStatus}
-                  walletPublicKey={walletPublicKey}
-                  setWalletActionStatus={setWalletActionStatus}
-                  onRefresh={() => refreshCharacter(character.userId)}
-                />
+                  <div className={styles.characterSummaryCell}>
+                    <span className={styles.characterSummaryValue}>
+                      LVL: {character.level}
+                    </span>
+                  </div>
+                  <div className={styles.characterSummaryCell}>
+                    <span className={styles.characterSummaryValue}>
+                      EXP: {character.exp}/{nextLevelExpTarget(character.level)}
+                    </span>
+                  </div>
+                  <div className={styles.characterSummaryCell} />
+
+                  <div className={styles.characterSummaryCell}>
+                    <span className={styles.characterSummaryMetric}>
+                      <HeartIcon className={styles.inlineMetricIcon} />
+                      <span>
+                        : {character.stats.hp}/{character.stats.hpMax}
+                      </span>
+                    </span>
+                  </div>
+                  <div className={styles.characterSummaryCell} />
+                  <div className={styles.characterSummaryCell} />
+                </div>
               </section>
 
               <ZoneRunPanel
