@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 
 import { allocateNextBattleNonce } from './combat/battleNonce';
+import { normalizeCharacterName } from './characterIdentity';
 import type { ZoneState } from '../types/settlement';
 import type {
   ActiveZoneRunSnapshot,
@@ -32,6 +33,11 @@ const DEFAULT_STARTER_UNLOCKED_ZONE_ID = 1;
 type CharacterCreateInput = {
   userId: string;
   name: string;
+  nameNormalized: string;
+  classId: string;
+  slotIndex: number;
+  chainBootstrapReady: boolean;
+  nameReservationId?: string;
   hp: number;
   hpMax: number;
   atk: number;
@@ -107,6 +113,10 @@ export type CharacterBattleReadyRecord = {
   id: string;
   userId: string;
   name: string;
+  nameNormalized: string;
+  classId: string;
+  slotIndex: number;
+  chainBootstrapReady: boolean;
   createdAt: Date;
   hp: number;
   hpMax: number;
@@ -138,6 +148,34 @@ export type UpdateCharacterChainIdentityInput = {
   chainCreatedAt?: Date | null;
   chainCreationTs?: number | null;
   chainCreationSeasonId?: number | null;
+};
+
+export type CharacterNameReservationStatus =
+  | 'HELD'
+  | 'CONSUMED'
+  | 'RELEASED'
+  | 'EXPIRED';
+
+export type CharacterNameReservationRecord = {
+  id: string;
+  userId: string;
+  characterId: string | null;
+  displayName: string;
+  normalizedName: string;
+  status: CharacterNameReservationStatus;
+  active: boolean;
+  expiresAt: Date;
+  consumedAt: Date | null;
+  releasedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateCharacterNameReservationInput = {
+  userId: string;
+  displayName: string;
+  normalizedName: string;
+  expiresAt: Date;
 };
 
 export type UpdateCharacterCursorSnapshotInput = {
@@ -489,6 +527,21 @@ type CharacterProvisionalProgressRow = {
   updatedAt: Date;
 };
 
+type CharacterNameReservationRow = {
+  id: string;
+  userId: string;
+  characterId: string | null;
+  displayName: string;
+  normalizedName: string;
+  status: CharacterNameReservationStatus;
+  active: boolean;
+  expiresAt: Date;
+  consumedAt: Date | null;
+  releasedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 type BattleOutcomeLedgerRow = {
   id: string;
   characterId: string;
@@ -701,6 +754,25 @@ function mapCharacterProvisionalProgress(
     zoneStates: parseCharacterZoneStates(row.zoneStatesJson),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+function mapCharacterNameReservation(
+  row: CharacterNameReservationRow
+): CharacterNameReservationRecord {
+  return {
+    id: row.id,
+    userId: row.userId,
+    characterId: row.characterId,
+    displayName: row.displayName,
+    normalizedName: row.normalizedName,
+    status: row.status,
+    active: row.active,
+    expiresAt: row.expiresAt,
+    consumedAt: row.consumedAt,
+    releasedAt: row.releasedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -999,17 +1071,217 @@ export const prisma = {
       return result.rows[0] ?? null;
     }
   },
+  characterNameReservation: {
+    async createHold(input: CreateCharacterNameReservationInput) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query<CharacterNameReservationRow>(
+          `UPDATE "CharacterNameReservation"
+          SET status = 'EXPIRED', active = false, "releasedAt" = $2, "updatedAt" = $2
+          WHERE "normalizedName" = $1 AND active = true AND "expiresAt" <= $2`,
+          [input.normalizedName, new Date()]
+        );
+
+        const existingCharacter = await client.query<{ id: string }>(
+          'SELECT id FROM "Character" WHERE "nameNormalized" = $1 LIMIT 1',
+          [input.normalizedName]
+        );
+        if (existingCharacter.rows[0] !== undefined) {
+          throw new Error('ERR_CHARACTER_NAME_TAKEN: character name is already taken');
+        }
+
+        const existingHold = await client.query<CharacterNameReservationRow>(
+          `SELECT
+            id,
+            "userId",
+            "characterId",
+            "displayName",
+            "normalizedName",
+            status,
+            active,
+            "expiresAt",
+            "consumedAt",
+            "releasedAt",
+            "createdAt",
+            "updatedAt"
+          FROM "CharacterNameReservation"
+          WHERE "normalizedName" = $1 AND active = true
+          LIMIT 1`,
+          [input.normalizedName]
+        );
+
+        if (existingHold.rows[0] !== undefined) {
+          const hold = existingHold.rows[0];
+          if (hold.userId !== input.userId) {
+            throw new Error('ERR_CHARACTER_NAME_TAKEN: character name is already taken');
+          }
+
+          const updated = await client.query<CharacterNameReservationRow>(
+            `UPDATE "CharacterNameReservation"
+            SET
+              "displayName" = $2,
+              "expiresAt" = $3,
+              status = 'HELD',
+              active = true,
+              "releasedAt" = NULL,
+              "updatedAt" = $4
+            WHERE id = $1
+            RETURNING
+              id,
+              "userId",
+              "characterId",
+              "displayName",
+              "normalizedName",
+              status,
+              active,
+              "expiresAt",
+              "consumedAt",
+              "releasedAt",
+              "createdAt",
+              "updatedAt"`,
+            [hold.id, input.displayName, input.expiresAt, new Date()]
+          );
+
+          await client.query('COMMIT');
+          return mapCharacterNameReservation(updated.rows[0]);
+        }
+
+        const inserted = await client.query<CharacterNameReservationRow>(
+          `INSERT INTO "CharacterNameReservation"
+            (
+              id,
+              "userId",
+              "displayName",
+              "normalizedName",
+              "expiresAt",
+              "updatedAt"
+            )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING
+            id,
+            "userId",
+            "characterId",
+            "displayName",
+            "normalizedName",
+            status,
+            active,
+            "expiresAt",
+            "consumedAt",
+            "releasedAt",
+            "createdAt",
+            "updatedAt"`,
+          [
+            createRowId(),
+            input.userId,
+            input.displayName,
+            input.normalizedName,
+            input.expiresAt,
+            new Date(),
+          ]
+        );
+
+        await client.query('COMMIT');
+        return mapCharacterNameReservation(inserted.rows[0]);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: unknown }).code === '23505'
+        ) {
+          throw new Error('ERR_CHARACTER_NAME_TAKEN: character name is already taken');
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async release(id: string, status: Exclude<CharacterNameReservationStatus, 'HELD' | 'CONSUMED'> = 'RELEASED') {
+      const result = await pool.query<CharacterNameReservationRow>(
+        `UPDATE "CharacterNameReservation"
+        SET
+          status = $2,
+          active = false,
+          "releasedAt" = $3,
+          "updatedAt" = $3
+        WHERE id = $1
+        RETURNING
+          id,
+          "userId",
+          "characterId",
+          "displayName",
+          "normalizedName",
+          status,
+          active,
+          "expiresAt",
+          "consumedAt",
+          "releasedAt",
+          "createdAt",
+          "updatedAt"`,
+        [id, status, new Date()]
+      );
+      return result.rows[0] ? mapCharacterNameReservation(result.rows[0]) : null;
+    },
+  },
   character: {
     async create(input: CharacterCreateInput) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        if (input.nameReservationId !== undefined) {
+          const reservation = await client.query<CharacterNameReservationRow>(
+            `SELECT
+              id,
+              "userId",
+              "characterId",
+              "displayName",
+              "normalizedName",
+              status,
+              active,
+              "expiresAt",
+              "consumedAt",
+              "releasedAt",
+              "createdAt",
+              "updatedAt"
+            FROM "CharacterNameReservation"
+            WHERE id = $1
+            FOR UPDATE`,
+            [input.nameReservationId]
+          );
+          const activeReservation = reservation.rows[0];
+          if (
+            activeReservation === undefined ||
+            activeReservation.active !== true ||
+            activeReservation.userId !== input.userId ||
+            activeReservation.normalizedName !== input.nameNormalized
+          ) {
+            throw new Error('ERR_CHARACTER_NAME_RESERVATION_INVALID: character name reservation is invalid');
+          }
+          if (activeReservation.expiresAt.getTime() <= Date.now()) {
+            throw new Error('ERR_CHARACTER_NAME_RESERVATION_EXPIRED: character name reservation has expired');
+          }
+        }
+
+        const existingName = await client.query<{ id: string }>(
+          'SELECT id FROM "Character" WHERE "nameNormalized" = $1 LIMIT 1',
+          [input.nameNormalized]
+        );
+        if (existingName.rows[0] !== undefined) {
+          throw new Error('ERR_CHARACTER_NAME_TAKEN: character name is already taken');
+        }
+
         const characterId = createRowId();
         const updatedAt = new Date();
         const characterResult = await client.query<{
           id: string;
           userId: string;
           name: string;
+          nameNormalized: string;
+          classId: string;
+          slotIndex: number;
+          chainBootstrapReady: boolean;
           level: number;
           exp: number;
           hp: number;
@@ -1022,13 +1294,50 @@ export const prisma = {
           createdAt: Date;
         }>(
           `INSERT INTO "Character"
-            (id, "userId", "name", "hp", "hpMax", "atk", "def", "spd", "accuracyBP", "evadeBP", "updatedAt")
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-          RETURNING id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP", "createdAt"`,
+            (
+              id,
+              "userId",
+              "name",
+              "nameNormalized",
+              "classId",
+              "slotIndex",
+              "chainBootstrapReady",
+              "hp",
+              "hpMax",
+              "atk",
+              "def",
+              "spd",
+              "accuracyBP",
+              "evadeBP",
+              "updatedAt"
+            )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          RETURNING
+            id,
+            "userId",
+            name,
+            "nameNormalized",
+            "classId",
+            "slotIndex",
+            "chainBootstrapReady",
+            level,
+            exp,
+            hp,
+            "hpMax",
+            atk,
+            def,
+            spd,
+            "accuracyBP",
+            "evadeBP",
+            "createdAt"`,
           [
             characterId,
             input.userId,
             input.name,
+            input.nameNormalized,
+            input.classId,
+            input.slotIndex,
+            input.chainBootstrapReady,
             input.hp,
             input.hpMax,
             input.atk,
@@ -1036,7 +1345,7 @@ export const prisma = {
             input.spd,
             input.accuracyBP,
             input.evadeBP,
-            updatedAt
+            updatedAt,
           ]
         );
         const character = characterResult.rows[0];
@@ -1082,6 +1391,20 @@ export const prisma = {
           );
         }
 
+        if (input.nameReservationId !== undefined) {
+          await client.query(
+            `UPDATE "CharacterNameReservation"
+            SET
+              "characterId" = $2,
+              status = 'CONSUMED',
+              active = false,
+              "consumedAt" = $3,
+              "updatedAt" = $3
+            WHERE id = $1`,
+            [input.nameReservationId, character.id, updatedAt]
+          );
+        }
+
         await client.query('COMMIT');
         return character;
       } catch (error) {
@@ -1093,7 +1416,27 @@ export const prisma = {
     },
     async findByUserId(userId: string) {
       const characterResult = await pool.query(
-        'SELECT id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP" FROM "Character" WHERE "userId" = $1 LIMIT 1',
+        `SELECT
+          id,
+          "userId",
+          name,
+          "nameNormalized",
+          "classId",
+          "slotIndex",
+          "chainBootstrapReady",
+          level,
+          exp,
+          hp,
+          "hpMax",
+          atk,
+          def,
+          spd,
+          "accuracyBP",
+          "evadeBP"
+        FROM "Character"
+        WHERE "userId" = $1
+        ORDER BY "slotIndex" ASC, "createdAt" ASC
+        LIMIT 1`,
         [userId]
       );
       const character = characterResult.rows[0];
@@ -1126,7 +1469,26 @@ export const prisma = {
     },
     async findById(characterId: string) {
       const characterResult = await pool.query(
-        'SELECT id, "userId", name, level, exp, hp, "hpMax", atk, def, spd, "accuracyBP", "evadeBP" FROM "Character" WHERE id = $1 LIMIT 1',
+        `SELECT
+          id,
+          "userId",
+          name,
+          "nameNormalized",
+          "classId",
+          "slotIndex",
+          "chainBootstrapReady",
+          level,
+          exp,
+          hp,
+          "hpMax",
+          atk,
+          def,
+          spd,
+          "accuracyBP",
+          "evadeBP"
+        FROM "Character"
+        WHERE id = $1
+        LIMIT 1`,
         [characterId]
       );
       const character = characterResult.rows[0];
@@ -1161,11 +1523,22 @@ export const prisma = {
       const result = await pool.query('SELECT id FROM "Character" WHERE id = $1 LIMIT 1', [id]);
       return result.rows[0] ?? null;
     },
+    async findByNormalizedName(normalizedName: string) {
+      const result = await pool.query<{ id: string }>(
+        'SELECT id FROM "Character" WHERE "nameNormalized" = $1 LIMIT 1',
+        [normalizeCharacterName(normalizedName)]
+      );
+      return result.rows[0] ?? null;
+    },
     async findBattleReadyById(characterId: string): Promise<CharacterBattleReadyRecord | null> {
       const characterResult = await pool.query<{
         id: string;
         userId: string;
         name: string;
+        nameNormalized: string;
+        classId: string;
+        slotIndex: number;
+        chainBootstrapReady: boolean;
         createdAt: Date;
         hp: number;
         hpMax: number;
@@ -1189,6 +1562,10 @@ export const prisma = {
           id,
           "userId",
           name,
+          "nameNormalized",
+          "classId",
+          "slotIndex",
+          "chainBootstrapReady",
           "createdAt",
           hp,
           "hpMax",
@@ -1232,6 +1609,10 @@ export const prisma = {
         id: character.id,
         userId: character.userId,
         name: character.name,
+        nameNormalized: character.nameNormalized,
+        classId: character.classId,
+        slotIndex: character.slotIndex,
+        chainBootstrapReady: character.chainBootstrapReady,
         createdAt: character.createdAt,
         hp: character.hp,
         hpMax: character.hpMax,

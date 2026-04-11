@@ -35,6 +35,9 @@ export interface CharacterReadModel {
   characterId: string;
   userId: string;
   name: string;
+  classId?: string;
+  slotIndex?: number;
+  chainBootstrapReady?: boolean;
   level: number;
   exp: number;
   syncPhase: CharacterSyncPhase;
@@ -127,6 +130,8 @@ export interface CreateCharacterResponse {
   characterId: string;
   userId: string;
   name: string;
+  classId?: string;
+  slotIndex?: number;
   level: number;
   stats: CharacterReadModel["stats"];
   activeSkills: string[];

@@ -1,16 +1,17 @@
 import type { BattleResult } from "./battle";
+import {
+  type ZoneRunTerminalStatusValue,
+  ZONE_RUN_TERMINAL_STATUSES,
+  isZoneRunTerminalStatus,
+} from "../lib/combat/zoneRunSkillMetadata";
 
 export type ActiveZoneRunState =
   | "TRAVERSING"
   | "AWAITING_BRANCH"
   | "POST_BATTLE_PAUSE";
 
-export type ZoneRunTerminalStatus =
-  | "COMPLETED"
-  | "FAILED"
-  | "ABANDONED"
-  | "EXPIRED"
-  | "SEASON_CUTOFF";
+export type ZoneRunTerminalStatus = ZoneRunTerminalStatusValue;
+export { ZONE_RUN_TERMINAL_STATUSES, isZoneRunTerminalStatus };
 
 export interface ZoneRunStatusEffectState {
   sourceId: string;

@@ -567,8 +567,8 @@ Execution rule:
   - terminal nodes,
   - node-local enemy pools,
   - per-subnode combat trigger probability.
-- [ ] Define canonical terminal status enum shared across server and settlement sealing.
-- [ ] Define canonical tagged-skill metadata for out-of-combat support/recovery use.
+- [x] Define canonical terminal status enum shared across server and settlement sealing.
+- [x] Define canonical tagged-skill metadata for out-of-combat support/recovery use.
 - [x] Define canonical carryover snapshot shape:
   - HP,
   - cooldowns,
@@ -593,13 +593,13 @@ Execution rule:
   - branch point state,
   - post-battle pause state,
   - carryover combat snapshot.
-- [ ] Persist backend character identity fields needed before first sync:
+- [x] Persist backend character identity fields needed before first sync:
   - `name`,
   - `class_id`,
   - slot assignment,
   - chain bootstrap readiness state.
-- [ ] Persist durable settlement batch records and settlement attempt records for first sync and later settlement retries.
-- [ ] Persist unique-name reservation records with expiry/revalidation lifecycle.
+- [x] Persist durable settlement batch records and settlement attempt records for first sync and later settlement retries.
+- [x] Persist unique-name reservation records with expiry/revalidation lifecycle.
 - [x] Persist closure state on `ClosedZoneRunSummary`:
   - terminal status,
   - settleable flag,

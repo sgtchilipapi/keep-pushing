@@ -1,9 +1,8 @@
-import { getSkillDef, BARRIER_SKILL_ID, REPAIR_SKILL_ID } from "../../engine/battle/skillRegistry";
+import { getSkillDef } from "../../engine/battle/skillRegistry";
 import { getStatusDef, isStatusId, type StatusId } from "../../engine/battle/statuses/statusRegistry";
 import type { CombatantBattleStateSnapshot } from "../../types/battle";
 import type { ZoneRunPlayerCarryoverState, ZoneRunStatusEffectState } from "../../types/zoneRun";
-
-const PAUSE_SKILL_IDS = new Set([BARRIER_SKILL_ID, REPAIR_SKILL_ID]);
+import { canUseSkillDuringPostBattlePause } from "./zoneRunSkillMetadata";
 
 function cloneStatuses(
   statuses: Record<string, ZoneRunStatusEffectState>,
@@ -98,7 +97,10 @@ export function applyPauseSkillToCarryover(args: {
   sourceId: string;
 }): ZoneRunPlayerCarryoverState {
   const skill = getSkillDef(args.skillId);
-  if (skill.resolutionMode !== "self_utility" || !PAUSE_SKILL_IDS.has(skill.skillId)) {
+  if (
+    skill.resolutionMode !== "self_utility" ||
+    !canUseSkillDuringPostBattlePause(skill.skillId)
+  ) {
     throw new Error(`ERR_ZONE_RUN_SKILL_NOT_ALLOWED: skill ${args.skillId} cannot be used during post-battle pause`);
   }
   if ((args.carryover.cooldowns[skill.skillId] ?? 0) > 0) {
