@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type TouchEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import type {
@@ -289,8 +289,22 @@ function HeartIcon(props: { className?: string }) {
 function PeopleIcon(props: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
-      <circle cx="9" cy="9" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="16.5" cy="10.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle
+        cx="9"
+        cy="9"
+        r="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <circle
+        cx="16.5"
+        cy="10.5"
+        r="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
       <path
         d="M4.5 18a4.5 4.5 0 0 1 9 0"
         fill="none"
@@ -347,7 +361,10 @@ function settlementTone(
 }
 
 function createIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
 
@@ -406,7 +423,9 @@ function writePendingSyncAck(record: PendingSyncAckRecord): void {
     }
   })();
 
-  const next = existing.filter((entry) => entry.characterId !== record.characterId);
+  const next = existing.filter(
+    (entry) => entry.characterId !== record.characterId,
+  );
   next.push(record);
   window.localStorage.setItem(PENDING_SYNC_STORAGE_KEY, JSON.stringify(next));
 }
@@ -443,7 +462,9 @@ function formatNodeLabel(nodeId: string): string {
 }
 
 function buildZoneStepperStages(topology: ZoneRunTopologyPreview) {
-  const nodesById = new Map(topology.nodes.map((node) => [node.nodeId, node] as const));
+  const nodesById = new Map(
+    topology.nodes.map((node) => [node.nodeId, node] as const),
+  );
   const depthByNodeId = new Map<string, number>();
 
   function visit(nodeId: string, depth: number) {
@@ -477,7 +498,9 @@ function buildZoneStepperStages(topology: ZoneRunTopologyPreview) {
     .sort(([left], [right]) => left - right)
     .map(([depth, nodes]) => ({
       depth,
-      nodes: [...nodes].sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
+      nodes: [...nodes].sort((left, right) =>
+        left.nodeId.localeCompare(right.nodeId),
+      ),
     }));
 }
 
@@ -508,7 +531,9 @@ function buildRunWindowStages(
   const activeDepth = resolveActiveStepperDepth(topology, activeRun);
 
   return stages.filter(
-    (stage) => stage.depth >= Math.max(0, activeDepth - 1) && stage.depth <= activeDepth + 1,
+    (stage) =>
+      stage.depth >= Math.max(0, activeDepth - 1) &&
+      stage.depth <= activeDepth + 1,
   );
 }
 
@@ -532,9 +557,10 @@ function resolveSubnodeState(args: {
     activeRun.currentSubnodeOrdinal === ordinal;
   const done =
     activeRun.lastConsumedNodeId === nodeId &&
-      ordinal <= activeRun.lastConsumedSubnodeOrdinal
+    ordinal <= activeRun.lastConsumedSubnodeOrdinal
       ? true
-      : activeRun.enteredNodeIds.includes(nodeId) && activeRun.currentNodeId !== nodeId;
+      : activeRun.enteredNodeIds.includes(nodeId) &&
+        activeRun.currentNodeId !== nodeId;
 
   return {
     done,
@@ -585,7 +611,9 @@ function buildZonePathDiagram(
 ): ZonePathDiagram {
   const stages = buildZoneStepperStages(topology);
   const depthByNodeId = new Map<string, number>();
-  const nodeById = new Map(topology.nodes.map((node) => [node.nodeId, node] as const));
+  const nodeById = new Map(
+    topology.nodes.map((node) => [node.nodeId, node] as const),
+  );
   const predecessorsByNodeId = new Map<string, string[]>();
   for (const stage of stages) {
     for (const node of stage.nodes) {
@@ -638,7 +666,10 @@ function buildZonePathDiagram(
   const entryX = 28;
   const nodeGap = 42;
   const subnodeGap = 28;
-  const maxSubnodes = Math.max(...topology.nodes.map((node) => node.subnodes.length), 1);
+  const maxSubnodes = Math.max(
+    ...topology.nodes.map((node) => node.subnodes.length),
+    1,
+  );
   const stageWidth = nodeGap + maxSubnodes * subnodeGap + 46;
   const stageStartX = 96;
   const exitX = stageStartX + stages.length * stageWidth;
@@ -807,12 +838,12 @@ function buildZonePathDiagram(
       continue;
     }
     const midX = from.x + 18;
-      edges.push({
-        key: `exit:${terminalNodeId}`,
-        d: `M ${from.x + 12} ${from.y} L ${midX} ${from.y} L ${midX} ${exitY} L ${exitX - 18} ${exitY}`,
-        fromNodeId: terminalNodeId,
-        branchOption: false,
-      });
+    edges.push({
+      key: `exit:${terminalNodeId}`,
+      d: `M ${from.x + 12} ${from.y} L ${midX} ${from.y} L ${midX} ${exitY} L ${exitX - 18} ${exitY}`,
+      fromNodeId: terminalNodeId,
+      branchOption: false,
+    });
   }
 
   return {
@@ -926,7 +957,9 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
               type="button"
               className={[
                 styles.classCard,
-                props.selectedClassId === item.classId ? styles.classCardSelected : "",
+                props.selectedClassId === item.classId
+                  ? styles.classCardSelected
+                  : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -987,7 +1020,9 @@ function LandingPanel(props: LandingPanelProps) {
     <section className={`${styles.panel} ${styles.heroPanel}`}>
       <div className={styles.stack}>
         <span className={styles.eyebrow}>Instant Play</span>
-        <h2 className={styles.heroTitle}>Start anon, build a character, run the season now.</h2>
+        <h2 className={styles.heroTitle}>
+          Start anon, build a character, run the season now.
+        </h2>
         <p className={styles.panelText}>
           Wallet ownership stays secondary in the MVP. The fastest path is to
           create an anonymous character, learn the zone flow, and sync later.
@@ -1040,7 +1075,8 @@ function RosterPanel(props: RosterPanelProps) {
 
       <div className={styles.slotGrid}>
         {Array.from({ length: props.slotsTotal }, (_, index) => {
-          const character = props.characters.find((item) => item.slotIndex === index) ?? null;
+          const character =
+            props.characters.find((item) => item.slotIndex === index) ?? null;
 
           if (character === null) {
             return (
@@ -1072,7 +1108,10 @@ function RosterPanel(props: RosterPanelProps) {
                 {character.classId} · Level {character.level}
               </span>
               <div className={styles.inlineStack}>
-                <StatusBadge label={character.syncStatus} tone={settlementTone(character.syncStatus)} />
+                <StatusBadge
+                  label={character.syncStatus}
+                  tone={settlementTone(character.syncStatus)}
+                />
               </div>
             </button>
           );
@@ -1110,13 +1149,19 @@ function WalletToolbar(props: WalletToolbarProps) {
       <details className={styles.menu}>
         <summary
           className={styles.menuSummary}
-          aria-label={actionLabel ? `${walletStatusLabel}. ${actionLabel}` : walletStatusLabel}
+          aria-label={
+            actionLabel
+              ? `${walletStatusLabel}. ${actionLabel}`
+              : walletStatusLabel
+          }
           title={walletStatusLabel}
         >
           <span
             className={[
               styles.iconButton,
-              props.connectionStatus === "connected" ? styles.iconButtonActive : "",
+              props.connectionStatus === "connected"
+                ? styles.iconButtonActive
+                : "",
             ]
               .filter(Boolean)
               .join(" ")}
@@ -1204,6 +1249,7 @@ type ZoneRunPanelProps = {
   pending: boolean;
   refreshPending: boolean;
   error: string | null;
+  onBack: () => void;
   onSelectZone: (zoneId: number) => void;
   onStartRun: () => Promise<void>;
   onRefreshRun: () => Promise<void>;
@@ -1246,7 +1292,8 @@ function ZoneRunMapWindow(props: {
           <span className={styles.slotEyebrow}>Zone Map</span>
           <h3 className={styles.panelTitle}>Active route</h3>
           <p className={styles.panelText}>
-            The full topology stays visible while only the previous, current, and next depth stay highlighted.
+            The full topology stays visible while only the previous, current,
+            and next depth stay highlighted.
           </p>
         </div>
       </div>
@@ -1304,7 +1351,14 @@ function ZoneRunMapWindow(props: {
                 {point.kind === "subnode" ? (
                   <circle cx={point.x} cy={point.y} r={9} />
                 ) : (
-                  <rect x={point.x - 18} y={point.y - 18} width={36} height={36} rx={12} ry={12} />
+                  <rect
+                    x={point.x - 18}
+                    y={point.y - 18}
+                    width={36}
+                    height={36}
+                    rx={12}
+                    ry={12}
+                  />
                 )}
                 {point.label ? (
                   <text
@@ -1357,7 +1411,9 @@ function ZoneRunMapWindow(props: {
       {props.activeRun?.state === "AWAITING_BRANCH" ? (
         <div className={styles.noteText}>
           Branch options:{" "}
-          {props.activeRun.branchOptions.map((nodeId) => formatNodeLabel(nodeId)).join(", ")}
+          {props.activeRun.branchOptions
+            .map((nodeId) => formatNodeLabel(nodeId))
+            .join(", ")}
         </div>
       ) : null}
     </section>
@@ -1366,13 +1422,13 @@ function ZoneRunMapWindow(props: {
 
 function ZoneRunPanel(props: ZoneRunPanelProps) {
   const activeRun = props.activeRun;
+  const unlockedZoneCount = maxUnlockedZone(props.character);
   const canStartRun =
     activeRun === null &&
     !props.resumePending &&
     props.character.battleEligible &&
-    !props.pending;
-  const unlockedZoneCount = maxUnlockedZone(props.character);
-  const visibleZoneCount = Math.max(3, unlockedZoneCount + 2);
+    !props.pending &&
+    props.selectedZoneId <= unlockedZoneCount;
   const pauseSkills = props.character.activeSkills
     .filter((skillId) => canUseSkillDuringPostBattlePause(skillId))
     .map((skillId) => getSkillDef(skillId));
@@ -1380,27 +1436,72 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
     activeRun !== null &&
     activeRun.state === "POST_BATTLE_PAUSE" &&
     activeRun.totalSubnodesTraversed >= activeRun.totalSubnodesInRun;
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const zoneIds = Array.from(
+    { length: Math.max(1, unlockedZoneCount + 1) },
+    (_, index) => index + 1,
+  );
+  const activeZoneId = zoneIds.includes(props.selectedZoneId)
+    ? props.selectedZoneId
+    : (zoneIds[0] ?? 1);
+  const activeZoneIndex = zoneIds.indexOf(activeZoneId);
+  const displayZoneId = zoneIds[activeZoneIndex] ?? 1;
+  const displayZoneUnlocked = displayZoneId <= unlockedZoneCount;
+  const canGoPreviousZone = activeZoneIndex > 0;
+  const canGoNextZone = activeZoneIndex < zoneIds.length - 1;
+
+  function cycleZone(direction: -1 | 1) {
+    if (zoneIds.length === 0) {
+      return;
+    }
+
+    const nextIndex = Math.min(
+      zoneIds.length - 1,
+      Math.max(0, activeZoneIndex + direction),
+    );
+    const nextZoneId = zoneIds[nextIndex];
+    if (nextZoneId !== undefined) {
+      props.onSelectZone(nextZoneId);
+    }
+  }
+
+  function handleCarouselTouchStart(event: TouchEvent<HTMLDivElement>) {
+    setTouchStartX(event.changedTouches[0]?.clientX ?? null);
+  }
+
+  function handleCarouselTouchEnd(event: TouchEvent<HTMLDivElement>) {
+    const startX = touchStartX;
+    const endX = event.changedTouches[0]?.clientX ?? null;
+    setTouchStartX(null);
+
+    if (startX === null || endX === null) {
+      return;
+    }
+
+    const deltaX = endX - startX;
+    if (Math.abs(deltaX) < 36) {
+      return;
+    }
+
+    cycleZone(deltaX < 0 ? 1 : -1);
+  }
 
   return (
-    <section className={styles.panel}>
+    <section className={`${styles.panel} ${styles.runPanelFull}`}>
       <div className={styles.panelTitleRow}>
-        <div className={styles.stack}>
-          <h2 className={styles.panelTitle}>
-            {activeRun === null ? "Run Setup" : "Active Run"}
-          </h2>
-          {props.season ? (
-            <div className={styles.inlineStack}>
-              <StatusBadge
-                label={`Season ${props.season.seasonNumber} · ${props.season.seasonName}`}
-                tone={seasonTone(props.season.phase)}
-              />
-              <span className={styles.metaText}>{seasonCountdownLabel(props.season)}</span>
-            </div>
-          ) : null}
-        </div>
+        <button
+          type="button"
+          className={styles.backTextButton}
+          onClick={props.onBack}
+          disabled={props.pending}
+          aria-label="Back to character page"
+          title="Back to character page"
+        >
+          {"<- Back to character"}
+        </button>
       </div>
 
-      <div className={styles.formGrid}>
+      <div className={`${styles.formGrid} ${styles.runPanelBody}`}>
         {activeRun === null ? (
           <>
             {props.resumePending ? (
@@ -1408,60 +1509,108 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
                 Restoring the active run snapshot from the server.
               </div>
             ) : (
-              <div className={styles.zoneCardGrid}>
-                {Array.from({ length: visibleZoneCount }, (_, index) => index + 1).map((zoneId) => {
-                  const unlocked = zoneId <= unlockedZoneCount;
-                  const selected = zoneId === props.selectedZoneId;
-
-                  return (
+              <div className={styles.zoneCarouselStage}>
+                <div
+                  className={styles.zoneCarousel}
+                  onTouchStart={handleCarouselTouchStart}
+                  onTouchEnd={handleCarouselTouchEnd}
+                >
+                  <div
+                    className={[
+                      styles.zoneCard,
+                      displayZoneUnlocked
+                        ? styles.zoneCardUnlocked
+                        : styles.zoneCardLocked,
+                      displayZoneId === 1 ? styles.zoneCardZone1 : "",
+                      styles.zoneCardSelected,
+                      styles.zoneCarouselCard,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
                     <button
-                      key={zoneId}
                       type="button"
-                      className={[
-                        styles.zoneCard,
-                        unlocked ? styles.zoneCardUnlocked : styles.zoneCardLocked,
-                        selected ? styles.zoneCardSelected : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      onClick={() => unlocked && props.onSelectZone(zoneId)}
-                      disabled={!unlocked || props.pending}
+                      className={`${styles.iconButton} ${styles.zoneCarouselIconButton} ${styles.zoneCarouselIconButtonLeft}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        cycleZone(-1);
+                      }}
+                      disabled={props.pending || !canGoPreviousZone}
+                      aria-label="Previous zone"
                     >
-                      <span className={styles.slotEyebrow}>Zone {zoneId}</span>
-                      <span className={styles.slotTitle}>
-                        {unlocked ? "Ready to enter" : "Locked"}
-                      </span>
-                      <span className={styles.slotText}>
-                        {unlocked
-                          ? zoneId === unlockedZoneCount
-                            ? "Highest unlocked zone. Stronger rewards, higher risk."
-                            : "Unlocked and ready for a fresh run."
-                          : "Finish earlier zones to unlock this route."}
-                      </span>
+                      <span className={styles.zoneCarouselIcon}>&#8249;</span>
                     </button>
-                  );
-                })}
+                    <button
+                      type="button"
+                      className={`${styles.iconButton} ${styles.zoneCarouselIconButton} ${styles.zoneCarouselIconButtonRight}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        cycleZone(1);
+                      }}
+                      disabled={props.pending || !canGoNextZone}
+                      aria-label="Next zone"
+                    >
+                      <span className={styles.zoneCarouselIcon}>&#8250;</span>
+                    </button>
+                    <div className={styles.zoneCarouselCopy}>
+                      <span
+                        className={`${styles.slotEyebrow} ${styles.zoneCarouselCaption} ${styles.zoneCarouselCaptionEyebrow}`}
+                      >
+                        Zone {displayZoneId}
+                      </span>
+                      <span
+                        className={`${styles.slotTitle} ${styles.zoneCarouselCaption} ${styles.zoneCarouselCaptionTitle}`}
+                      >
+                        {displayZoneId === 1
+                          ? "Fringe Fields"
+                          : displayZoneUnlocked
+                            ? "Ready to enter"
+                            : "Locked"}
+                      </span>
+                      <span
+                        className={`${styles.slotText} ${styles.zoneCarouselCaption} ${styles.zoneCarouselCaptionBody}`}
+                      >
+                        {displayZoneId === 1
+                          ? "A quiet stretch of reclaimed land where broken machines lie scattered and forgotten."
+                          : displayZoneUnlocked
+                            ? displayZoneId === unlockedZoneCount
+                              ? "Highest unlocked zone. Stronger rewards, higher risk."
+                              : "Unlocked and ready for a fresh run."
+                            : "Finish earlier zones to unlock this route."}
+                      </span>
+                    </div>
+                    <div
+                      className={`${styles.buttonRow} ${styles.runActionRow} ${styles.zoneCarouselActions}`}
+                    >
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void props.onRefreshRun();
+                        }}
+                        disabled={props.refreshPending}
+                        aria-label="Refresh run state"
+                        title="Refresh run state"
+                      >
+                        <SyncIcon className={styles.iconSvg} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.button} ${styles.buttonPrimary}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void props.onStartRun();
+                        }}
+                        disabled={!canStartRun}
+                      >
+                        {props.pending ? "Starting run..." : "Start Run"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-
-            <div className={styles.buttonRow}>
-              <button
-                type="button"
-                className={`${styles.button} ${styles.buttonPrimary}`}
-                onClick={() => void props.onStartRun()}
-                disabled={!canStartRun}
-              >
-                {props.pending ? "Starting run..." : "Start Run"}
-              </button>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={() => void props.onRefreshRun()}
-                disabled={props.refreshPending}
-              >
-                {props.refreshPending ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
           </>
         ) : (
           <>
@@ -1536,7 +1685,9 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
                         key={skill.skillId}
                         type="button"
                         className={styles.button}
-                        onClick={() => void props.onUsePauseSkill(skill.skillId)}
+                        onClick={() =>
+                          void props.onUsePauseSkill(skill.skillId)
+                        }
                         disabled={props.pending}
                       >
                         Use {skill.skillName}
@@ -1585,7 +1736,9 @@ function ZoneRunPanel(props: ZoneRunPanelProps) {
           </>
         )}
 
-        {props.error ? <div className={styles.errorBox}>{props.error}</div> : null}
+        {props.error ? (
+          <div className={styles.errorBox}>{props.error}</div>
+        ) : null}
       </div>
     </section>
   );
@@ -1627,7 +1780,8 @@ function CharacterSyncButton(props: CharacterSyncButtonProps) {
             <InfoIcon className={styles.iconSvg} />
           </summary>
           <div className={styles.inlinePopoverCard}>
-            Sync writes character progression to Solana and shows whether any submitted tx still needs acknowledgement.
+            Sync writes character progression to Solana and shows whether any
+            submitted tx still needs acknowledgement.
           </div>
         </details>
       </div>
@@ -1662,7 +1816,10 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
   const { character, season, sync } = props.detail;
   const syncState = resolveSyncPanelState(character);
-  const mismatchMessage = authorityMismatchMessage(character, props.walletPublicKey);
+  const mismatchMessage = authorityMismatchMessage(
+    character,
+    props.walletPublicKey,
+  );
 
   useEffect(() => {
     setPendingAck(readPendingSyncAck(character.characterId));
@@ -1785,7 +1942,9 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           },
         );
         if (prepared.phase !== "sign_transaction") {
-          throw new Error("Unexpected first sync response: expected sign_transaction phase.");
+          throw new Error(
+            "Unexpected first sync response: expected sign_transaction phase.",
+          );
         }
 
         props.setWalletActionStatus("signing_transaction");
@@ -1851,7 +2010,9 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           return;
         }
         if (prepared.phase !== "sign_transaction") {
-          throw new Error("Unexpected settlement response: expected sign_transaction phase.");
+          throw new Error(
+            "Unexpected settlement response: expected sign_transaction phase.",
+          );
         }
 
         props.setWalletActionStatus("signing_transaction");
@@ -1916,11 +2077,16 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           <div className={styles.stack}>
             <h2 className={styles.panelTitle}>Sync Page</h2>
             <p className={styles.panelText}>
-              Progression first, sync state second. One tap submits the oldest unresolved work.
+              Progression first, sync state second. One tap submits the oldest
+              unresolved work.
             </p>
           </div>
           <div className={styles.buttonRow}>
-            <button type="button" className={styles.button} onClick={props.onBack}>
+            <button
+              type="button"
+              className={styles.button}
+              onClick={props.onBack}
+            >
               Character Page
             </button>
           </div>
@@ -1928,10 +2094,14 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
         <div className={styles.characterSummaryGrid}>
           <div className={styles.characterSummaryCell}>
-            <span className={styles.characterSummaryValue}>Name: {character.name}</span>
+            <span className={styles.characterSummaryValue}>
+              Name: {character.name}
+            </span>
           </div>
           <div className={styles.characterSummaryCell}>
-            <span className={styles.characterSummaryValue}>LVL: {character.level}</span>
+            <span className={styles.characterSummaryValue}>
+              LVL: {character.level}
+            </span>
           </div>
           <div className={styles.characterSummaryCell}>
             <span className={styles.characterSummaryValue}>
@@ -1939,13 +2109,21 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             </span>
           </div>
           <div className={styles.characterSummaryCell}>
-            <StatusBadge label={character.syncPhase} tone={settlementTone(character.syncPhase)} />
+            <StatusBadge
+              label={character.syncPhase}
+              tone={settlementTone(character.syncPhase)}
+            />
           </div>
           <div className={styles.characterSummaryCell}>
-            <span className={styles.characterSummaryValue}>{season.seasonName}</span>
+            <span className={styles.characterSummaryValue}>
+              {season.seasonName}
+            </span>
           </div>
           <div className={styles.characterSummaryCell}>
-            <StatusBadge label={season.phase.toUpperCase()} tone={seasonTone(season.phase)} />
+            <StatusBadge
+              label={season.phase.toUpperCase()}
+              tone={seasonTone(season.phase)}
+            />
           </div>
         </div>
       </section>
@@ -1979,25 +2157,37 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           </div>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>Pending batch</span>
-            <span className={styles.keyValue}>{sync.pendingBatchNumber ?? "None"}</span>
+            <span className={styles.keyValue}>
+              {sync.pendingBatchNumber ?? "None"}
+            </span>
           </div>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>Wallet authority</span>
-            <span className={styles.keyValue}>{truncateMiddle(props.walletPublicKey)}</span>
+            <span className={styles.keyValue}>
+              {truncateMiddle(props.walletPublicKey)}
+            </span>
           </div>
           <div className={styles.keyValueItem}>
             <span className={styles.keyLabel}>Season timing</span>
-            <span className={styles.keyValue}>{seasonCountdownLabel(season)}</span>
+            <span className={styles.keyValue}>
+              {seasonCountdownLabel(season)}
+            </span>
           </div>
         </div>
 
         {props.walletAvailability === "not_installed" ? (
-          <div className={styles.infoBox}>Install Phantom to use one-tap sync.</div>
+          <div className={styles.infoBox}>
+            Install Phantom to use one-tap sync.
+          </div>
         ) : null}
         {props.walletConnectionStatus !== "connected" ? (
-          <div className={styles.infoBox}>Connect Phantom before syncing this character.</div>
+          <div className={styles.infoBox}>
+            Connect Phantom before syncing this character.
+          </div>
         ) : null}
-        {mismatchMessage ? <div className={styles.errorBox}>{mismatchMessage}</div> : null}
+        {mismatchMessage ? (
+          <div className={styles.errorBox}>{mismatchMessage}</div>
+        ) : null}
 
         <div className={styles.buttonRow}>
           {props.walletConnectionStatus !== "connected" ? (
@@ -2007,14 +2197,20 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
               onClick={() => void props.onConnectWallet()}
               disabled={pending || props.walletAvailability !== "installed"}
             >
-              {props.walletConnectionStatus === "connecting" ? "Connecting..." : "Connect Phantom"}
+              {props.walletConnectionStatus === "connecting"
+                ? "Connecting..."
+                : "Connect Phantom"}
             </button>
           ) : (
             <button
               type="button"
               className={`${styles.button} ${styles.buttonPrimary}`}
               onClick={() => void handleSync()}
-              disabled={pending || Boolean(mismatchMessage) || (syncState.syncMode === null && pendingAck === null)}
+              disabled={
+                pending ||
+                Boolean(mismatchMessage) ||
+                (syncState.syncMode === null && pendingAck === null)
+              }
             >
               {pending
                 ? "Syncing..."
@@ -2029,7 +2225,9 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           )}
         </div>
 
-        {stepMessage ? <div className={styles.syncFeedback}>{stepMessage}</div> : null}
+        {stepMessage ? (
+          <div className={styles.syncFeedback}>{stepMessage}</div>
+        ) : null}
         {notice ? <div className={styles.successBox}>{notice}</div> : null}
         {error ? <div className={styles.errorBox}>{error}</div> : null}
       </section>
@@ -2045,20 +2243,32 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
         </div>
 
         {sync.attempts.length === 0 ? (
-          <div className={styles.infoBox}>No submission attempts recorded yet.</div>
+          <div className={styles.infoBox}>
+            No submission attempts recorded yet.
+          </div>
         ) : (
           <div className={styles.stack}>
             {sync.attempts.map((attempt) => (
               <div key={attempt.attemptId} className={styles.infoBox}>
                 <div className={styles.panelTitleRow}>
-                  <span className={styles.metaText}>Attempt {attempt.attemptNumber}</span>
-                  <StatusBadge label={attempt.status} tone={settlementTone(attempt.status)} />
+                  <span className={styles.metaText}>
+                    Attempt {attempt.attemptNumber}
+                  </span>
+                  <StatusBadge
+                    label={attempt.status}
+                    tone={settlementTone(attempt.status)}
+                  />
                 </div>
-                <div className={styles.metaText}>Tx {truncateMiddle(attempt.transactionSignature)}</div>
                 <div className={styles.metaText}>
-                  Submitted {formatDateTime(attempt.submittedAt)} · Resolved {formatDateTime(attempt.resolvedAt)}
+                  Tx {truncateMiddle(attempt.transactionSignature)}
                 </div>
-                {attempt.rpcError ? <div className={styles.metaText}>{attempt.rpcError}</div> : null}
+                <div className={styles.metaText}>
+                  Submitted {formatDateTime(attempt.submittedAt)} · Resolved{" "}
+                  {formatDateTime(attempt.resolvedAt)}
+                </div>
+                {attempt.rpcError ? (
+                  <div className={styles.metaText}>{attempt.rpcError}</div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -2078,7 +2288,9 @@ export default function GameClient() {
   const [roster, setRoster] = useState<CharacterRosterItem[]>([]);
   const [character, setCharacter] = useState<CharacterReadModel | null>(null);
   const [season, setSeason] = useState<CurrentSeasonResponse | null>(null);
-  const [classCatalog, setClassCatalog] = useState<CharacterClassCatalogItem[]>([]);
+  const [classCatalog, setClassCatalog] = useState<CharacterClassCatalogItem[]>(
+    [],
+  );
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [createName, setCreateName] = useState("Rookie");
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
@@ -2090,12 +2302,16 @@ export default function GameClient() {
   const [zoneRunError, setZoneRunError] = useState<string | null>(null);
   const [zoneRunNotice, setZoneRunNotice] = useState<string | null>(null);
   const [zoneRunRefreshPending, setZoneRunRefreshPending] = useState(false);
-  const [zoneTopology, setZoneTopology] = useState<ZoneRunTopologyPreview | null>(null);
+  const [zoneTopology, setZoneTopology] =
+    useState<ZoneRunTopologyPreview | null>(null);
   const [zoneTopologyPending, setZoneTopologyPending] = useState(false);
-  const [zoneTopologyError, setZoneTopologyError] = useState<string | null>(null);
+  const [zoneTopologyError, setZoneTopologyError] = useState<string | null>(
+    null,
+  );
   const [activeZoneRunDetail, setActiveZoneRunDetail] =
     useState<ActiveZoneRunSnapshot | null>(null);
-  const [syncDetail, setSyncDetail] = useState<CharacterSyncDetailResponse | null>(null);
+  const [syncDetail, setSyncDetail] =
+    useState<CharacterSyncDetailResponse | null>(null);
   const [refreshPending, setRefreshPending] = useState(false);
   const [walletAvailability, setWalletAvailability] =
     useState<WalletAvailability>("unknown");
@@ -2130,15 +2346,20 @@ export default function GameClient() {
   }
 
   async function refreshClasses(): Promise<CharacterClassCatalogItem[]> {
-    const response = await apiRequest<CharacterClassesResponse>("/api/classes", {
-      method: "GET",
-      headers: undefined,
-    });
+    const response = await apiRequest<CharacterClassesResponse>(
+      "/api/classes",
+      {
+        method: "GET",
+        headers: undefined,
+      },
+    );
     setClassCatalog(response.classes);
     return response.classes;
   }
 
-  async function refreshRoster(nextUserId?: string): Promise<CharacterRosterResponse> {
+  async function refreshRoster(
+    nextUserId?: string,
+  ): Promise<CharacterRosterResponse> {
     const resolvedUserId = nextUserId ?? userId;
     if (!resolvedUserId) {
       throw new Error("No user id is available yet.");
@@ -2180,8 +2401,8 @@ export default function GameClient() {
       }
       setAppPhase("ready");
       setShellView(
-        preferredView
-          ?? (response.character.activeZoneRun !== null || shellView === "run"
+        preferredView ??
+          (response.character.activeZoneRun !== null || shellView === "run"
             ? "run"
             : "character"),
       );
@@ -2221,7 +2442,8 @@ export default function GameClient() {
     nextUserId?: string,
   ): Promise<CharacterSyncDetailResponse | null> {
     const resolvedUserId = nextUserId ?? userId;
-    const resolvedCharacterId = nextCharacterId ?? character?.characterId ?? null;
+    const resolvedCharacterId =
+      nextCharacterId ?? character?.characterId ?? null;
 
     if (!resolvedUserId || !resolvedCharacterId) {
       setSyncDetail(null);
@@ -2269,7 +2491,9 @@ export default function GameClient() {
     } catch (error) {
       setZoneTopology(null);
       setZoneTopologyError(
-        error instanceof Error ? error.message : "Failed to load zone topology.",
+        error instanceof Error
+          ? error.message
+          : "Failed to load zone topology.",
       );
       console.error("[zone-run] topology load failed", error);
     } finally {
@@ -2423,8 +2647,9 @@ export default function GameClient() {
 
   useEffect(() => {
     const maxZone = maxUnlockedZone(character);
-    if (selectedZoneId > maxZone) {
-      setSelectedZoneId(maxZone);
+    const maxVisibleZone = Math.max(1, maxZone + 1);
+    if (selectedZoneId > maxVisibleZone) {
+      setSelectedZoneId(maxVisibleZone);
     }
   }, [character, selectedZoneId]);
 
@@ -2533,15 +2758,18 @@ export default function GameClient() {
       let createdCharacterId: string | null = null;
 
       try {
-        const created = await apiRequest<CreateCharacterResponse>("/api/characters", {
-          method: "POST",
-          body: JSON.stringify({
-            userId: activeUserId,
-            name: createName,
-            classId: selectedClassId,
-            slotIndex: createSlotIndex,
-          }),
-        });
+        const created = await apiRequest<CreateCharacterResponse>(
+          "/api/characters",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              userId: activeUserId,
+              name: createName,
+              classId: selectedClassId,
+              slotIndex: createSlotIndex,
+            }),
+          },
+        );
         createdCharacterId = created.characterId;
       } catch (error) {
         if (
@@ -2554,21 +2782,28 @@ export default function GameClient() {
         window.localStorage.removeItem(USER_STORAGE_KEY);
         activeUserId = await issueAnonymousUser();
 
-        const created = await apiRequest<CreateCharacterResponse>("/api/characters", {
-          method: "POST",
-          body: JSON.stringify({
-            userId: activeUserId,
-            name: createName,
-            classId: selectedClassId,
-            slotIndex: createSlotIndex,
-          }),
-        });
+        const created = await apiRequest<CreateCharacterResponse>(
+          "/api/characters",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              userId: activeUserId,
+              name: createName,
+              classId: selectedClassId,
+              slotIndex: createSlotIndex,
+            }),
+          },
+        );
         createdCharacterId = created.characterId;
       }
 
       await refreshRoster(activeUserId);
       if (createdCharacterId !== null) {
-        await loadCharacterDetail(createdCharacterId, activeUserId, "character");
+        await loadCharacterDetail(
+          createdCharacterId,
+          activeUserId,
+          "character",
+        );
       } else {
         await refreshCharacter(activeUserId);
       }
@@ -2581,7 +2816,9 @@ export default function GameClient() {
     }
   }
 
-  async function refreshActiveZoneRun(nextCharacter?: CharacterReadModel | null) {
+  async function refreshActiveZoneRun(
+    nextCharacter?: CharacterReadModel | null,
+  ) {
     const activeCharacter = nextCharacter ?? character;
     if (!activeCharacter?.activeZoneRun) {
       setActiveZoneRunDetail(null);
@@ -2609,7 +2846,9 @@ export default function GameClient() {
       });
       if (response.closedRunSummary) {
         await refreshCharacter(activeCharacter.userId);
-        router.push(`/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`);
+        router.push(
+          `/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`,
+        );
       }
     } catch (error) {
       console.error("[zone-run] refresh failed", error);
@@ -2691,7 +2930,9 @@ export default function GameClient() {
       });
       await refreshCharacter(character.userId);
       if (response.closedRunSummary) {
-        router.push(`/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`);
+        router.push(
+          `/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`,
+        );
         return;
       }
       setShellView("run");
@@ -2712,13 +2953,10 @@ export default function GameClient() {
     }
 
     setShellView("run");
-    await executeZoneRunAction(
-      "/api/zone-runs/start",
-      {
-        characterId: character.characterId,
-        zoneId: selectedZoneId,
-      },
-    );
+    await executeZoneRunAction("/api/zone-runs/start", {
+      characterId: character.characterId,
+      zoneId: selectedZoneId,
+    });
   }
 
   async function handleAdvanceZoneRun() {
@@ -2726,10 +2964,9 @@ export default function GameClient() {
       return;
     }
 
-    await executeZoneRunAction(
-      "/api/zone-runs/advance",
-      { characterId: character.characterId },
-    );
+    await executeZoneRunAction("/api/zone-runs/advance", {
+      characterId: character.characterId,
+    });
   }
 
   async function handleChooseZoneRunBranch(nextNodeId: string) {
@@ -2737,13 +2974,10 @@ export default function GameClient() {
       return;
     }
 
-    await executeZoneRunAction(
-      "/api/zone-runs/choose-branch",
-      {
-        characterId: character.characterId,
-        nextNodeId,
-      },
-    );
+    await executeZoneRunAction("/api/zone-runs/choose-branch", {
+      characterId: character.characterId,
+      nextNodeId,
+    });
   }
 
   async function handleUseZoneRunPauseSkill(skillId: string) {
@@ -2751,13 +2985,10 @@ export default function GameClient() {
       return;
     }
 
-    await executeZoneRunAction(
-      "/api/zone-runs/use-skill",
-      {
-        characterId: character.characterId,
-        skillId,
-      },
-    );
+    await executeZoneRunAction("/api/zone-runs/use-skill", {
+      characterId: character.characterId,
+      skillId,
+    });
   }
 
   async function handleContinueZoneRun() {
@@ -2765,10 +2996,9 @@ export default function GameClient() {
       return;
     }
 
-    await executeZoneRunAction(
-      "/api/zone-runs/continue",
-      { characterId: character.characterId },
-    );
+    await executeZoneRunAction("/api/zone-runs/continue", {
+      characterId: character.characterId,
+    });
   }
 
   async function handleAbandonZoneRun() {
@@ -2776,10 +3006,9 @@ export default function GameClient() {
       return;
     }
 
-    await executeZoneRunAction(
-      "/api/zone-runs/abandon",
-      { characterId: character.characterId },
-    );
+    await executeZoneRunAction("/api/zone-runs/abandon", {
+      characterId: character.characterId,
+    });
   }
 
   async function handleShareZoneRun(runId: string) {
@@ -2810,7 +3039,7 @@ export default function GameClient() {
       <main className={styles.page}>
         <div className={styles.shell}>
           <header className={styles.header}>
-            <h1 className={styles.title}>RUNANA</h1>
+            <h1 className={styles.title}>RUNARA</h1>
           </header>
 
           <div className={styles.panelGrid}>
@@ -2832,7 +3061,7 @@ export default function GameClient() {
       <main className={styles.page}>
         <div className={styles.shell}>
           <header className={styles.header}>
-            <h1 className={styles.title}>RUNANA</h1>
+            <h1 className={styles.title}>RUNARA</h1>
           </header>
 
           <section className={styles.panel}>
@@ -2860,10 +3089,13 @@ export default function GameClient() {
         <header className={styles.header}>
           <div className={styles.stack}>
             <div className={styles.titleRow}>
-              <h1 className={styles.title}>RUNANA</h1>
+              <h1 className={styles.title}>RUNARA</h1>
               {season ? (
                 <>
-                  <StatusBadge label={season.seasonName} tone={seasonTone(season.phase)} />
+                  <StatusBadge
+                    label={season.seasonName}
+                    tone={seasonTone(season.phase)}
+                  />
                   <span className={styles.headerMetaText}>
                     ends in {formatCountdown(seasonTargetTs(season))}
                   </span>
@@ -2872,7 +3104,9 @@ export default function GameClient() {
             </div>
             {season ? (
               season.phase === "grace" ? (
-                <p className={styles.subtitle}>Grace period is open for sync and settlement.</p>
+                <p className={styles.subtitle}>
+                  Grace period is open for sync and settlement.
+                </p>
               ) : null
             ) : null}
           </div>
@@ -2920,7 +3154,9 @@ export default function GameClient() {
             slotsTotal={slotsTotal}
             characters={roster}
             onCreate={handleOpenCreate}
-            onOpenCharacter={(characterId) => void handleOpenCharacter(characterId)}
+            onOpenCharacter={(characterId) =>
+              void handleOpenCharacter(characterId)
+            }
           />
         ) : shellView === "create" ? (
           <CreateCharacterPanel
@@ -2936,52 +3172,22 @@ export default function GameClient() {
             onSubmit={handleCreateCharacter}
           />
         ) : shellView === "run" && character !== null ? (
-          <div className={styles.panelGrid}>
-            <section className={styles.panel}>
-              <div className={styles.characterPanelHeader}>
-                <div className={styles.panelBackRow}>
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    onClick={() => setShellView("character")}
-                    disabled={zoneRunPending}
-                    aria-label="Back to character page"
-                    title="Back to character page"
-                  >
-                    <BackIcon className={styles.iconSvg} />
-                  </button>
-                </div>
-                <div className={styles.characterPanelTopRow}>
-                  <div className={styles.characterIdentityRow}>
-                    <h2 className={styles.characterHeroName}>{character.name}</h2>
-                    <span className={styles.classTag}>
-                      {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
-                    </span>
-                    <span className={styles.secondaryTag}>Lvl {character.level}</span>
-                    <span className={styles.secondaryTag}>
-                      Exp {character.exp}/{nextLevelExpTarget(character.level)}
-                    </span>
-                  </div>
-                  <CharacterSyncButton
-                    character={character}
-                    onOpen={() => void handleOpenSync()}
-                  />
-                </div>
-              </div>
-            </section>
-
+          <div className={`${styles.panelGrid} ${styles.characterStage}`}>
             <ZoneRunPanel
               character={character}
               season={season}
               selectedZoneId={selectedZoneId}
               activeRun={activeZoneRunDetail}
-              resumePending={character.activeZoneRun !== null && activeZoneRunDetail === null}
+              resumePending={
+                character.activeZoneRun !== null && activeZoneRunDetail === null
+              }
               topology={zoneTopology}
               topologyPending={zoneTopologyPending}
               topologyError={zoneTopologyError}
               pending={zoneRunPending}
               refreshPending={zoneRunRefreshPending}
               error={zoneRunError}
+              onBack={() => setShellView("character")}
               onSelectZone={setSelectedZoneId}
               onStartRun={handleStartZoneRun}
               onRefreshRun={async () => {
@@ -3006,7 +3212,9 @@ export default function GameClient() {
               </section>
             ) : null}
           </div>
-        ) : shellView === "sync" && character !== null && syncDetail !== null ? (
+        ) : shellView === "sync" &&
+          character !== null &&
+          syncDetail !== null ? (
           <CharacterSyncPage
             detail={syncDetail}
             walletAvailability={walletAvailability}
@@ -3015,7 +3223,9 @@ export default function GameClient() {
             setWalletActionStatus={setWalletActionStatus}
             onConnectWallet={handleConnectWallet}
             onRefreshCharacter={() => refreshCharacter(character.userId)}
-            onRefreshSyncDetail={() => refreshSyncDetail(character.characterId, character.userId)}
+            onRefreshSyncDetail={() =>
+              refreshSyncDetail(character.characterId, character.userId)
+            }
             onBack={() => setShellView("character")}
           />
         ) : shellView === "sync" && character !== null ? (
@@ -3028,7 +3238,9 @@ export default function GameClient() {
             slotsTotal={slotsTotal}
             characters={roster}
             onCreate={handleOpenCreate}
-            onOpenCharacter={(characterId) => void handleOpenCharacter(characterId)}
+            onOpenCharacter={(characterId) =>
+              void handleOpenCharacter(characterId)
+            }
           />
         ) : (
           <div className={`${styles.panelGrid} ${styles.characterStage}`}>
@@ -3036,11 +3248,17 @@ export default function GameClient() {
               <div className={styles.characterPanelHeader}>
                 <div className={styles.characterPanelTopRow}>
                   <div className={styles.characterIdentityRow}>
-                    <h2 className={styles.characterHeroName}>{character.name}</h2>
+                    <h2 className={styles.characterHeroName}>
+                      {character.name}
+                    </h2>
                     <span className={styles.classTag}>
-                      {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
+                      {classCatalog.find(
+                        (item) => item.classId === character.classId,
+                      )?.displayName ?? character.classId}
                     </span>
-                    <span className={styles.secondaryTag}>Lvl {character.level}</span>
+                    <span className={styles.secondaryTag}>
+                      Lvl {character.level}
+                    </span>
                     <span className={styles.secondaryTag}>
                       Exp {character.exp}/{nextLevelExpTarget(character.level)}
                     </span>

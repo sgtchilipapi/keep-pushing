@@ -17,7 +17,7 @@ const displayFont = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Keep Pushing",
+  title: "RUNARA",
   description: "Bright atmospheric tactical run prototype.",
 };
 

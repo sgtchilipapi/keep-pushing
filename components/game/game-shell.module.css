@@ -252,6 +252,23 @@
   padding: 14px;
 }
 
+.runPanelFull {
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+
+.zoneCarouselStage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
 .characterSummaryGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -447,6 +464,31 @@
   margin-bottom: 12px;
 }
 
+.backTextButton {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color var(--motion-base),
+    transform var(--motion-fast);
+}
+
+.backTextButton:hover {
+  color: var(--brand-primary-active);
+  transform: translateX(-1px);
+}
+
+.backTextButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .panelTitle {
   margin: 0;
   font-size: 15px;
@@ -587,7 +629,83 @@
   gap: 12px;
 }
 
+.zoneCarousel {
+  flex: 1 1 auto;
+  display: block;
+  min-height: 100%;
+  height: 100%;
+}
+
+.zoneCarouselControl {
+  appearance: none;
+  width: 44px;
+  min-height: 180px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    var(--surface-strong) 0%,
+    var(--surface-soft) 100%
+  );
+  color: var(--text);
+  font: inherit;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform var(--motion-fast),
+    border-color var(--motion-base),
+    background var(--motion-base),
+    box-shadow var(--motion-base);
+}
+
+.zoneCarouselControl:hover {
+  transform: translateY(-1px);
+  border-color: var(--brand-primary-border);
+  background: linear-gradient(
+    180deg,
+    var(--surface-tint) 0%,
+    var(--surface-strong) 100%
+  );
+}
+
+.zoneCarouselControl:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.zoneCarouselIconButton {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  margin-top: -16px;
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--shadow-panel);
+}
+
+.zoneCarouselIconButton:hover {
+  border-color: var(--brand-primary-border);
+  background: var(--surface-strong);
+}
+
+.zoneCarouselIcon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.zoneCarouselIconButtonLeft {
+  left: 12px;
+}
+
+.zoneCarouselIconButtonRight {
+  right: 12px;
+}
+
 .zoneCard {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -595,7 +713,7 @@
   min-height: 170px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 16px;
+  padding: 16px 56px 72px 56px;
   background: var(--text-inverse);
   color: var(--text);
   text-align: left;
@@ -607,6 +725,16 @@
     var(--text-inverse) 0%,
     var(--cloud) 100%
   );
+}
+
+.zoneCardZone1 {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(247, 251, 254, 0.36) 0%,
+      rgba(230, 240, 246, 0.62) 100%
+    ),
+    url("../../app/public/zone1-bg.png") center center / cover no-repeat;
 }
 
 .zoneCardLocked {
@@ -622,6 +750,65 @@
 .zoneCardSelected {
   border-color: var(--brand-primary);
   box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.zoneCarouselCard {
+  min-height: 100%;
+  height: 100%;
+  justify-content: center;
+  width: 100%;
+}
+
+.zoneCarouselCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.zoneCarouselCaption {
+  display: inline;
+  max-width: min(34ch, 100%);
+  padding: 0.14em 0.42em;
+  border-radius: 0.35em;
+  background: rgba(255, 255, 255, 0.5);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.zoneCarouselCaptionEyebrow {
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.zoneCarouselCaptionTitle {
+  line-height: 1.25;
+}
+
+.zoneCarouselCaptionBody {
+  line-height: 1.7;
+}
+
+.zoneCarouselMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: 700;
+}
+
+.zoneCarouselActions {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: fit-content;
+  margin: 0;
+  padding-top: 0;
 }
 
 .mapWindowGrid {
@@ -877,6 +1064,21 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
+}
+
+.runPanelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.formGrid.runPanelBody {
+  display: flex;
+  flex-direction: column;
+}
+
+.runActionRow {
+  justify-content: flex-end;
 }
 
 .button {
@@ -1210,6 +1412,15 @@
 
   .visualMapShell {
     padding: 14px;
+  }
+
+  .zoneCarousel {
+    display: block;
+  }
+
+  .zoneCarouselControl {
+    min-height: var(--tap-size);
+    width: 100%;
   }
 
   .visualMapFrame {

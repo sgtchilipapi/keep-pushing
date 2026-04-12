@@ -177,7 +177,7 @@ export async function createRunSharePayload(
     runId: run.runId,
     shareUrl,
     resultUrl,
-    shareText: `${run.characterName} finished Zone ${run.zoneId} in RUNANA. ${shareUrl}`,
+    shareText: `${run.characterName} finished Zone ${run.zoneId} in RUNARA. ${shareUrl}`,
     shareStatus: run.shareStatus,
   };
 }

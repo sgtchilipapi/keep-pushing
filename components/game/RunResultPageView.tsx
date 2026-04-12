@@ -44,7 +44,7 @@ type RunResultPageViewProps = {
 export default function RunResultPageView(props: RunResultPageViewProps) {
   const shareUrl = new URL(props.run.shareUrl, props.origin).toString();
   const resultUrl = new URL(props.run.resultUrl, props.origin).toString();
-  const shareText = `${props.run.characterName} finished Zone ${props.run.zoneId} in RUNANA. ${shareUrl}`;
+  const shareText = `${props.run.characterName} finished Zone ${props.run.zoneId} in RUNARA. ${shareUrl}`;
 
   return (
     <main className={styles.page}>
@@ -153,12 +153,18 @@ export default function RunResultPageView(props: RunResultPageViewProps) {
 
             <div className={styles.resultBattleList}>
               {props.run.battles.map((battle) => (
-                <article key={battle.battleId} className={styles.resultBattleCard}>
+                <article
+                  key={battle.battleId}
+                  className={styles.resultBattleCard}
+                >
                   <div className={styles.panelTitleRow}>
                     <div className={styles.stack}>
-                      <h3 className={styles.resultBattleTitle}>{battle.enemyName}</h3>
+                      <h3 className={styles.resultBattleTitle}>
+                        {battle.enemyName}
+                      </h3>
                       <p className={styles.noteText}>
-                        {battle.nodeId ?? "unknown-node"} / {battle.subnodeId ?? "unknown-subnode"}
+                        {battle.nodeId ?? "unknown-node"} /{" "}
+                        {battle.subnodeId ?? "unknown-subnode"}
                       </p>
                     </div>
                     <div className={styles.inlineStack}>
@@ -172,7 +178,8 @@ export default function RunResultPageView(props: RunResultPageViewProps) {
                           tone={
                             battle.settlementStatus === "COMMITTED"
                               ? "success"
-                              : battle.settlementStatus === "LOCAL_ONLY_ARCHIVED"
+                              : battle.settlementStatus ===
+                                  "LOCAL_ONLY_ARCHIVED"
                                 ? "danger"
                                 : "warning"
                           }
@@ -188,11 +195,15 @@ export default function RunResultPageView(props: RunResultPageViewProps) {
                     </div>
                     <div className={styles.keyValueItem}>
                       <span className={styles.keyLabel}>Winner</span>
-                      <span className={styles.keyValue}>{battle.winnerEntityId}</span>
+                      <span className={styles.keyValue}>
+                        {battle.winnerEntityId}
+                      </span>
                     </div>
                     <div className={styles.keyValueItem}>
                       <span className={styles.keyLabel}>Rounds</span>
-                      <span className={styles.keyValue}>{battle.roundsPlayed}</span>
+                      <span className={styles.keyValue}>
+                        {battle.roundsPlayed}
+                      </span>
                     </div>
                     <div className={styles.keyValueItem}>
                       <span className={styles.keyLabel}>Resolved At</span>
