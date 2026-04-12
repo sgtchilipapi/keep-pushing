@@ -15,6 +15,12 @@ import {
 } from "@solana/web3.js";
 
 import {
+  getCompactClassId,
+} from "../lib/catalog/classes";
+import {
+  getLatestZoneRunTopology,
+} from "../lib/combat/zoneRunTopologies";
+import {
   accountCharacterIdHex,
   accountStateHashHex,
   fetchCharacterRootAccount,
@@ -22,6 +28,7 @@ import {
   fetchCharacterStatsAccount,
   fetchCharacterWorldProgressAccount,
   fetchCharacterZoneProgressPageAccount,
+  fetchClassRegistryAccount,
   fetchEnemyArchetypeRegistryAccount,
   fetchProgramConfigAccount,
   fetchSeasonPolicyAccount,
@@ -29,6 +36,7 @@ import {
   fetchZoneRegistryAccount,
 } from "../lib/solana/runanaAccounts";
 import {
+  buildInitializeClassRegistryInstruction,
   buildInitializeEnemyArchetypeRegistryInstruction,
   buildInitializeProgramConfigInstruction,
   buildInitializeSeasonPolicyInstruction,
@@ -50,6 +58,7 @@ import {
 } from "../lib/solana/runanaClient";
 import {
   RUNANA_CLUSTER_ID_LOCALNET,
+  deriveClassRegistryPda,
   deriveEnemyArchetypeRegistryPda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
@@ -337,6 +346,8 @@ async function ensureProgramBootstrap(
     seasonEndTs,
     commitGraceEndTs,
   } = context;
+  const topology = getLatestZoneRunTopology(zoneId);
+  const compactSoldierClassId = getCompactClassId("soldier");
 
   const programConfigPubkey = deriveProgramConfigPda(programId);
   const existingProgramConfig = await connection.getAccountInfo(
@@ -357,6 +368,7 @@ async function ensureProgramBootstrap(
         settlementPaused: false,
         maxBattlesPerBatch: 8,
         maxHistogramEntriesPerBatch: 8,
+        maxRunsPerBatch: 4,
         programId,
       }),
     });
@@ -404,7 +416,11 @@ async function ensureProgramBootstrap(
     });
   }
 
-  const zoneRegistryPubkey = deriveZoneRegistryPda(zoneId, programId);
+  const zoneRegistryPubkey = deriveZoneRegistryPda(
+    zoneId,
+    topology.topologyVersion,
+    programId,
+  );
   if (
     (await connection.getAccountInfo(zoneRegistryPubkey, commitment)) === null
   ) {
@@ -417,6 +433,9 @@ async function ensureProgramBootstrap(
         payer: payer.publicKey,
         adminAuthority: admin.publicKey,
         zoneId,
+        topologyVersion: topology.topologyVersion,
+        totalSubnodeCount: topology.totalSubnodeCount,
+        topologyHash: topology.topologyHash,
         expMultiplierNum: 1,
         expMultiplierDen: 1,
         programId,
@@ -446,7 +465,33 @@ async function ensureProgramBootstrap(
     });
   }
 
-  const zoneEnemySetPubkey = deriveZoneEnemySetPda(zoneId, programId);
+  const classRegistryPubkey = deriveClassRegistryPda(
+    compactSoldierClassId,
+    programId,
+  );
+  if (
+    (await connection.getAccountInfo(classRegistryPubkey, commitment)) === null
+  ) {
+    await sendAdminInstruction({
+      connection,
+      commitment,
+      payer,
+      signers: [admin],
+      instruction: buildInitializeClassRegistryInstruction({
+        payer: payer.publicKey,
+        adminAuthority: admin.publicKey,
+        classId: compactSoldierClassId,
+        enabled: true,
+        programId,
+      }),
+    });
+  }
+
+  const zoneEnemySetPubkey = deriveZoneEnemySetPda(
+    zoneId,
+    topology.topologyVersion,
+    programId,
+  );
   const zoneEnemySetInfo = await connection.getAccountInfo(
     zoneEnemySetPubkey,
     commitment,
@@ -461,7 +506,8 @@ async function ensureProgramBootstrap(
         payer: payer.publicKey,
         adminAuthority: admin.publicKey,
         zoneId,
-        allowedEnemyArchetypeIds: [enemyArchetypeId],
+        topologyVersion: topology.topologyVersion,
+        enemyRules: [{ enemyArchetypeId, maxPerRun: topology.totalSubnodeCount }],
         programId,
       }),
     });
@@ -472,8 +518,9 @@ async function ensureProgramBootstrap(
       commitment,
     );
     if (
-      decoded.allowedEnemyArchetypeIds.length !== 1 ||
-      decoded.allowedEnemyArchetypeIds[0] !== enemyArchetypeId
+      decoded.enemyRules.length !== 1 ||
+      decoded.enemyRules[0]?.enemyArchetypeId !== enemyArchetypeId ||
+      decoded.enemyRules[0]?.maxPerRun !== topology.totalSubnodeCount
     ) {
       await sendAdminInstruction({
         connection,
@@ -483,7 +530,8 @@ async function ensureProgramBootstrap(
         instruction: buildUpdateZoneEnemySetInstruction({
           adminAuthority: admin.publicKey,
           zoneId,
-          allowedEnemyArchetypeIds: [enemyArchetypeId],
+          topologyVersion: topology.topologyVersion,
+          enemyRules: [{ enemyArchetypeId, maxPerRun: topology.totalSubnodeCount }],
           programId,
         }),
       });
@@ -545,6 +593,7 @@ describeLocalnet("runana localnet integration", () => {
   });
 
   it("bootstraps admin state with backend instructions on localnet", async () => {
+    const topology = getLatestZoneRunTopology(context.zoneId);
     const programConfig = await fetchProgramConfigAccount(
       context.connection,
       deriveProgramConfigPda(context.programId),
@@ -557,12 +606,25 @@ describeLocalnet("runana localnet integration", () => {
     );
     const zoneRegistry = await fetchZoneRegistryAccount(
       context.connection,
-      deriveZoneRegistryPda(context.zoneId, context.programId),
+      deriveZoneRegistryPda(
+        context.zoneId,
+        topology.topologyVersion,
+        context.programId,
+      ),
       context.commitment,
     );
     const zoneEnemySet = await fetchZoneEnemySetAccount(
       context.connection,
-      deriveZoneEnemySetPda(context.zoneId, context.programId),
+      deriveZoneEnemySetPda(
+        context.zoneId,
+        topology.topologyVersion,
+        context.programId,
+      ),
+      context.commitment,
+    );
+    const classRegistry = await fetchClassRegistryAccount(
+      context.connection,
+      deriveClassRegistryPda(getCompactClassId("soldier"), context.programId),
       context.commitment,
     );
     const enemyArchetype = await fetchEnemyArchetypeRegistryAccount(
@@ -581,6 +643,7 @@ describeLocalnet("runana localnet integration", () => {
       context.serverSigner.publicKey.toBase58(),
     );
     expect(programConfig.settlementPaused).toBe(false);
+    expect(programConfig.maxRunsPerBatch).toBe(4);
     expect(seasonPolicy.seasonId).toBe(context.seasonId);
     expect(Number(seasonPolicy.seasonStartTs)).toBe(context.seasonStartTs);
     expect(Number(seasonPolicy.seasonEndTs)).toBe(context.seasonEndTs);
@@ -588,11 +651,19 @@ describeLocalnet("runana localnet integration", () => {
       context.commitGraceEndTs,
     );
     expect(zoneRegistry.zoneId).toBe(context.zoneId);
+    expect(zoneRegistry.topologyVersion).toBe(topology.topologyVersion);
+    expect(zoneRegistry.totalSubnodeCount).toBe(topology.totalSubnodeCount);
+    expect(zoneRegistry.topologyHash).toBe(topology.topologyHash);
     expect(zoneRegistry.expMultiplierNum).toBe(1);
     expect(zoneRegistry.expMultiplierDen).toBe(1);
-    expect(zoneEnemySet.allowedEnemyArchetypeIds).toEqual([
-      context.enemyArchetypeId,
+    expect(zoneEnemySet.enemyRules).toEqual([
+      {
+        enemyArchetypeId: context.enemyArchetypeId,
+        maxPerRun: topology.totalSubnodeCount,
+      },
     ]);
+    expect(classRegistry.classId).toBe(getCompactClassId("soldier"));
+    expect(classRegistry.enabled).toBe(true);
     expect(enemyArchetype.expRewardBase).toBe(context.expRewardBase);
   });
 
@@ -611,6 +682,8 @@ describeLocalnet("runana localnet integration", () => {
       seasonId: context.seasonId,
       characterIdHex,
       initialUnlockedZoneId: context.zoneId,
+      classId: "soldier",
+      name: "Local Runner",
       programId: context.programId,
     });
     const preparedCreate = await buildPreparedVersionedTransaction({

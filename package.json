@@ -16,6 +16,7 @@
     "solana:character:create": "npx tsx scripts/solana/createCharacter.ts",
     "solana:first-sync": "npx tsx scripts/solana/runFirstSync.ts",
     "solana:encounter:settle": "npx tsx scripts/solana/runEncounterSettlement.ts",
+    "solana:benchmark:settlement-envelope": "npx tsx scripts/solana/benchmarkSettlementEnvelope.ts",
     "solana:bootstrap": "npx tsx scripts/solana/seedBootstrap.ts",
     "solana:bootstrap:dry-run": "npx tsx scripts/solana/seedBootstrap.ts --dry-run"
   },

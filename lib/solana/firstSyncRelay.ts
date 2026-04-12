@@ -331,6 +331,8 @@ export async function prepareSolanaFirstSync(
   let seasonIdAtCreation: number;
   let initialUnlockedZoneId: number;
   let localCharacterId: string;
+  let classId: string;
+  let name: string;
 
   if (existingBatch !== null) {
     const anchor = await prepareFirstSyncCharacterAnchor({
@@ -366,6 +368,8 @@ export async function prepareSolanaFirstSync(
       lastCommittedSeasonId: seasonIdAtCreation,
     };
     initialUnlockedZoneId = anchor.initialUnlockedZoneId;
+    classId = anchor.classId;
+    name = anchor.name;
   } else {
     const rebased = await prepareRebase({
       characterId: input.characterId,
@@ -387,6 +391,8 @@ export async function prepareSolanaFirstSync(
     seasonIdAtCreation = rebased.anchor.seasonIdAtCreation;
     initialUnlockedZoneId = rebased.anchor.initialUnlockedZoneId;
     localCharacterId = rebased.anchor.characterId;
+    classId = rebased.anchor.classId;
+    name = rebased.anchor.name;
   }
 
   const permitDomain = permitDomainFromDraft({
@@ -422,6 +428,8 @@ export async function prepareSolanaFirstSync(
     programId,
     characterIdHex: chainCharacterIdHex,
     initialUnlockedZoneId,
+    classId,
+    name,
   });
   const settlementInstructionAccounts = buildCanonicalSettlementInstructionAccounts({
     payload,
@@ -486,6 +494,8 @@ export async function prepareSolanaFirstSync(
       localCharacterId,
       chainCharacterIdHex,
       characterRootPubkey,
+      classId,
+      name,
       characterCreationTs,
       seasonIdAtCreation,
       initialUnlockedZoneId,

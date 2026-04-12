@@ -62,7 +62,11 @@ import {
   fetchProgramConfigAccount,
 } from '../lib/solana/runanaAccounts';
 import { prepareFirstSyncTransaction } from '../lib/solana/playerOwnedTransactions';
-import { RUNANA_PROGRAM_ID, computeAnchorInstructionDiscriminator } from '../lib/solana/runanaProgram';
+import {
+  RUNANA_PROGRAM_ID,
+  computeAnchorInstructionDiscriminator,
+  computeGenesisStateHashHex,
+} from '../lib/solana/runanaProgram';
 
 const prepareFirstSyncRebaseMock = jest.mocked(prepareFirstSyncRebase);
 const prepareFirstSyncCharacterAnchorMock = jest.mocked(prepareFirstSyncCharacterAnchor);
@@ -87,6 +91,8 @@ function buildPreparedRebase(authority: string, batchCount = 1) {
       characterId: 'character-1',
       authority,
       feePayer: authority,
+      name: 'Rookie',
+      classId: 'soldier',
       characterCreationTs: 1_700_000_000,
       seasonIdAtCreation: 4,
       initialUnlockedZoneId: 1,
@@ -115,6 +121,22 @@ function buildPreparedRebase(authority: string, batchCount = 1) {
         payload: {
           characterId: chainCharacterIdHex,
           batchId,
+          startRunSequence: batchId,
+          endRunSequence: batchId,
+          runSummaries: [
+            {
+              closedRunSequence: batchId,
+              zoneId: 1 + index,
+              topologyVersion: 1,
+              topologyHash: `${44 + index}`.repeat(32),
+              terminalStatus: 'COMPLETED' as const,
+              rewardedBattleCount: 2,
+              rewardedEncounterHistogram: [{ enemyArchetypeId: 101 + index, count: 2 }],
+              zoneProgressDelta: [{ zoneId: 1 + index, newState: 2 as const }],
+              firstRewardedBattleTs: 1_700_000_010 + index * 40,
+              lastRewardedBattleTs: 1_700_000_040 + index * 40,
+            },
+          ],
           startNonce,
           endNonce,
           battleCount: 2,
@@ -146,6 +168,9 @@ function buildPersistedBatch(
     id: `settlement-batch-${batchIndex + 1}`,
     characterId: rebased.anchor.characterId,
     batchId: draft.payload.batchId,
+    startRunSequence: draft.payload.startRunSequence,
+    endRunSequence: draft.payload.endRunSequence,
+    runSummaries: draft.payload.runSummaries,
     startNonce: draft.payload.startNonce,
     endNonce: draft.payload.endNonce,
     battleCount: draft.payload.battleCount,
@@ -184,6 +209,8 @@ describe('firstSyncRelay', () => {
       characterId: 'character-1',
       authority: '',
       feePayer: '',
+      name: 'Rookie',
+      classId: 'soldier',
       characterCreationTs: 1_700_000_000,
       seasonIdAtCreation: 4,
       initialUnlockedZoneId: 1,
@@ -191,27 +218,46 @@ describe('firstSyncRelay', () => {
   });
 
   it('returns the player authorization message before transaction assembly', async () => {
-    const authority = Keypair.generate().publicKey.toBase58();
-    prepareFirstSyncRebaseMock.mockResolvedValue(buildPreparedRebase(authority));
+    const authority = Keypair.generate();
+    const serverSigner = Keypair.generate();
+    const buildPreparedTransaction = jest.fn(async () => ({
+      serializedMessageBase64: Buffer.from('message').toString('base64'),
+      serializedTransactionBase64: Buffer.from('transaction').toString('base64'),
+      recentBlockhash: '11111111111111111111111111111111',
+      lastValidBlockHeight: 88,
+    }));
+    prepareFirstSyncRebaseMock.mockResolvedValue(buildPreparedRebase(authority.publicKey.toBase58()));
+    fetchProgramConfigAccountMock.mockResolvedValue({
+      trustedServerSigner: serverSigner.publicKey,
+    } as Awaited<ReturnType<typeof fetchProgramConfigAccount>>);
 
     const result = await prepareSolanaFirstSync(
       {
         characterId: 'character-1',
-        authority,
+        authority: authority.publicKey.toBase58(),
       },
       {
+        connection: {
+          getLatestBlockhash: jest.fn().mockResolvedValue({
+            blockhash: '11111111111111111111111111111111',
+            lastValidBlockHeight: 88,
+          }),
+          getAccountInfo: jest.fn(),
+        },
+        serverSigner,
+        addressLookupTableAccounts: [],
         prepareFirstSyncRebase: prepareFirstSyncRebaseMock,
+        buildPreparedTransaction: buildPreparedTransaction as never,
       },
     );
 
-    expect(result.phase).toBe('authorize');
+    expect(result.phase).toBe('sign_transaction');
     expect(result.expectedCursor.lastCommittedEndNonce).toBe(0);
-    expect(result.permitDomain.playerAuthority).toBe(authority);
+    expect(result.permitDomain.playerAuthority).toBe(authority.publicKey.toBase58());
     expect(result.payload.signatureScheme).toBe(1);
-    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA|settlement|1|');
-    expect(Buffer.from(result.playerAuthorizationMessageBase64, 'base64').length).toBeGreaterThan(
-      32,
-    );
+    expect(result.playerAuthorizationMessageUtf8).toBe('');
+    expect(result.playerAuthorizationMessageBase64).toBe('');
+    expect(buildPreparedTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('assembles create-plus-settle instructions in the required order', async () => {
@@ -230,7 +276,6 @@ describe('firstSyncRelay', () => {
 
       expect(instructionProgramIds).toEqual([
         RUNANA_PROGRAM_ID.toBase58(),
-        Ed25519Program.programId.toBase58(),
         Ed25519Program.programId.toBase58(),
         RUNANA_PROGRAM_ID.toBase58(),
       ]);
@@ -290,7 +335,13 @@ describe('firstSyncRelay', () => {
   it('reuses an existing unconfirmed first-sync batch on prepare retries', async () => {
     const authority = Keypair.generate().publicKey.toBase58();
     const preparedRebase = buildPreparedRebase(authority);
-    const persistedBatch = buildPersistedBatch(preparedRebase);
+    const persistedBatch = {
+      ...buildPersistedBatch(preparedRebase),
+      startStateHash: computeGenesisStateHashHex(
+        new PublicKey(preparedRebase.reservedIdentity.characterRootPubkey),
+        preparedRebase.reservedIdentity.chainCharacterIdHex,
+      ),
+    };
 
     prismaMock.character.findChainState.mockResolvedValue({
       id: 'character-1',
@@ -310,6 +361,16 @@ describe('firstSyncRelay', () => {
       lastReconciledAt: null,
     });
     prismaMock.settlementBatch.findNextUnconfirmedForCharacter.mockResolvedValue(persistedBatch);
+    const serverSigner = Keypair.generate();
+    const buildPreparedTransaction = jest.fn(async () => ({
+      serializedMessageBase64: Buffer.from('message').toString('base64'),
+      serializedTransactionBase64: Buffer.from('transaction').toString('base64'),
+      recentBlockhash: '11111111111111111111111111111111',
+      lastValidBlockHeight: 88,
+    }));
+    fetchProgramConfigAccountMock.mockResolvedValue({
+      trustedServerSigner: serverSigner.publicKey,
+    } as Awaited<ReturnType<typeof fetchProgramConfigAccount>>);
 
     const result = await prepareSolanaFirstSync(
       {
@@ -317,16 +378,27 @@ describe('firstSyncRelay', () => {
         authority,
       },
       {
+        connection: {
+          getLatestBlockhash: jest.fn().mockResolvedValue({
+            blockhash: '11111111111111111111111111111111',
+            lastValidBlockHeight: 88,
+          }),
+          getAccountInfo: jest.fn(),
+        },
+        serverSigner,
+        addressLookupTableAccounts: [],
+        buildPreparedTransaction: buildPreparedTransaction as never,
         prismaClient: prismaMock as never,
         prepareFirstSyncRebase: prepareFirstSyncRebaseMock,
       },
     );
 
-    expect(result.phase).toBe('authorize');
+    expect(result.phase).toBe('sign_transaction');
     expect(result.payload.batchHash).toBe(persistedBatch.batchHash);
     expect(result.expectedCursor.lastCommittedStateHash).toHaveLength(64);
     expect(prepareFirstSyncRebaseMock).not.toHaveBeenCalled();
     expect(prepareFirstSyncCharacterAnchorMock).toHaveBeenCalledTimes(1);
+    expect(buildPreparedTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('reuses the persisted first-sync batch on submit retries when awaiting backlog is already sealed', async () => {
@@ -353,6 +425,8 @@ describe('firstSyncRelay', () => {
         localCharacterId: preparedRebase.anchor.characterId,
         chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
         characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        classId: preparedRebase.anchor.classId,
+        name: preparedRebase.anchor.name,
         characterCreationTs: preparedRebase.anchor.characterCreationTs,
         seasonIdAtCreation: preparedRebase.anchor.seasonIdAtCreation,
         initialUnlockedZoneId: preparedRebase.anchor.initialUnlockedZoneId,
@@ -492,6 +566,8 @@ describe('firstSyncRelay', () => {
         localCharacterId: preparedRebase.anchor.characterId,
         chainCharacterIdHex: preparedRebase.reservedIdentity.chainCharacterIdHex,
         characterRootPubkey: preparedRebase.reservedIdentity.characterRootPubkey,
+        classId: preparedRebase.anchor.classId,
+        name: preparedRebase.anchor.name,
         characterCreationTs: preparedRebase.anchor.characterCreationTs,
         seasonIdAtCreation: preparedRebase.anchor.seasonIdAtCreation,
         initialUnlockedZoneId: preparedRebase.anchor.initialUnlockedZoneId,

@@ -464,6 +464,10 @@ export function getZoneRunTopology(
   return cloneTopology(topology);
 }
 
+export function listZoneRunTopologies(): ZoneRunTopology[] {
+  return TOPOLOGIES.map((topology) => cloneTopology(topology));
+}
+
 export function getZoneNode(topology: ZoneRunTopology, nodeId: string): ZoneNodeDef {
   const node = topology.nodes.find((candidate) => candidate.nodeId === nodeId);
   if (node === undefined) {

@@ -4,17 +4,21 @@ import { resolve } from 'node:path';
 import { PublicKey, sendAndConfirmTransaction, Transaction } from '@solana/web3.js';
 
 import {
+  buildInitializeClassRegistryInstruction,
   buildInitializeEnemyArchetypeRegistryInstruction,
   buildInitializeProgramConfigInstruction,
   buildInitializeSeasonPolicyInstruction,
   buildInitializeZoneEnemySetInstruction,
   buildInitializeZoneRegistryInstruction,
+  buildUpdateClassRegistryInstruction,
   buildUpdateZoneEnemySetInstruction,
+  type InitializeClassRegistryArgs,
   type InitializeEnemyArchetypeRegistryArgs,
   type InitializeProgramConfigArgs,
   type InitializeSeasonPolicyArgs,
   type InitializeZoneEnemySetArgs,
   type InitializeZoneRegistryArgs,
+  type ZoneEnemyRuleEntry,
 } from '../../lib/solana/runanaAdminInstructions';
 import {
   createRunanaConnection,
@@ -23,6 +27,7 @@ import {
   resolveRunanaProgramId,
 } from '../../lib/solana/runanaClient';
 import {
+  decodeClassRegistryAccount,
   decodeEnemyArchetypeRegistryAccount,
   decodeProgramConfigAccount,
   decodeSeasonPolicyAccount,
@@ -30,6 +35,7 @@ import {
   decodeZoneRegistryAccount,
 } from '../../lib/solana/runanaAccounts';
 import {
+  deriveClassRegistryPda,
   deriveEnemyArchetypeRegistryPda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
@@ -37,6 +43,7 @@ import {
   deriveZoneRegistryPda,
 } from '../../lib/solana/runanaProgram';
 import {
+  listSharedBootstrapClassRegistries,
   listSharedBootstrapEnemyArchetypes,
   listSharedBootstrapZoneEnemySets,
   mergeZoneRegistryDefaults,
@@ -47,6 +54,7 @@ interface BootstrapConfigFile {
     trustedServerSigner: string;
     settlementPaused: boolean;
     maxBattlesPerBatch: number;
+    maxRunsPerBatch: number;
     maxHistogramEntriesPerBatch: number;
   };
   seasons?: Array<{
@@ -57,12 +65,20 @@ interface BootstrapConfigFile {
   }>;
   zoneRegistries?: Array<{
     zoneId: number;
+    topologyVersion: number;
+    totalSubnodeCount: number;
+    topologyHash: string;
     expMultiplierNum: number;
     expMultiplierDen: number;
   }>;
   zoneEnemySets?: Array<{
     zoneId: number;
-    allowedEnemyArchetypeIds: number[];
+    topologyVersion: number;
+    enemyRules: ZoneEnemyRuleEntry[];
+  }>;
+  classRegistries?: Array<{
+    classId: number;
+    enabled: boolean;
   }>;
   enemyArchetypes?: Array<{
     enemyArchetypeId: number;
@@ -124,12 +140,12 @@ function expectInteger(value: unknown, field: string, minimum = 0): number {
   return value as number;
 }
 
-function expectIntegerArray(value: unknown, field: string): number[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be an array`);
+function expectHash32(value: unknown, field: string): string {
+  const normalized = expectString(value, field).replace(/^0x/i, '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be a 32-byte hex string`);
   }
-
-  return value.map((entry, index) => expectInteger(entry, `${field}[${index}]`, 0));
+  return normalized;
 }
 
 function expectOptionalArray<T>(
@@ -146,6 +162,34 @@ function expectOptionalArray<T>(
   }
 
   return value.map(decoder);
+}
+
+function decodeEnemyRules(value: unknown, field: string): ZoneEnemyRuleEntry[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be an array`);
+  }
+
+  const entries = value.map((entry, index) => {
+    const item = expectRecord(entry, `${field}[${index}]`);
+    return {
+      enemyArchetypeId: expectInteger(
+        item.enemyArchetypeId,
+        `${field}[${index}].enemyArchetypeId`,
+        0,
+      ),
+      maxPerRun: expectInteger(item.maxPerRun, `${field}[${index}].maxPerRun`, 1),
+    };
+  });
+
+  for (let index = 1; index < entries.length; index += 1) {
+    if (entries[index - 1]!.enemyArchetypeId >= entries[index]!.enemyArchetypeId) {
+      throw new Error(
+        `ERR_INVALID_${field.toUpperCase()}: ${field} must be strictly increasing without duplicates`,
+      );
+    }
+  }
+
+  return entries;
 }
 
 function parseCliArgs(argv: string[]): CliOptions {
@@ -200,6 +244,11 @@ function decodeBootstrapConfig(raw: unknown): BootstrapConfigFile {
         'programConfig.maxBattlesPerBatch',
         0,
       ),
+      maxRunsPerBatch: expectInteger(
+        programConfig.maxRunsPerBatch,
+        'programConfig.maxRunsPerBatch',
+        1,
+      ),
       maxHistogramEntriesPerBatch: expectInteger(
         programConfig.maxHistogramEntriesPerBatch,
         'programConfig.maxHistogramEntriesPerBatch',
@@ -223,6 +272,20 @@ function decodeBootstrapConfig(raw: unknown): BootstrapConfigFile {
       const item = expectRecord(entry, `zoneRegistries[${index}]`);
       return {
         zoneId: expectInteger(item.zoneId, `zoneRegistries[${index}].zoneId`, 0),
+        topologyVersion: expectInteger(
+          item.topologyVersion,
+          `zoneRegistries[${index}].topologyVersion`,
+          0,
+        ),
+        totalSubnodeCount: expectInteger(
+          item.totalSubnodeCount,
+          `zoneRegistries[${index}].totalSubnodeCount`,
+          1,
+        ),
+        topologyHash: expectHash32(
+          item.topologyHash,
+          `zoneRegistries[${index}].topologyHash`,
+        ),
         expMultiplierNum: expectInteger(
           item.expMultiplierNum,
           `zoneRegistries[${index}].expMultiplierNum`,
@@ -239,10 +302,22 @@ function decodeBootstrapConfig(raw: unknown): BootstrapConfigFile {
       const item = expectRecord(entry, `zoneEnemySets[${index}]`);
       return {
         zoneId: expectInteger(item.zoneId, `zoneEnemySets[${index}].zoneId`, 0),
-        allowedEnemyArchetypeIds: expectIntegerArray(
-          item.allowedEnemyArchetypeIds,
-          `zoneEnemySets[${index}].allowedEnemyArchetypeIds`,
+        topologyVersion: expectInteger(
+          item.topologyVersion,
+          `zoneEnemySets[${index}].topologyVersion`,
+          0,
         ),
+        enemyRules: decodeEnemyRules(
+          item.enemyRules,
+          `zoneEnemySets[${index}].enemyRules`,
+        ),
+      };
+    }),
+    classRegistries: expectOptionalArray(root.classRegistries, 'classRegistries', (entry, index) => {
+      const item = expectRecord(entry, `classRegistries[${index}]`);
+      return {
+        classId: expectInteger(item.classId, `classRegistries[${index}].classId`, 0),
+        enabled: expectBoolean(item.enabled, `classRegistries[${index}].enabled`),
       };
     }),
     enemyArchetypes: expectOptionalArray(root.enemyArchetypes, 'enemyArchetypes', (entry, index) => {
@@ -266,13 +341,23 @@ function loadBootstrapConfig(configPath: string): BootstrapConfigFile {
   return {
     ...decoded,
     zoneRegistries: mergeZoneRegistryDefaults(decoded.zoneRegistries ?? []),
-    zoneEnemySets: listSharedBootstrapZoneEnemySets(),
-    enemyArchetypes: listSharedBootstrapEnemyArchetypes(),
+    zoneEnemySets: decoded.zoneEnemySets?.length
+      ? decoded.zoneEnemySets
+      : listSharedBootstrapZoneEnemySets(),
+    classRegistries: decoded.classRegistries?.length
+      ? decoded.classRegistries
+      : listSharedBootstrapClassRegistries().map((entry) => ({
+          classId: entry.compactId,
+          enabled: entry.enabled,
+        })),
+    enemyArchetypes: decoded.enemyArchetypes?.length
+      ? decoded.enemyArchetypes
+      : listSharedBootstrapEnemyArchetypes(),
   };
 }
 
-function assertUniqueIds<T>(values: T[], getId: (value: T) => number, field: string): void {
-  const seen = new Set<number>();
+function assertUniqueIds<T>(values: T[], getId: (value: T) => number | string, field: string): void {
+  const seen = new Set<number | string>();
   for (const value of values) {
     const id = getId(value);
     if (seen.has(id)) {
@@ -282,12 +367,19 @@ function assertUniqueIds<T>(values: T[], getId: (value: T) => number, field: str
   }
 }
 
-function sortById<T>(values: T[], getId: (value: T) => number): T[] {
-  return [...values].sort((left, right) => getId(left) - getId(right));
+function sortByKey<T>(values: T[], getKey: (value: T) => string): T[] {
+  return [...values].sort((left, right) => getKey(left).localeCompare(getKey(right)));
 }
 
-function sameNumbers(left: number[], right: number[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
+function sameEnemyRules(left: ZoneEnemyRuleEntry[], right: ZoneEnemyRuleEntry[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (entry, index) =>
+        entry.enemyArchetypeId === right[index]?.enemyArchetypeId &&
+        entry.maxPerRun === right[index]?.maxPerRun,
+    )
+  );
 }
 
 async function sendInstruction(args: {
@@ -330,8 +422,17 @@ async function main(): Promise<void> {
   const programConfigPubkey = deriveProgramConfigPda(programId);
 
   assertUniqueIds(config.seasons ?? [], (value) => value.seasonId, 'season');
-  assertUniqueIds(config.zoneRegistries ?? [], (value) => value.zoneId, 'zoneRegistry');
-  assertUniqueIds(config.zoneEnemySets ?? [], (value) => value.zoneId, 'zoneEnemySet');
+  assertUniqueIds(
+    config.zoneRegistries ?? [],
+    (value) => `${value.zoneId}:${value.topologyVersion}`,
+    'zoneRegistry',
+  );
+  assertUniqueIds(
+    config.zoneEnemySets ?? [],
+    (value) => `${value.zoneId}:${value.topologyVersion}`,
+    'zoneEnemySet',
+  );
+  assertUniqueIds(config.classRegistries ?? [], (value) => value.classId, 'classRegistry');
   assertUniqueIds(config.enemyArchetypes ?? [], (value) => value.enemyArchetypeId, 'enemyArchetype');
 
   console.log(`rpc=${connection.rpcEndpoint}`);
@@ -343,6 +444,7 @@ async function main(): Promise<void> {
     trustedServerSigner: new PublicKey(config.programConfig.trustedServerSigner),
     settlementPaused: config.programConfig.settlementPaused,
     maxBattlesPerBatch: config.programConfig.maxBattlesPerBatch,
+    maxRunsPerBatch: config.programConfig.maxRunsPerBatch,
     maxHistogramEntriesPerBatch: config.programConfig.maxHistogramEntriesPerBatch,
   };
 
@@ -372,6 +474,7 @@ async function main(): Promise<void> {
       decoded.trustedServerSigner.equals(desiredProgramConfig.trustedServerSigner) &&
       decoded.settlementPaused === desiredProgramConfig.settlementPaused &&
       decoded.maxBattlesPerBatch === desiredProgramConfig.maxBattlesPerBatch &&
+      decoded.maxRunsPerBatch === desiredProgramConfig.maxRunsPerBatch &&
       decoded.maxHistogramEntriesPerBatch === desiredProgramConfig.maxHistogramEntriesPerBatch;
 
     if (!matches) {
@@ -383,12 +486,15 @@ async function main(): Promise<void> {
     console.log(`skip initialize_program_config ${programConfigPubkey.toBase58()} already matches`);
   }
 
-  for (const zoneRegistry of sortById(config.zoneRegistries ?? [], (value) => value.zoneId)) {
-    const pubkey = deriveZoneRegistryPda(zoneRegistry.zoneId, programId);
+  for (const zoneRegistry of sortByKey(
+    config.zoneRegistries ?? [],
+    (value) => `${value.zoneId.toString().padStart(5, '0')}:${value.topologyVersion.toString().padStart(5, '0')}`,
+  )) {
+    const pubkey = deriveZoneRegistryPda(zoneRegistry.zoneId, zoneRegistry.topologyVersion, programId);
     const accountInfo = await connection.getAccountInfo(pubkey, commitment);
     if (accountInfo === null) {
       await sendInstruction({
-        label: `initialize_zone_registry zone=${zoneRegistry.zoneId} ${pubkey.toBase58()}`,
+        label: `initialize_zone_registry zone=${zoneRegistry.zoneId} topology=${zoneRegistry.topologyVersion} ${pubkey.toBase58()}`,
         dryRun: cli.dryRun,
         payer: authorities.payer,
         admin: authorities.admin,
@@ -405,21 +511,71 @@ async function main(): Promise<void> {
     const decoded = decodeZoneRegistryAccount(pubkey, accountInfo);
     const matches =
       decoded.zoneId === zoneRegistry.zoneId &&
+      decoded.topologyVersion === zoneRegistry.topologyVersion &&
+      decoded.totalSubnodeCount === zoneRegistry.totalSubnodeCount &&
+      Buffer.from(decoded.topologyHash).toString('hex') === zoneRegistry.topologyHash &&
       decoded.expMultiplierNum === zoneRegistry.expMultiplierNum &&
       decoded.expMultiplierDen === zoneRegistry.expMultiplierDen;
 
     if (!matches) {
       throw new Error(
-        `ERR_ZONE_REGISTRY_EXISTS_WITH_DIFFERENT_VALUES: zone ${zoneRegistry.zoneId} already exists with different values`,
+        `ERR_ZONE_REGISTRY_EXISTS_WITH_DIFFERENT_VALUES: zone ${zoneRegistry.zoneId} topology ${zoneRegistry.topologyVersion} already exists with different values`,
       );
     }
 
-    console.log(`skip initialize_zone_registry zone=${zoneRegistry.zoneId} already matches`);
+    console.log(
+      `skip initialize_zone_registry zone=${zoneRegistry.zoneId} topology=${zoneRegistry.topologyVersion} already matches`,
+    );
   }
 
-  for (const enemyArchetype of sortById(
+  for (const classRegistry of sortByKey(
+    config.classRegistries ?? [],
+    (value) => value.classId.toString().padStart(5, '0'),
+  )) {
+    const desired: InitializeClassRegistryArgs = {
+      classId: classRegistry.classId,
+      enabled: classRegistry.enabled,
+    };
+    const pubkey = deriveClassRegistryPda(classRegistry.classId, programId);
+    const accountInfo = await connection.getAccountInfo(pubkey, commitment);
+    if (accountInfo === null) {
+      await sendInstruction({
+        label: `initialize_class_registry class=${classRegistry.classId} ${pubkey.toBase58()}`,
+        dryRun: cli.dryRun,
+        payer: authorities.payer,
+        admin: authorities.admin,
+        instruction: buildInitializeClassRegistryInstruction({
+          payer: authorities.payer.publicKey,
+          adminAuthority: authorities.admin.publicKey,
+          programId,
+          ...desired,
+        }),
+      });
+      continue;
+    }
+
+    const decoded = decodeClassRegistryAccount(pubkey, accountInfo);
+    if (decoded.enabled === desired.enabled) {
+      console.log(`skip update_class_registry class=${classRegistry.classId} already matches`);
+      continue;
+    }
+
+    await sendInstruction({
+      label: `update_class_registry class=${classRegistry.classId} ${pubkey.toBase58()}`,
+      dryRun: cli.dryRun,
+      payer: authorities.payer,
+      admin: authorities.admin,
+      instruction: buildUpdateClassRegistryInstruction({
+        adminAuthority: authorities.admin.publicKey,
+        programId,
+        ...desired,
+      }),
+    });
+  }
+
+  for (const enemyArchetype of sortByKey(
     config.enemyArchetypes ?? [],
-    (value) => value.enemyArchetypeId,
+    (value) => value.enemyArchetypeId.toString().padStart(5, '0'),
   )) {
     const pubkey = deriveEnemyArchetypeRegistryPda(enemyArchetype.enemyArchetypeId, programId);
     const accountInfo = await connection.getAccountInfo(pubkey, commitment);
@@ -455,16 +611,24 @@ async function main(): Promise<void> {
     );
   }
 
-  for (const zoneEnemySet of sortById(config.zoneEnemySets ?? [], (value) => value.zoneId)) {
+  for (const zoneEnemySet of sortByKey(
+    config.zoneEnemySets ?? [],
+    (value) => `${value.zoneId.toString().padStart(5, '0')}:${value.topologyVersion.toString().padStart(5, '0')}`,
+  )) {
     const desired: InitializeZoneEnemySetArgs = {
       zoneId: zoneEnemySet.zoneId,
-      allowedEnemyArchetypeIds: zoneEnemySet.allowedEnemyArchetypeIds,
+      topologyVersion: zoneEnemySet.topologyVersion,
+      enemyRules: zoneEnemySet.enemyRules,
     };
-    const pubkey = deriveZoneEnemySetPda(zoneEnemySet.zoneId, programId);
+    const pubkey = deriveZoneEnemySetPda(
+      zoneEnemySet.zoneId,
+      zoneEnemySet.topologyVersion,
+      programId,
+    );
     const accountInfo = await connection.getAccountInfo(pubkey, commitment);
     if (accountInfo === null) {
       await sendInstruction({
-        label: `initialize_zone_enemy_set zone=${zoneEnemySet.zoneId} ${pubkey.toBase58()}`,
+        label: `initialize_zone_enemy_set zone=${zoneEnemySet.zoneId} topology=${zoneEnemySet.topologyVersion} ${pubkey.toBase58()}`,
         dryRun: cli.dryRun,
         payer: authorities.payer,
         admin: authorities.admin,
@@ -479,13 +643,15 @@ async function main(): Promise<void> {
     }
 
     const decoded = decodeZoneEnemySetAccount(pubkey, accountInfo);
-    if (sameNumbers(decoded.allowedEnemyArchetypeIds, desired.allowedEnemyArchetypeIds)) {
-      console.log(`skip update_zone_enemy_set zone=${zoneEnemySet.zoneId} already matches`);
+    if (sameEnemyRules(decoded.enemyRules, desired.enemyRules)) {
+      console.log(
+        `skip update_zone_enemy_set zone=${zoneEnemySet.zoneId} topology=${zoneEnemySet.topologyVersion} already matches`,
+      );
       continue;
     }
 
     await sendInstruction({
-      label: `update_zone_enemy_set zone=${zoneEnemySet.zoneId} ${pubkey.toBase58()}`,
+      label: `update_zone_enemy_set zone=${zoneEnemySet.zoneId} topology=${zoneEnemySet.topologyVersion} ${pubkey.toBase58()}`,
       dryRun: cli.dryRun,
       payer: authorities.payer,
       admin: authorities.admin,
@@ -493,12 +659,13 @@ async function main(): Promise<void> {
         adminAuthority: authorities.admin.publicKey,
         programId,
         zoneId: desired.zoneId,
-        allowedEnemyArchetypeIds: desired.allowedEnemyArchetypeIds,
+        topologyVersion: desired.topologyVersion,
+        enemyRules: desired.enemyRules,
       }),
     });
   }
 
-  for (const season of sortById(config.seasons ?? [], (value) => value.seasonId)) {
+  for (const season of sortByKey(config.seasons ?? [], (value) => value.seasonId.toString().padStart(10, '0'))) {
     const desired: InitializeSeasonPolicyArgs = {
       seasonId: season.seasonId,
       seasonStartTs: season.seasonStartTs,

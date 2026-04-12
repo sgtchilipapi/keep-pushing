@@ -595,6 +595,14 @@ export async function fetchZoneEnemySetAccount(
   return fetchRequiredDecodedAccount(reader, pubkey, 'ZoneEnemySetAccount', decodeZoneEnemySetAccount, commitment);
 }
 
+export async function fetchClassRegistryAccount(
+  reader: SolanaAccountReader | Connection,
+  pubkey: PublicKey,
+  commitment?: Commitment,
+): Promise<ClassRegistryAccountState> {
+  return fetchRequiredDecodedAccount(reader, pubkey, 'ClassRegistryAccount', decodeClassRegistryAccount, commitment);
+}
+
 export async function fetchEnemyArchetypeRegistryAccount(
   reader: SolanaAccountReader | Connection,
   pubkey: PublicKey,

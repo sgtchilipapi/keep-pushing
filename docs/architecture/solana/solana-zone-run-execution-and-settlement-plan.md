@@ -775,9 +775,9 @@ Execution rule:
 - [x] Update settlement preparation/submit services to use run-native payloads.
 - [x] Update first-sync services to use signer-based one-approval transport.
 - [x] Update local validators/dry-run validators to match the new payload and account model.
-- [ ] Update admin/bootstrap tooling for versioned zone metadata and enemy-rule accounts.
+- [x] Update admin/bootstrap tooling for versioned zone metadata and enemy-rule accounts.
 - [x] Update read-model builders and dashboards to show active runs and closed-run settlement state.
-- [ ] Update remaining operator docs and runbooks to point to the reconciled zone-run path as canonical gameplay.
+- [x] Update remaining operator docs and runbooks to point to the reconciled zone-run path as canonical gameplay.
 - [x] Move runana planning docs into `keep-pushing` and keep only one authoritative documentation root.
 - [x] Mark older conflicting frontend/backend plans as non-authoritative where they still document pre-reconciliation flows.
 
@@ -798,5 +798,5 @@ Execution rule:
 - [ ] Add tests for illegal zone/version references and illegal archetype caps.
 - [ ] Add tests for successful-run-only zone progression.
 - [ ] Add tests for throughput counting rewarded combats only.
-- [ ] Add tests for first-sync and later settlement one-wallet-approval transport expectations.
-- [ ] Benchmark worst-case run-summary batch compute and account envelope size before rollout.
+- [x] Add tests for first-sync and later settlement one-wallet-approval transport expectations.
+- [x] Benchmark worst-case run-summary batch compute and account envelope size before rollout.

@@ -16,10 +16,9 @@ import {
   accountCharacterIdHex,
   fetchCharacterRootAccount,
   fetchCharacterSettlementBatchCursorAccount,
+  fetchClassRegistryAccount,
   fetchProgramConfigAccount,
   fetchSeasonPolicyAccount,
-  fetchZoneEnemySetAccount,
-  fetchZoneRegistryAccount,
   accountStateHashHex,
 } from "./runanaAccounts";
 import {
@@ -43,13 +42,13 @@ import {
   deriveCharacterStatsPda,
   deriveCharacterWorldProgressPda,
   deriveCharacterZoneProgressPagePda,
+  deriveClassRegistryPda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
-  deriveZoneEnemySetPda,
-  deriveZoneRegistryPda,
   computeAnchorInstructionDiscriminator,
 } from "./runanaProgram";
 import { serializeCreateCharacterArgs } from "./runanaCharacterInstructions";
+import { getCompactClassId } from "../catalog/classes";
 
 const STARTER_ACTIVE_SKILLS = ["1001", "1002"];
 const STARTER_PASSIVES = ["2001", "2002"];
@@ -326,6 +325,10 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
   }
 
   const expectedSeasonPolicy = new PublicKey(args.relay.seasonPolicyPubkey);
+  const expectedClassRegistry = deriveClassRegistryPda(
+    getCompactClassId(args.relay.classId),
+    args.programId,
+  );
   const expectedCharacterRoot = deriveCharacterRootPda(
     authority,
     args.relay.chainCharacterIdHex,
@@ -356,6 +359,8 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
     serializeCreateCharacterArgs({
       characterIdHex: args.relay.chainCharacterIdHex,
       initialUnlockedZoneId: args.relay.initialUnlockedZoneId,
+      classId: args.relay.classId,
+      name: args.relay.name,
     }),
   ]);
 
@@ -377,6 +382,12 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
       isSigner: false,
       isWritable: false,
       label: "season_policy",
+    },
+    {
+      pubkey: expectedClassRegistry,
+      isSigner: false,
+      isWritable: false,
+      label: "class_registry",
     },
     {
       pubkey: expectedCharacterRoot,
@@ -506,14 +517,14 @@ async function validateBootstrapPreconditions(args: {
   commitment?: Commitment;
   programId: PublicKey;
   activeSeasonId: number;
-  initialUnlockedZoneId: number;
+  classId: string;
 }): Promise<void> {
   const {
     connection,
     commitment,
     programId,
     activeSeasonId,
-    initialUnlockedZoneId,
+    classId,
   } = args;
 
   await fetchProgramConfigAccount(
@@ -526,14 +537,9 @@ async function validateBootstrapPreconditions(args: {
     deriveSeasonPolicyPda(activeSeasonId, programId),
     commitment,
   );
-  await fetchZoneRegistryAccount(
+  await fetchClassRegistryAccount(
     connection as Connection,
-    deriveZoneRegistryPda(initialUnlockedZoneId, programId),
-    commitment,
-  );
-  await fetchZoneEnemySetAccount(
-    connection as Connection,
-    deriveZoneEnemySetPda(initialUnlockedZoneId, programId),
+    deriveClassRegistryPda(getCompactClassId(classId), programId),
     commitment,
   );
 }
@@ -707,7 +713,7 @@ export async function prepareSolanaCharacterCreation(
     commitment,
     programId,
     activeSeasonId,
-    initialUnlockedZoneId: input.initialUnlockedZoneId,
+    classId: character.classId,
   });
 
   const generateCharacterIdHex =
@@ -739,6 +745,8 @@ export async function prepareSolanaCharacterCreation(
       programId,
       characterIdHex: chainCharacterIdHex,
       initialUnlockedZoneId: input.initialUnlockedZoneId,
+      classId: character.classId,
+      name: character.name,
     });
 
     preparedTransactionBytes = await buildPreparedVersionedTransaction({
@@ -817,6 +825,8 @@ export async function prepareSolanaCharacterCreation(
     localCharacterId: character.id,
     chainCharacterIdHex,
     characterRootPubkey: createInstruction.characterRoot.toBase58(),
+    classId: character.classId,
+    name: character.name,
     seasonPolicyPubkey: createInstruction.seasonPolicy.toBase58(),
     initialUnlockedZoneId: input.initialUnlockedZoneId,
     recentBlockhash: preparedTransactionBytes.recentBlockhash,

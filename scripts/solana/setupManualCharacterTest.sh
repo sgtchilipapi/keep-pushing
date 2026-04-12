@@ -253,14 +253,13 @@ function build_program_if_needed() {
 function write_bootstrap_config() {
   local trusted_server_signer="$1"
 
-  node - "$BOOTSTRAP_CONFIG_PATH" "$trusted_server_signer" "$SEASON_ID" "$ZONE_ID" "$MAX_BATTLES_PER_BATCH" "$MAX_HISTOGRAM_ENTRIES_PER_BATCH" <<'NODE'
+  node - "$BOOTSTRAP_CONFIG_PATH" "$trusted_server_signer" "$SEASON_ID" "$MAX_BATTLES_PER_BATCH" "$MAX_HISTOGRAM_ENTRIES_PER_BATCH" <<'NODE'
 const fs = require('node:fs');
 
 const [
   outputPath,
   trustedServerSigner,
   seasonId,
-  zoneId,
   maxBattlesPerBatch,
   maxHistogramEntriesPerBatch,
 ] = process.argv.slice(2);
@@ -271,6 +270,7 @@ const config = {
     trustedServerSigner,
     settlementPaused: false,
     maxBattlesPerBatch: Number(maxBattlesPerBatch),
+    maxRunsPerBatch: 4,
     maxHistogramEntriesPerBatch: Number(maxHistogramEntriesPerBatch),
   },
   seasons: [
@@ -279,13 +279,6 @@ const config = {
       seasonStartTs: now - 3600,
       seasonEndTs: now + 86400,
       commitGraceEndTs: now + 172800,
-    },
-  ],
-  zoneRegistries: [
-    {
-      zoneId: Number(zoneId),
-      expMultiplierNum: 1,
-      expMultiplierDen: 1,
     },
   ],
 };

@@ -64,9 +64,10 @@ function buildChainState(characterRootPubkey: string, authority: string): Charac
 }
 
 describe('settlementRelay', () => {
-  it('returns the player authorization message before transaction assembly', async () => {
+  it('returns a one-approval prepared settlement transaction without a separate player auth message', async () => {
     const authority = Keypair.generate().publicKey;
     const characterRoot = Keypair.generate().publicKey;
+    const serverSigner = Keypair.generate();
     const batch = buildBatch();
     const prismaClient = {
       character: {
@@ -88,83 +89,7 @@ describe('settlementRelay', () => {
       },
       {
         prismaClient: prismaClient as never,
-        sealNextSettlementBatch: jest.fn().mockResolvedValue({
-          batch,
-          payload: {
-            characterId: '00112233445566778899aabbccddeeff',
-            batchId: batch.batchId,
-            startNonce: batch.startNonce,
-            endNonce: batch.endNonce,
-            battleCount: batch.battleCount,
-            startStateHash: batch.startStateHash,
-            endStateHash: batch.endStateHash,
-            zoneProgressDelta: batch.zoneProgressDelta,
-            encounterHistogram: batch.encounterHistogram,
-            optionalLoadoutRevision: undefined,
-            batchHash: batch.batchHash,
-            firstBattleTs: batch.firstBattleTs,
-            lastBattleTs: batch.lastBattleTs,
-            seasonId: batch.seasonId,
-            schemaVersion: 2 as const,
-            signatureScheme: 1 as const,
-          },
-          dryRunResult: {},
-          validationContext: {},
-          wasExistingBatch: true,
-        }),
-        loadEnvelope: jest.fn().mockResolvedValue({
-          playerAuthority: authority,
-          characterRoot: { pubkey: characterRoot },
-          characterBatchCursor: {
-            lastCommittedEndNonce: 0n,
-            lastCommittedBatchId: 0n,
-            lastCommittedStateHash: Buffer.from('11'.repeat(32), 'hex'),
-            lastCommittedBattleTs: 1_700_000_090n,
-            lastCommittedSeasonId: 4,
-          },
-        }),
-      },
-    );
-
-    expect(result.phase).toBe('authorize');
-    if (result.phase !== 'authorize') {
-      throw new Error('expected authorize phase');
-    }
-    expect(result.settlementBatchId).toBe(batch.id);
-    expect(result.permitDomain.batchHash).toBe(batch.batchHash);
-    expect(result.payload.signatureScheme).toBe(1);
-    expect(result.playerAuthorizationMessageUtf8).toContain('RUNANA|settlement|');
-    expect(Buffer.from(result.playerAuthorizationMessageBase64, 'base64').length).toBeGreaterThan(32);
-  });
-
-  it('returns a prepared settlement transaction once the permit signature is provided', async () => {
-    const authority = Keypair.generate().publicKey;
-    const characterRoot = Keypair.generate().publicKey;
-    const batch = buildBatch();
-    const updatedBatch = { ...batch, status: 'PREPARED' as const, latestMessageSha256Hex: 'aa'.repeat(32) };
-    const updateStatus = jest.fn().mockResolvedValue(updatedBatch);
-    const prismaClient = {
-      character: {
-        findChainState: jest
-          .fn()
-          .mockResolvedValue(buildChainState(characterRoot.toBase58(), authority.toBase58())),
-      },
-      settlementBatch: {
-        findById: jest.fn().mockResolvedValue(batch),
-        findNextUnconfirmedForCharacter: jest.fn().mockResolvedValue(batch),
-        updateStatus,
-      },
-    };
-
-    const result = await prepareSolanaSettlement(
-      {
-        characterId: 'character-1',
-        authority: authority.toBase58(),
-        playerAuthorizationSignatureBase64: Buffer.from(new Uint8Array(64).fill(7)).toString('base64'),
-      },
-      {
-        prismaClient: prismaClient as never,
-        serverSigner: Keypair.generate(),
+        serverSigner,
         addressLookupTableAccounts: [],
         sealNextSettlementBatch: jest.fn().mockResolvedValue({
           batch,
@@ -192,6 +117,9 @@ describe('settlementRelay', () => {
         }),
         loadEnvelope: jest.fn().mockResolvedValue({
           playerAuthority: authority,
+          programConfig: {
+            trustedServerSigner: serverSigner.publicKey,
+          },
           characterRoot: { pubkey: characterRoot },
           characterBatchCursor: {
             lastCommittedEndNonce: 0n,
@@ -206,7 +134,98 @@ describe('settlementRelay', () => {
           serializedTransactionBase64: Buffer.from('transaction').toString('base64'),
           recentBlockhash: 'recent-blockhash',
           lastValidBlockHeight: 88,
-          serverSignerPubkey: Keypair.generate().publicKey.toBase58(),
+          serverSignerPubkey: serverSigner.publicKey.toBase58(),
+          serverAttestationMessageBase64: Buffer.from('server-attestation').toString('base64'),
+          playerAuthorizationMessageBase64: Buffer.from('player-authorization').toString('base64'),
+        }),
+      },
+    );
+
+    expect(result.phase).toBe('sign_transaction');
+    if (result.phase !== 'sign_transaction') {
+      throw new Error('expected sign_transaction phase');
+    }
+    expect(result.settlementBatchId).toBe(batch.id);
+    expect(result.permitDomain.batchHash).toBe(batch.batchHash);
+    expect(result.payload.signatureScheme).toBe(1);
+    expect(result.playerAuthorizationMessageUtf8).toBe('');
+    expect(result.playerAuthorizationMessageBase64).toBe('');
+    expect(result.preparedTransaction.kind).toBe('battle_settlement');
+  });
+
+  it('returns a prepared settlement transaction directly without requiring a permit signature', async () => {
+    const authority = Keypair.generate().publicKey;
+    const characterRoot = Keypair.generate().publicKey;
+    const serverSigner = Keypair.generate();
+    const batch = buildBatch();
+    const updatedBatch = { ...batch, status: 'PREPARED' as const, latestMessageSha256Hex: 'aa'.repeat(32) };
+    const updateStatus = jest.fn().mockResolvedValue(updatedBatch);
+    const prismaClient = {
+      character: {
+        findChainState: jest
+          .fn()
+          .mockResolvedValue(buildChainState(characterRoot.toBase58(), authority.toBase58())),
+      },
+      settlementBatch: {
+        findById: jest.fn().mockResolvedValue(batch),
+        findNextUnconfirmedForCharacter: jest.fn().mockResolvedValue(batch),
+        updateStatus,
+      },
+    };
+
+    const result = await prepareSolanaSettlement(
+      {
+        characterId: 'character-1',
+        authority: authority.toBase58(),
+      },
+      {
+        prismaClient: prismaClient as never,
+        serverSigner,
+        addressLookupTableAccounts: [],
+        sealNextSettlementBatch: jest.fn().mockResolvedValue({
+          batch,
+          payload: {
+            characterId: '00112233445566778899aabbccddeeff',
+            batchId: batch.batchId,
+            startNonce: batch.startNonce,
+            endNonce: batch.endNonce,
+            battleCount: batch.battleCount,
+            startStateHash: batch.startStateHash,
+            endStateHash: batch.endStateHash,
+            zoneProgressDelta: batch.zoneProgressDelta,
+            encounterHistogram: batch.encounterHistogram,
+            optionalLoadoutRevision: undefined,
+            batchHash: batch.batchHash,
+            firstBattleTs: batch.firstBattleTs,
+            lastBattleTs: batch.lastBattleTs,
+            seasonId: batch.seasonId,
+            schemaVersion: 2 as const,
+            signatureScheme: 1 as const,
+          },
+          dryRunResult: {},
+          validationContext: {},
+          wasExistingBatch: true,
+        }),
+        loadEnvelope: jest.fn().mockResolvedValue({
+          playerAuthority: authority,
+          programConfig: {
+            trustedServerSigner: serverSigner.publicKey,
+          },
+          characterRoot: { pubkey: characterRoot },
+          characterBatchCursor: {
+            lastCommittedEndNonce: 0n,
+            lastCommittedBatchId: 0n,
+            lastCommittedStateHash: Buffer.from('11'.repeat(32), 'hex'),
+            lastCommittedBattleTs: 1_700_000_090n,
+            lastCommittedSeasonId: 4,
+          },
+        }),
+        buildPreparedSettlement: jest.fn().mockResolvedValue({
+          serializedMessageBase64: Buffer.from('message').toString('base64'),
+          serializedTransactionBase64: Buffer.from('transaction').toString('base64'),
+          recentBlockhash: 'recent-blockhash',
+          lastValidBlockHeight: 88,
+          serverSignerPubkey: serverSigner.publicKey.toBase58(),
           serverAttestationMessageBase64: Buffer.from('server-attestation').toString('base64'),
           playerAuthorizationMessageBase64: Buffer.from('player-authorization').toString('base64'),
         }),
@@ -220,6 +239,8 @@ describe('settlementRelay', () => {
     expect(result.phase).toBe('sign_transaction');
     expect(result.preparedTransaction.kind).toBe('battle_settlement');
     expect(result.preparedTransaction.settlementRelay?.batchId).toBe(batch.batchId);
+    expect(result.playerAuthorizationMessageUtf8).toBe('');
+    expect(result.playerAuthorizationMessageBase64).toBe('');
     expect(updateStatus).toHaveBeenCalled();
   });
 

@@ -22,8 +22,7 @@ jest.mock("../lib/prisma", () => ({
 jest.mock("../lib/solana/runanaAccounts", () => ({
   fetchProgramConfigAccount: jest.fn(async () => ({})),
   fetchSeasonPolicyAccount: jest.fn(async () => ({})),
-  fetchZoneRegistryAccount: jest.fn(async () => ({})),
-  fetchZoneEnemySetAccount: jest.fn(async () => ({})),
+  fetchClassRegistryAccount: jest.fn(async () => ({})),
   fetchCharacterRootAccount: jest.fn(),
   fetchCharacterSettlementBatchCursorAccount: jest.fn(),
   accountCharacterIdHex: jest.requireActual("../lib/solana/runanaAccounts")
@@ -72,6 +71,7 @@ describe("characterCreation", () => {
       id: "character-1",
       userId: "user-1",
       name: "Rookie",
+      classId: "soldier",
       level: 1,
       exp: 0,
       hp: 1200,
@@ -191,6 +191,8 @@ describe("characterCreation", () => {
       programId: RUNANA_PROGRAM_ID,
       characterIdHex: chainCharacterIdHex,
       initialUnlockedZoneId: 1,
+      classId: "soldier",
+      name: "Rookie",
     }).characterRoot.toBase58();
 
     prismaMock.character.findChainState.mockResolvedValue({
@@ -341,6 +343,8 @@ describe("characterCreation", () => {
       programId: RUNANA_PROGRAM_ID,
       characterIdHex: chainCharacterIdHex,
       initialUnlockedZoneId,
+      classId: "soldier",
+      name: "Rookie",
     });
 
     const preparedMessage = new TransactionMessage({
@@ -400,6 +404,8 @@ describe("characterCreation", () => {
       localCharacterId: "character-1",
       chainCharacterIdHex,
       characterRootPubkey: createInstruction.characterRoot.toBase58(),
+      classId: "soldier",
+      name: "Rookie",
       seasonPolicyPubkey: deriveSeasonPolicyPda(
         seasonId,
         RUNANA_PROGRAM_ID,
@@ -441,6 +447,8 @@ describe("characterCreation", () => {
       programId: RUNANA_PROGRAM_ID,
       characterIdHex: chainCharacterIdHex,
       initialUnlockedZoneId: 2,
+      classId: "soldier",
+      name: "Rookie",
     });
     const signedMessage = new TransactionMessage({
       payerKey: authority.publicKey,
@@ -461,6 +469,8 @@ describe("characterCreation", () => {
       localCharacterId: "character-1",
       chainCharacterIdHex,
       characterRootPubkey: mutatedInstruction.characterRoot.toBase58(),
+      classId: "soldier",
+      name: "Rookie",
       seasonPolicyPubkey: deriveSeasonPolicyPda(
         seasonId,
         RUNANA_PROGRAM_ID,

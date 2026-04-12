@@ -61,6 +61,23 @@ function vecU16(values: number[]): Buffer {
   return Buffer.concat([u32(values.length), ...values.map((value) => u16(value))]);
 }
 
+function fixedAscii16(value: string): Buffer {
+  const buffer = Buffer.alloc(16);
+  buffer.write(value, "ascii");
+  return buffer;
+}
+
+function vecEnemyRules(
+  values: Array<{ enemyArchetypeId: number; maxPerRun: number }>,
+): Buffer {
+  return Buffer.concat([
+    u32(values.length),
+    ...values.map((value) =>
+      Buffer.concat([u16(value.enemyArchetypeId), u16(value.maxPerRun)]),
+    ),
+  ]);
+}
+
 function accountInfo(data: Buffer): AccountInfo<Buffer> {
   return {
     data,
@@ -76,6 +93,7 @@ function programConfigData(args: {
   trustedServerSigner: PublicKey;
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
+  maxRunsPerBatch: number;
   maxHistogramEntriesPerBatch: number;
   updatedAtSlot: bigint;
 }): Buffer {
@@ -87,6 +105,7 @@ function programConfigData(args: {
     args.trustedServerSigner.toBuffer(),
     bool(args.settlementPaused),
     u16(args.maxBattlesPerBatch),
+    u16(args.maxRunsPerBatch),
     u16(args.maxHistogramEntriesPerBatch),
     u64(args.updatedAtSlot),
   ]);
@@ -96,6 +115,8 @@ function characterRootData(args: {
   authority: PublicKey;
   characterId: Buffer;
   characterCreationTs: bigint;
+  classId: number;
+  name: string;
 }): Buffer {
   return Buffer.concat([
     accountDiscriminator('CharacterRootAccount'),
@@ -104,6 +125,8 @@ function characterRootData(args: {
     args.authority.toBuffer(),
     args.characterId,
     u64(args.characterCreationTs),
+    u16(args.classId),
+    fixedAscii16(args.name),
   ]);
 }
 
@@ -196,6 +219,9 @@ function characterCursorData(args: {
 
 function zoneRegistryData(args: {
   zoneId: number;
+  topologyVersion: number;
+  totalSubnodeCount: number;
+  topologyHash: Buffer;
   expMultiplierNum: number;
   expMultiplierDen: number;
 }): Buffer {
@@ -204,6 +230,9 @@ function zoneRegistryData(args: {
     u8(1),
     u8(248),
     u16(args.zoneId),
+    u16(args.topologyVersion),
+    u16(args.totalSubnodeCount),
+    args.topologyHash,
     u16(args.expMultiplierNum),
     u16(args.expMultiplierDen),
   ]);
@@ -211,14 +240,16 @@ function zoneRegistryData(args: {
 
 function zoneEnemySetData(args: {
   zoneId: number;
-  allowedEnemyArchetypeIds: number[];
+  topologyVersion: number;
+  enemyRules: Array<{ enemyArchetypeId: number; maxPerRun: number }>;
 }): Buffer {
   return Buffer.concat([
     accountDiscriminator('ZoneEnemySetAccount'),
     u8(1),
     u8(247),
     u16(args.zoneId),
-    vecU16(args.allowedEnemyArchetypeIds),
+    u16(args.topologyVersion),
+    vecEnemyRules(args.enemyRules),
   ]);
 }
 
@@ -258,6 +289,34 @@ describe('runana chain read layer', () => {
     const payload: SettlementBatchPayloadV2 = {
       characterId,
       batchId: 1,
+      startRunSequence: 1,
+      endRunSequence: 2,
+      runSummaries: [
+        {
+          closedRunSequence: 1,
+          zoneId: 300,
+          topologyVersion: 1,
+          topologyHash: '44'.repeat(32),
+          terminalStatus: 'COMPLETED',
+          rewardedBattleCount: 1,
+          rewardedEncounterHistogram: [{ enemyArchetypeId: 20, count: 1 }],
+          zoneProgressDelta: [{ zoneId: 300, newState: 1 }],
+          firstRewardedBattleTs: 100,
+          lastRewardedBattleTs: 100,
+        },
+        {
+          closedRunSequence: 2,
+          zoneId: 1,
+          topologyVersion: 1,
+          topologyHash: '55'.repeat(32),
+          terminalStatus: 'COMPLETED',
+          rewardedBattleCount: 2,
+          rewardedEncounterHistogram: [{ enemyArchetypeId: 10, count: 2 }],
+          zoneProgressDelta: [{ zoneId: 1, newState: 2 }],
+          firstRewardedBattleTs: 110,
+          lastRewardedBattleTs: 120,
+        },
+      ],
       startNonce: 1,
       endNonce: 3,
       battleCount: 3,
@@ -308,6 +367,34 @@ describe('runana chain read layer', () => {
     const payload: SettlementBatchPayloadV2 = {
       characterId: characterIdHex,
       batchId: 1,
+      startRunSequence: 1,
+      endRunSequence: 2,
+      runSummaries: [
+        {
+          closedRunSequence: 1,
+          zoneId: 300,
+          topologyVersion: 1,
+          topologyHash: '44'.repeat(32),
+          terminalStatus: 'COMPLETED',
+          rewardedBattleCount: 1,
+          rewardedEncounterHistogram: [{ enemyArchetypeId: 20, count: 1 }],
+          zoneProgressDelta: [{ zoneId: 300, newState: 1 }],
+          firstRewardedBattleTs: 101,
+          lastRewardedBattleTs: 101,
+        },
+        {
+          closedRunSequence: 2,
+          zoneId: 1,
+          topologyVersion: 1,
+          topologyHash: '55'.repeat(32),
+          terminalStatus: 'COMPLETED',
+          rewardedBattleCount: 2,
+          rewardedEncounterHistogram: [{ enemyArchetypeId: 10, count: 2 }],
+          zoneProgressDelta: [{ zoneId: 1, newState: 2 }],
+          firstRewardedBattleTs: 110,
+          lastRewardedBattleTs: 121,
+        },
+      ],
       startNonce: 1,
       endNonce: 3,
       battleCount: 3,
@@ -338,10 +425,10 @@ describe('runana chain read layer', () => {
     const additionalPage = deriveCharacterZoneProgressPagePda(characterRoot, 1);
     const seasonPolicy = deriveSeasonPolicyPda(payload.seasonId);
     const cursor = deriveCharacterBatchCursorPda(characterRoot);
-    const zoneRegistry1 = deriveZoneRegistryPda(1);
-    const zoneRegistry300 = deriveZoneRegistryPda(300);
-    const zoneEnemySet1 = deriveZoneEnemySetPda(1);
-    const zoneEnemySet300 = deriveZoneEnemySetPda(300);
+    const zoneRegistry1 = deriveZoneRegistryPda(1, 1);
+    const zoneRegistry300 = deriveZoneRegistryPda(300, 1);
+    const zoneEnemySet1 = deriveZoneEnemySetPda(1, 1);
+    const zoneEnemySet300 = deriveZoneEnemySetPda(300, 1);
     const enemy10 = deriveEnemyArchetypeRegistryPda(10);
     const enemy20 = deriveEnemyArchetypeRegistryPda(20);
 
@@ -358,6 +445,7 @@ describe('runana chain read layer', () => {
           trustedServerSigner,
           settlementPaused: false,
           maxBattlesPerBatch: 32,
+          maxRunsPerBatch: 8,
           maxHistogramEntriesPerBatch: 64,
           updatedAtSlot: 5n,
         }),
@@ -370,6 +458,8 @@ describe('runana chain read layer', () => {
           authority,
           characterId,
           characterCreationTs: 100n,
+          classId: 1,
+          name: 'Rookie',
         }),
       ),
     );
@@ -444,6 +534,9 @@ describe('runana chain read layer', () => {
       accountInfo(
         zoneRegistryData({
           zoneId: 1,
+          topologyVersion: 1,
+          totalSubnodeCount: 4,
+          topologyHash: Buffer.from('55'.repeat(32), 'hex'),
           expMultiplierNum: 1,
           expMultiplierDen: 1,
         }),
@@ -454,6 +547,9 @@ describe('runana chain read layer', () => {
       accountInfo(
         zoneRegistryData({
           zoneId: 300,
+          topologyVersion: 1,
+          totalSubnodeCount: 6,
+          topologyHash: Buffer.from('44'.repeat(32), 'hex'),
           expMultiplierNum: 2,
           expMultiplierDen: 1,
         }),
@@ -464,7 +560,8 @@ describe('runana chain read layer', () => {
       accountInfo(
         zoneEnemySetData({
           zoneId: 1,
-          allowedEnemyArchetypeIds: [10],
+          topologyVersion: 1,
+          enemyRules: [{ enemyArchetypeId: 10, maxPerRun: 2 }],
         }),
       ),
     );
@@ -473,7 +570,8 @@ describe('runana chain read layer', () => {
       accountInfo(
         zoneEnemySetData({
           zoneId: 300,
-          allowedEnemyArchetypeIds: [20],
+          topologyVersion: 1,
+          enemyRules: [{ enemyArchetypeId: 20, maxPerRun: 1 }],
         }),
       ),
     );

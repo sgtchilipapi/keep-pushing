@@ -52,6 +52,8 @@ export interface CharacterCreationRelayMetadata {
   localCharacterId: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
+  classId: string;
+  name: string;
   seasonPolicyPubkey?: string;
   characterCreationTs?: number;
   seasonIdAtCreation?: number;
@@ -93,6 +95,8 @@ export interface PrepareCharacterCreationTransactionRequest {
   localCharacterId: string;
   chainCharacterIdHex: string;
   characterRootPubkey: string;
+  classId: string;
+  name: string;
   seasonPolicyPubkey?: string;
   characterCreationTs?: number;
   seasonIdAtCreation?: number;

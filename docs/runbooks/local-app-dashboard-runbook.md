@@ -1,11 +1,11 @@
 # Local App Dashboard Runbook
 
-Status: Reusable local runbook for starting the full `keep-pushing` app stack needed by the current frontend dashboard at `/`.
+Status: Reusable local runbook for starting the full `keep-pushing` app stack needed by the reconciled zone-run dashboard at `/`.
 
-Reconciliation note:
+Canonical path note:
 
-- this runbook describes the current dashboard/testing flow
-- canonical MVP product and API behavior now lives in the architecture/API docs, not this runbook
+- this runbook follows the reconciled homepage flow as the primary manual path
+- direct helper scripts and the old proof page remain troubleshooting fallbacks, not the canonical player surface
 
 ## Summary
 
@@ -27,10 +27,10 @@ http://127.0.0.1:3000/
 3. Test from the browser
 
 - create character
-- run local battle
+- start a zone run
 - connect Phantom
-- save character on chain
-- settle battles
+- sync the character
+- settle later backlog from the sync page
 
 Truly fresh:
 
@@ -54,6 +54,7 @@ What the one-shot helper now does:
 - bootstraps a fresh validator
 - rebuilds `runana-program` when local source is newer than the deployed `.so`
 - deploys and seeds the Solana program
+- seeds class registry plus versioned zone metadata and enemy-rule accounts
 - starts the backend with the fresh trusted server signer wired automatically
 - enables backend-side auto-ALT creation for local first-sync and settlement preparation
 
@@ -242,10 +243,9 @@ The homepage is now the main dashboard for:
 
 - anonymous user bootstrap
 - local-first character creation
-- local battle execution
-- on-chain character creation
-- initial backlog settlement
-- post-sync settlement preparation/submission
+- roster and character management
+- zone-run setup, active run, result, and share
+- first sync and later settlement from the dedicated sync page
 
 The old proof page is still available at:
 
@@ -259,27 +259,26 @@ http://127.0.0.1:3000/battle%20(old%20pof)
 
 1. Open `/`
 2. Wait for anonymous user bootstrap
-3. Create a character
-4. Choose a zone and run `Battle`
-5. Observe latest battle status become `AWAITING_FIRST_SYNC`
+3. Create a character from the roster
+4. Open the character page and press `Start Run`
+5. Complete or abandon a run
+6. Observe the result page and the sync summary move into a pending state
 
 ### Create And Initial Settlement Path
 
-The current frontend uses Phantom directly for both character creation and settlement.
+The current frontend uses Phantom directly for both first sync and later settlement.
 
 This means:
 
 - you connect Phantom in the browser
-- the app prepares the readable authorization message
-- Phantom signs that message
-- the app prepares the transaction
-- Phantom signs the transaction
-- the app submits through the backend broadcaster
+- the app prepares a client-signed transaction
+- Phantom signs and sends that transaction once
+- the client acknowledges the resulting txid back to the backend
 
 The sync flow is sequential:
 
-- first save the genesis character on chain
-- then settle the local backlog as the first batch
+- first sync creates the on-chain character
+- that same first sync transaction settles the oldest contiguous eligible backlog
 
 When the app is started through `npm run app:local:fresh`, backend-side auto-ALT creation is already enabled, so you should not need a manual lookup-table step for normal browser testing.
 
@@ -291,7 +290,7 @@ npm run solana:character:create -- --player-keypair <path> --character-id <id>
 
 ### Post-Sync Settlement Path
 
-After the character becomes `CONFIRMED`, the dashboard uses the same Phantom prepare/sign/submit pattern for later settlement batches.
+After the character becomes `CONFIRMED`, the dashboard uses the same one-approval Phantom flow for later settlement batches.
 
 When the app is started through `npm run app:local:fresh`, backend-side auto-ALT creation is also enabled for later settlement preparation.
 

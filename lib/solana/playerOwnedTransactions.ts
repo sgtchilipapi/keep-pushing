@@ -209,6 +209,8 @@ function buildCharacterCreationRelayMetadata(
   assertNonEmptyString(request.localCharacterId, "localCharacterId");
   assertNonEmptyString(request.chainCharacterIdHex, "chainCharacterIdHex");
   assertNonEmptyString(request.characterRootPubkey, "characterRootPubkey");
+  assertNonEmptyString(request.classId, "classId");
+  assertNonEmptyString(request.name, "name");
   assertNonEmptyString(request.recentBlockhash, "recentBlockhash");
   assertInteger(request.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
   assertInteger(request.lastValidBlockHeight, "lastValidBlockHeight", 0);
@@ -227,6 +229,8 @@ function buildCharacterCreationRelayMetadata(
     localCharacterId: request.localCharacterId,
     chainCharacterIdHex: request.chainCharacterIdHex,
     characterRootPubkey: request.characterRootPubkey,
+    classId: request.classId,
+    name: request.name,
     ...(request.seasonPolicyPubkey !== undefined
       ? { seasonPolicyPubkey: request.seasonPolicyPubkey }
       : {}),

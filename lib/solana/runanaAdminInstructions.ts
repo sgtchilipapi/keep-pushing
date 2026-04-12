@@ -7,6 +7,7 @@ import {
 
 import {
   computeAnchorInstructionDiscriminator,
+  deriveClassRegistryPda,
   deriveEnemyArchetypeRegistryPda,
   deriveProgramConfigPda,
   deriveSeasonPolicyPda,
@@ -15,7 +16,7 @@ import {
   RUNANA_PROGRAM_ID,
 } from './runanaProgram';
 
-const RUNANA_MAX_ZONE_ENEMY_SET_MEMBERS = 64;
+const RUNANA_MAX_ZONE_ENEMY_RULES = 64;
 
 type U64Like = number | bigint;
 
@@ -70,25 +71,53 @@ function bool(value: boolean, field: string): Buffer {
   return Buffer.from([value ? 1 : 0]);
 }
 
-function sortedStrictAscendingU16Vector(values: number[], field: string): Buffer {
+function fixedHash32(value: string, field: string): Buffer {
+  const normalized = value.startsWith('0x') ? value.slice(2) : value;
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be a 32-byte hex string`);
+  }
+  return Buffer.from(normalized, 'hex');
+}
+
+function sortedStrictEnemyRuleVector(
+  values: ZoneEnemyRuleEntry[],
+  field: string,
+): Buffer {
   if (!Array.isArray(values)) {
     throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be an array`);
   }
 
-  if (values.length > RUNANA_MAX_ZONE_ENEMY_SET_MEMBERS) {
+  if (values.length > RUNANA_MAX_ZONE_ENEMY_RULES) {
     throw new Error(
-      `ERR_INVALID_${field.toUpperCase()}: ${field} exceeds ${RUNANA_MAX_ZONE_ENEMY_SET_MEMBERS} entries`,
+      `ERR_INVALID_${field.toUpperCase()}: ${field} exceeds ${RUNANA_MAX_ZONE_ENEMY_RULES} entries`,
     );
   }
 
   const encoded = values.map((value, index) => {
-    if (index > 0 && values[index - 1] >= value) {
+    if (
+      !Number.isInteger(value.enemyArchetypeId) ||
+      value.enemyArchetypeId < 0 ||
+      value.enemyArchetypeId > 0xffff
+    ) {
+      throw new Error(
+        `ERR_INVALID_${field.toUpperCase()}: ${field}[${index}].enemyArchetypeId must fit in u16`,
+      );
+    }
+    if (!Number.isInteger(value.maxPerRun) || value.maxPerRun <= 0 || value.maxPerRun > 0xffff) {
+      throw new Error(
+        `ERR_INVALID_${field.toUpperCase()}: ${field}[${index}].maxPerRun must fit in u16 and be > 0`,
+      );
+    }
+    if (index > 0 && values[index - 1]!.enemyArchetypeId >= value.enemyArchetypeId) {
       throw new Error(
         `ERR_INVALID_${field.toUpperCase()}: ${field} must be strictly increasing without duplicates`,
       );
     }
 
-    return u16(value, `${field}[${index}]`);
+    return Buffer.concat([
+      u16(value.enemyArchetypeId, `${field}[${index}].enemyArchetypeId`),
+      u16(value.maxPerRun, `${field}[${index}].maxPerRun`),
+    ]);
   });
 
   return Buffer.concat([u32(values.length, `${field}.length`), ...encoded]);
@@ -114,27 +143,48 @@ function instruction(
   });
 }
 
+export interface ZoneEnemyRuleEntry {
+  enemyArchetypeId: number;
+  maxPerRun: number;
+}
+
 export interface InitializeProgramConfigArgs {
   trustedServerSigner: PublicKey;
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
+  maxRunsPerBatch: number;
   maxHistogramEntriesPerBatch: number;
 }
 
 export interface InitializeZoneRegistryArgs {
   zoneId: number;
+  topologyVersion: number;
+  totalSubnodeCount: number;
+  topologyHash: string;
   expMultiplierNum: number;
   expMultiplierDen: number;
 }
 
 export interface InitializeZoneEnemySetArgs {
   zoneId: number;
-  allowedEnemyArchetypeIds: number[];
+  topologyVersion: number;
+  enemyRules: ZoneEnemyRuleEntry[];
 }
 
 export interface UpdateZoneEnemySetArgs {
   zoneId: number;
-  allowedEnemyArchetypeIds: number[];
+  topologyVersion: number;
+  enemyRules: ZoneEnemyRuleEntry[];
+}
+
+export interface InitializeClassRegistryArgs {
+  classId: number;
+  enabled: boolean;
+}
+
+export interface UpdateClassRegistryArgs {
+  classId: number;
+  enabled: boolean;
 }
 
 export interface InitializeEnemyArchetypeRegistryArgs {
@@ -165,6 +215,7 @@ export function serializeInitializeProgramConfigArgs(args: InitializeProgramConf
     args.trustedServerSigner.toBuffer(),
     bool(args.settlementPaused, 'settlementPaused'),
     u16(args.maxBattlesPerBatch, 'maxBattlesPerBatch'),
+    u16(args.maxRunsPerBatch, 'maxRunsPerBatch'),
     u16(args.maxHistogramEntriesPerBatch, 'maxHistogramEntriesPerBatch'),
   ]);
 }
@@ -172,6 +223,9 @@ export function serializeInitializeProgramConfigArgs(args: InitializeProgramConf
 export function serializeInitializeZoneRegistryArgs(args: InitializeZoneRegistryArgs): Buffer {
   return Buffer.concat([
     u16(args.zoneId, 'zoneId'),
+    u16(args.topologyVersion, 'topologyVersion'),
+    u16(args.totalSubnodeCount, 'totalSubnodeCount'),
+    fixedHash32(args.topologyHash, 'topologyHash'),
     u16(args.expMultiplierNum, 'expMultiplierNum'),
     u16(args.expMultiplierDen, 'expMultiplierDen'),
   ]);
@@ -180,12 +234,24 @@ export function serializeInitializeZoneRegistryArgs(args: InitializeZoneRegistry
 export function serializeInitializeZoneEnemySetArgs(args: InitializeZoneEnemySetArgs): Buffer {
   return Buffer.concat([
     u16(args.zoneId, 'zoneId'),
-    sortedStrictAscendingU16Vector(args.allowedEnemyArchetypeIds, 'allowedEnemyArchetypeIds'),
+    u16(args.topologyVersion, 'topologyVersion'),
+    sortedStrictEnemyRuleVector(args.enemyRules, 'enemyRules'),
   ]);
 }
 
 export function serializeUpdateZoneEnemySetArgs(args: UpdateZoneEnemySetArgs): Buffer {
   return serializeInitializeZoneEnemySetArgs(args);
+}
+
+export function serializeInitializeClassRegistryArgs(args: InitializeClassRegistryArgs): Buffer {
+  return Buffer.concat([
+    u16(args.classId, 'classId'),
+    bool(args.enabled, 'enabled'),
+  ]);
+}
+
+export function serializeUpdateClassRegistryArgs(args: UpdateClassRegistryArgs): Buffer {
+  return serializeInitializeClassRegistryArgs(args);
 }
 
 export function serializeInitializeEnemyArchetypeRegistryArgs(
@@ -230,7 +296,11 @@ export function buildInitializeZoneRegistryInstruction(
 ): TransactionInstruction {
   const programId = input.programId ?? RUNANA_PROGRAM_ID;
   const programConfig = deriveProgramConfigPda(programId);
-  const zoneRegistry = deriveZoneRegistryPda(input.zoneId, programId);
+  const zoneRegistry = deriveZoneRegistryPda(
+    input.zoneId,
+    input.topologyVersion,
+    programId,
+  );
 
   return instruction(
     programId,
@@ -251,7 +321,11 @@ export function buildInitializeZoneEnemySetInstruction(
 ): TransactionInstruction {
   const programId = input.programId ?? RUNANA_PROGRAM_ID;
   const programConfig = deriveProgramConfigPda(programId);
-  const zoneEnemySet = deriveZoneEnemySetPda(input.zoneId, programId);
+  const zoneEnemySet = deriveZoneEnemySetPda(
+    input.zoneId,
+    input.topologyVersion,
+    programId,
+  );
 
   return instruction(
     programId,
@@ -272,7 +346,11 @@ export function buildUpdateZoneEnemySetInstruction(
 ): TransactionInstruction {
   const programId = input.programId ?? RUNANA_PROGRAM_ID;
   const programConfig = deriveProgramConfigPda(programId);
-  const zoneEnemySet = deriveZoneEnemySetPda(input.zoneId, programId);
+  const zoneEnemySet = deriveZoneEnemySetPda(
+    input.zoneId,
+    input.topologyVersion,
+    programId,
+  );
 
   return instruction(
     programId,
@@ -283,6 +361,46 @@ export function buildUpdateZoneEnemySetInstruction(
     ],
     'update_zone_enemy_set',
     serializeUpdateZoneEnemySetArgs(input),
+  );
+}
+
+export function buildInitializeClassRegistryInstruction(
+  input: InitializeAdminAccountInput & InitializeClassRegistryArgs,
+): TransactionInstruction {
+  const programId = input.programId ?? RUNANA_PROGRAM_ID;
+  const programConfig = deriveProgramConfigPda(programId);
+  const classRegistry = deriveClassRegistryPda(input.classId, programId);
+
+  return instruction(
+    programId,
+    [
+      { pubkey: input.payer, isSigner: true, isWritable: true },
+      { pubkey: input.adminAuthority, isSigner: true, isWritable: false },
+      { pubkey: programConfig, isSigner: false, isWritable: false },
+      { pubkey: classRegistry, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    'initialize_class_registry',
+    serializeInitializeClassRegistryArgs(input),
+  );
+}
+
+export function buildUpdateClassRegistryInstruction(
+  input: UpdateAdminAccountInput & UpdateClassRegistryArgs,
+): TransactionInstruction {
+  const programId = input.programId ?? RUNANA_PROGRAM_ID;
+  const programConfig = deriveProgramConfigPda(programId);
+  const classRegistry = deriveClassRegistryPda(input.classId, programId);
+
+  return instruction(
+    programId,
+    [
+      { pubkey: input.adminAuthority, isSigner: true, isWritable: false },
+      { pubkey: programConfig, isSigner: false, isWritable: false },
+      { pubkey: classRegistry, isSigner: false, isWritable: true },
+    ],
+    'update_class_registry',
+    serializeUpdateClassRegistryArgs(input),
   );
 }
 

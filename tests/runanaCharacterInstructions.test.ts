@@ -5,6 +5,7 @@ import { Keypair, SystemProgram } from "@solana/web3.js";
 import { buildPreparedVersionedTransaction } from "../lib/solana/playerOwnedV0Transactions";
 import { buildCreateCharacterInstruction } from "../lib/solana/runanaCharacterInstructions";
 import {
+  deriveClassRegistryPda,
   deriveSeasonPolicyPda,
   deriveCharacterBatchCursorPda,
   deriveCharacterRootPda,
@@ -31,6 +32,7 @@ describe("runanaCharacterInstructions", () => {
     const seasonId = 4;
     const expectedRoot = deriveCharacterRootPda(authority, characterIdHex);
     const expectedSeasonPolicy = deriveSeasonPolicyPda(seasonId);
+    const expectedClassRegistry = deriveClassRegistryPda(1);
 
     const envelope = buildCreateCharacterInstruction({
       payer,
@@ -38,9 +40,12 @@ describe("runanaCharacterInstructions", () => {
       seasonId,
       characterIdHex,
       initialUnlockedZoneId: 300,
+      classId: "soldier",
+      name: "Rookie One",
     });
 
     expect(envelope.seasonPolicy.equals(expectedSeasonPolicy)).toBe(true);
+    expect(envelope.classRegistry.equals(expectedClassRegistry)).toBe(true);
     expect(envelope.characterRoot.equals(expectedRoot)).toBe(true);
     expect(
       envelope.characterStats.equals(deriveCharacterStatsPda(expectedRoot)),
@@ -61,11 +66,14 @@ describe("runanaCharacterInstructions", () => {
       ),
     ).toBe(true);
     expect(envelope.initialPageIndex).toBe(1);
+    expect(envelope.compactClassId).toBe(1);
+    expect(envelope.canonicalName).toBe("Rookie One");
 
     expect(envelope.instruction.keys).toEqual([
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: authority, isSigner: true, isWritable: false },
       { pubkey: expectedSeasonPolicy, isSigner: false, isWritable: false },
+      { pubkey: expectedClassRegistry, isSigner: false, isWritable: false },
       { pubkey: expectedRoot, isSigner: false, isWritable: true },
       {
         pubkey: deriveCharacterStatsPda(expectedRoot),
@@ -96,6 +104,8 @@ describe("runanaCharacterInstructions", () => {
           discriminator("create_character"),
           Buffer.from(characterIdHex, "hex"),
           u16(300),
+          u16(1),
+          Buffer.concat([Buffer.from("Rookie One", "ascii"), Buffer.alloc(6)]),
         ]),
       ),
     ).toBe(true);
@@ -109,6 +119,8 @@ describe("runanaCharacterInstructions", () => {
       seasonId: 4,
       characterIdHex: "00112233445566778899aabbccddeeff",
       initialUnlockedZoneId: 1,
+      classId: "soldier",
+      name: "Rookie One",
     });
 
     const prepared = await buildPreparedVersionedTransaction({

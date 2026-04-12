@@ -1,20 +1,20 @@
 # Local Solana Character Test Runbook
 
-Status: Reproducible local runbook for Dockerized `keep-pushing` plus host-run Solana validator, real character creation, real encounter execution, and settlement submission.
+Status: Reproducible local runbook for Dockerized `keep-pushing` plus host-run Solana validator, with the reconciled zone-run flow as the canonical manual gameplay path.
 
-Reconciliation note:
+Canonical path note:
 
-- this runbook documents the current local/manual harness and current battle-native implementation path
-- it is not the canonical reconciled MVP API/product contract
+- the canonical manual gameplay path is the homepage zone-run flow backed by `/api/zone-runs/*`, `/api/runs/:runId`, and the dedicated sync page
+- the direct character/encounter helper scripts remain useful low-level troubleshooting tools, but they are not the primary product path anymore
 
 This document captures the working manual test environment that was validated against:
 - real Postgres
 - real `keep-pushing` backend
 - real local Solana validator
 - real deployed `runana-program`
-- real on-chain character creation through backend prepare/sign/submit flow
-- real encounter execution through `POST /api/combat/encounter`
-- real settlement sealing, prepare, submit, confirm, and reconciliation
+- real one-approval on-chain character creation and sync flows
+- real zone-run gameplay and result/share pages through the main dashboard
+- real settlement acknowledgement and reconciliation
 
 ## Scope
 
@@ -22,6 +22,7 @@ This runbook covers:
 - Dockerized `keep-pushing` app + Postgres
 - host-run `solana-test-validator`
 - fresh `runana-program` deployment and bootstrap seeding
+- canonical manual gameplay through `/`
 - one-shot character creation via [createCharacter.ts](/home/paps/projects/keep-pushing/scripts/solana/createCharacter.ts)
 - one-shot encounter plus settlement submission via [runEncounterSettlement.ts](/home/paps/projects/keep-pushing/scripts/solana/runEncounterSettlement.ts)
 
@@ -150,8 +151,9 @@ What this does:
 - seeds:
   - program config
   - season policy
-  - zone registry
-  - zone enemy set
+  - class registry
+  - versioned zone registry
+  - versioned zone enemy set
   - enemy archetype registry
 - creates an anon backend user
 - writes local test artifacts under `.tmp/manual-character-test/<timestamp>`
@@ -168,6 +170,25 @@ Expected end state:
 - program deployed
 - bootstrap seeding complete
 - artifact directory printed
+
+## 3A. Canonical Manual Gameplay Verification
+
+Use this as the primary product-level check after bootstrap:
+
+1. Open `http://127.0.0.1:3000/`
+2. Let the anon session bootstrap silently
+3. Create a character with class card + unique name
+4. Open the character page and start a run
+5. Complete or abandon the run through the zone-run UI
+6. Open the result page or public share page
+7. Connect Phantom and use the dedicated sync page to perform first sync or later settlement
+
+Expected product behavior:
+
+- roster and character pages show season + sync context
+- active play uses the zone-run map window, not raw encounter endpoints
+- first sync and later settlement each use one Phantom transaction approval
+- the sync page surfaces the oldest unresolved batch as the primary action
 
 ## 4. Create A Local-Only Character
 

@@ -11,6 +11,8 @@ export interface PreparedFirstSyncCharacterAnchor {
   characterId: string;
   authority: string;
   feePayer: string;
+  name: string;
+  classId: string;
   characterCreationTs: number;
   seasonIdAtCreation: number;
   initialUnlockedZoneId: number;
@@ -99,6 +101,8 @@ export async function prepareFirstSyncCharacterAnchor(
     characterId: character.id,
     authority: input.authority,
     feePayer,
+    name: character.name,
+    classId: character.classId,
     characterCreationTs: creationTs,
     seasonIdAtCreation,
     initialUnlockedZoneId: resolveInitialUnlockedZoneId(
