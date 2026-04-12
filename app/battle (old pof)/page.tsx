@@ -1,14 +1,23 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 
-import type { BattleEvent, BattleResult } from '../../types/battle';
-import type { CombatantSnapshot } from '../../types/combat';
+import type { BattleEvent, BattleResult } from "../../types/battle";
+import type { CombatantSnapshot } from "../../types/combat";
 
-type Side = 'left' | 'right';
+type Side = "left" | "right";
 
 type ReplayFrame = {
-  event: Extract<BattleEvent, { type: 'ACTION' | 'STUNNED_SKIP' | 'STATUS_EFFECT_RESOLVE' }>;
+  event: Extract<
+    BattleEvent,
+    { type: "ACTION" | "STUNNED_SKIP" | "STATUS_EFFECT_RESOLVE" }
+  >;
   logCursorIndex: number;
   leftHp: number;
   rightHp: number;
@@ -20,27 +29,72 @@ type ReplayFrame = {
   displayRightCooldowns: Record<string, number>;
   actionLabelSide: Side | null;
   actionLabelText: string;
-  leftFlash: 'damage' | 'recover' | null;
-  rightFlash: 'damage' | 'recover' | null;
+  leftFlash: "damage" | "recover" | null;
+  rightFlash: "damage" | "recover" | null;
   logLine: string;
 };
 
 const SKILL_META: Record<string, { name: string; icon: string }> = {
-  '1000': { name: 'Basic Attack', icon: '◼' },
-  '1001': { name: 'Volt Strike', icon: '⚡' },
-  '1002': { name: 'Finishing Blow', icon: '✦' },
-  '1003': { name: 'Surge', icon: '⬢' },
-  '1004': { name: 'Barrier', icon: '▦' },
-  '1005': { name: 'Repair', icon: '✚' }
+  "1000": { name: "Basic Attack", icon: "◼" },
+  "1001": { name: "Volt Strike", icon: "⚡" },
+  "1002": { name: "Finishing Blow", icon: "✦" },
+  "1003": { name: "Surge", icon: "⬢" },
+  "1004": { name: "Barrier", icon: "▦" },
+  "1005": { name: "Repair", icon: "✚" },
 };
 
-const ACTIVE_SKILL_IDS = ['1001', '1002', '1003', '1004', '1005'] as const;
+const ACTIVE_SKILL_IDS = ["1001", "1002", "1003", "1004", "1005"] as const;
 const NAME_BANK = [
-  'Ironclaw', 'Bloodfang', 'Wolfbite', 'Razorbeast', 'Stonejaw', 'Grimhound', 'Nightfang', 'Brutehorn', 'Skullwolf', 'Venomtail',
-  'Gunshock', 'Steelshot', 'Bladefist', 'Axebreaker', 'Hammerfall', 'Quickshot', 'Deadtrigger', 'Blastcore', 'Ironburst', 'Killspike',
-  'Maskhead', 'Boneface', 'Scarjaw', 'Redeye', 'Steelmask', 'Grimface', 'Halfskull', 'Madgrin', 'Coldeye', 'Rustface',
-  'Blackthorn', 'Frostbite', 'Darkclaw', 'Stormfury', 'Ironfang', 'Voidstrike', 'Shadowburn', 'Bloodspark', 'Ashbreaker', 'Steelrage',
-  'Brawler', 'Outlaw', 'Reaper', 'Crusher', 'Slasher', 'Breaker', 'Hunter', 'Warden', 'Striker', 'Ravager'
+  "Ironclaw",
+  "Bloodfang",
+  "Wolfbite",
+  "Razorbeast",
+  "Stonejaw",
+  "Grimhound",
+  "Nightfang",
+  "Brutehorn",
+  "Skullwolf",
+  "Venomtail",
+  "Gunshock",
+  "Steelshot",
+  "Bladefist",
+  "Axebreaker",
+  "Hammerfall",
+  "Quickshot",
+  "Deadtrigger",
+  "Blastcore",
+  "Ironburst",
+  "Killspike",
+  "Maskhead",
+  "Boneface",
+  "Scarjaw",
+  "Redeye",
+  "Steelmask",
+  "Grimface",
+  "Halfskull",
+  "Madgrin",
+  "Coldeye",
+  "Rustface",
+  "Blackthorn",
+  "Frostbite",
+  "Darkclaw",
+  "Stormfury",
+  "Ironfang",
+  "Voidstrike",
+  "Shadowburn",
+  "Bloodspark",
+  "Ashbreaker",
+  "Steelrage",
+  "Brawler",
+  "Outlaw",
+  "Reaper",
+  "Crusher",
+  "Slasher",
+  "Breaker",
+  "Hunter",
+  "Warden",
+  "Striker",
+  "Ravager",
 ] as const;
 
 function randomInt(min: number, max: number): number {
@@ -63,13 +117,16 @@ function pickDistinct<T>(values: readonly T[], count: number): T[] {
 }
 
 function buildRandomCharacter(entityId: string, side: Side): CombatantSnapshot {
-  const [skill1, skill2] = pickDistinct(ACTIVE_SKILL_IDS, 2) as [string, string];
+  const [skill1, skill2] = pickDistinct(ACTIVE_SKILL_IDS, 2) as [
+    string,
+    string,
+  ];
   const hpMax = randomInt(950, 1450);
   const [name] = pickDistinct(NAME_BANK, 1) as [string];
 
   return {
     entityId,
-    side: side === 'left' ? 'PLAYER' : 'ENEMY',
+    side: side === "left" ? "PLAYER" : "ENEMY",
     name,
     hp: hpMax,
     hpMax,
@@ -79,28 +136,37 @@ function buildRandomCharacter(entityId: string, side: Side): CombatantSnapshot {
     accuracyBP: randomInt(8600, 9600),
     evadeBP: randomInt(300, 1300),
     activeSkillIds: [skill1, skill2],
-    passiveSkillIds: ['2001', '2002']
+    passiveSkillIds: ["2001", "2002"],
   };
 }
 
-function buildDefaultCharacter(entityId: string, side: Side): CombatantSnapshot {
+function buildDefaultCharacter(
+  entityId: string,
+  side: Side,
+): CombatantSnapshot {
   return {
     entityId,
-    side: side === 'left' ? 'PLAYER' : 'ENEMY',
-    name: side === 'left' ? 'Vanguard' : 'Sentinel',
+    side: side === "left" ? "PLAYER" : "ENEMY",
+    name: side === "left" ? "Vanguard" : "Sentinel",
     hp: 1200,
     hpMax: 1200,
     atk: 110,
     def: 90,
-    spd: side === 'left' ? 105 : 100,
+    spd: side === "left" ? 105 : 100,
     accuracyBP: 9000,
     evadeBP: 900,
-    activeSkillIds: ['1001', '1002'],
-    passiveSkillIds: ['2001', '2002']
+    activeSkillIds: ["1001", "1002"],
+    passiveSkillIds: ["2001", "2002"],
   };
 }
 
-function formatCombatantName(entityId: string, leftId: string, leftName: string, rightId: string, rightName: string): string {
+function formatCombatantName(
+  entityId: string,
+  leftId: string,
+  leftName: string,
+  rightId: string,
+  rightName: string,
+): string {
   if (entityId === leftId) {
     return leftName;
   }
@@ -117,53 +183,60 @@ function formatEventLine(
   leftId: string,
   leftName: string,
   rightId: string,
-  rightName: string
+  rightName: string,
 ): string {
   switch (event.type) {
-    case 'ROUND_START':
+    case "ROUND_START":
       return `Round ${event.round} start`;
-    case 'ACTION':
+    case "ACTION":
       return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} uses ${SKILL_META[event.skillId]?.name ?? event.skillId} on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)}`;
-    case 'COOLDOWN_SET':
+    case "COOLDOWN_SET":
       return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} sets cooldown on ${SKILL_META[event.skillId]?.name ?? event.skillId} to ${event.cooldownRemainingTurns}`;
-    case 'STUNNED_SKIP':
+    case "STUNNED_SKIP":
       return `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} is stunned and loses their action`;
-    case 'HIT_RESULT':
+    case "HIT_RESULT":
       return event.didHit
         ? `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} hits ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} (${event.rollBP}/${event.hitChanceBP})`
         : `${formatCombatantName(event.actorId, leftId, leftName, rightId, rightName)} misses ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} (${event.rollBP}/${event.hitChanceBP})`;
-    case 'DAMAGE':
+    case "DAMAGE":
       return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} takes ${event.amount} damage (HP now ${event.targetHpAfter})`;
-    case 'STATUS_APPLY':
+    case "STATUS_APPLY":
       return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} gains ${event.statusId} from ${formatCombatantName(event.sourceId, leftId, leftName, rightId, rightName)} (${event.remainingTurns} turns)`;
-    case 'STATUS_REFRESH':
+    case "STATUS_REFRESH":
       return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} refreshes ${event.statusId} to ${event.remainingTurns} turns`;
-    case 'STATUS_APPLY_FAILED':
+    case "STATUS_APPLY_FAILED":
       return `${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} failed to gain ${event.statusId} (${event.reason})`;
-    case 'STATUS_EFFECT_RESOLVE':
+    case "STATUS_EFFECT_RESOLVE":
       return `${event.statusId} resolves on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)} during ${event.phase} (hpΔ ${event.hpDelta}, hp ${event.targetHpAfter})`;
-    case 'STATUS_EXPIRE':
+    case "STATUS_EXPIRE":
       return `${event.statusId} expired on ${formatCombatantName(event.targetId, leftId, leftName, rightId, rightName)}`;
-    case 'DEATH':
+    case "DEATH":
       return `${formatCombatantName(event.entityId, leftId, leftName, rightId, rightName)} was defeated`;
-    case 'ROUND_END':
+    case "ROUND_END":
       return `Round ${event.round} end`;
-    case 'BATTLE_END':
+    case "BATTLE_END":
       return `Battle ended by ${event.reason}. Winner: ${event.winnerEntityId}, Loser: ${event.loserEntityId}`;
     default:
-      return 'Unknown event.';
+      return "Unknown event.";
   }
 }
 
-function decrementCooldowns(cooldowns: Record<string, number>): Record<string, number> {
-  return Object.fromEntries(Object.entries(cooldowns).map(([skillId, value]) => [skillId, Math.max(0, value - 1)]));
+function decrementCooldowns(
+  cooldowns: Record<string, number>,
+): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(cooldowns).map(([skillId, value]) => [
+      skillId,
+      Math.max(0, value - 1),
+    ]),
+  );
 }
 
 function toStatusName(statusId: string): string {
   return statusId
-    .split('_')
+    .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 function formatDelta(value: number): string {
@@ -179,14 +252,14 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
   let leftHp = result.playerInitial.hp;
   let rightHp = result.enemyInitial.hp;
   let leftCooldowns: Record<string, number> = {
-    '1000': 0,
+    "1000": 0,
     [result.playerInitial.activeSkillIds[0]]: 0,
-    [result.playerInitial.activeSkillIds[1]]: 0
+    [result.playerInitial.activeSkillIds[1]]: 0,
   };
   let rightCooldowns: Record<string, number> = {
-    '1000': 0,
+    "1000": 0,
     [result.enemyInitial.activeSkillIds[0]]: 0,
-    [result.enemyInitial.activeSkillIds[1]]: 0
+    [result.enemyInitial.activeSkillIds[1]]: 0,
   };
   let displayLeftHp = leftHp;
   let displayRightHp = rightHp;
@@ -200,9 +273,18 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
   while (index < result.events.length) {
     const mainEvent = result.events[index];
 
-    if (mainEvent.type === 'STATUS_EFFECT_RESOLVE' && mainEvent.phase === 'onRoundStart' && mainEvent.hpDelta !== 0) {
+    if (
+      mainEvent.type === "STATUS_EFFECT_RESOLVE" &&
+      mainEvent.phase === "onRoundStart" &&
+      mainEvent.hpDelta !== 0
+    ) {
       const event = mainEvent;
-      let actionLabelSide: Side | null = event.targetId === leftId ? 'left' : event.targetId === rightId ? 'right' : null;
+      let actionLabelSide: Side | null =
+        event.targetId === leftId
+          ? "left"
+          : event.targetId === rightId
+            ? "right"
+            : null;
       let actionLabelText = `${toStatusName(event.statusId)} (${formatDelta(event.hpDelta)})`;
 
       if (event.targetId === leftId) {
@@ -225,16 +307,26 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
         displayRightCooldowns: { ...displayRightCooldowns },
         actionLabelSide,
         actionLabelText,
-        leftFlash: event.targetId === leftId ? (event.hpDelta < 0 ? 'damage' : 'recover') : null,
-        rightFlash: event.targetId === rightId ? (event.hpDelta < 0 ? 'damage' : 'recover') : null,
-        logLine: formatEventLine(event, leftId, leftName, rightId, rightName)
+        leftFlash:
+          event.targetId === leftId
+            ? event.hpDelta < 0
+              ? "damage"
+              : "recover"
+            : null,
+        rightFlash:
+          event.targetId === rightId
+            ? event.hpDelta < 0
+              ? "damage"
+              : "recover"
+            : null,
+        logLine: formatEventLine(event, leftId, leftName, rightId, rightName),
       });
 
       index += 1;
       continue;
     }
 
-    if (mainEvent.type !== 'ACTION' && mainEvent.type !== 'STUNNED_SKIP') {
+    if (mainEvent.type !== "ACTION" && mainEvent.type !== "STUNNED_SKIP") {
       index += 1;
       continue;
     }
@@ -242,15 +334,32 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
     const tickStartLeftHp = leftHp;
     const tickStartRightHp = rightHp;
     let tickEndIndex = index;
-    let actionLabelSide: Side | null = mainEvent.actorId === leftId ? 'left' : mainEvent.actorId === rightId ? 'right' : null;
-    let actionLabelText = '';
-    let logLine = formatEventLine(mainEvent, leftId, leftName, rightId, rightName);
-    let skillName = mainEvent.type === 'ACTION' ? SKILL_META[mainEvent.skillId]?.name ?? mainEvent.skillId : 'Turn';
+    let actionLabelSide: Side | null =
+      mainEvent.actorId === leftId
+        ? "left"
+        : mainEvent.actorId === rightId
+          ? "right"
+          : null;
+    let actionLabelText = "";
+    let logLine = formatEventLine(
+      mainEvent,
+      leftId,
+      leftName,
+      rightId,
+      rightName,
+    );
+    let skillName =
+      mainEvent.type === "ACTION"
+        ? (SKILL_META[mainEvent.skillId]?.name ?? mainEvent.skillId)
+        : "Turn";
     let didHit: boolean | null = null;
     let actionHpDelta = 0;
 
-    if (mainEvent.type === 'ACTION') {
-      lastUsedSkillByActor = { ...lastUsedSkillByActor, [mainEvent.actorId]: skillName };
+    if (mainEvent.type === "ACTION") {
+      lastUsedSkillByActor = {
+        ...lastUsedSkillByActor,
+        [mainEvent.actorId]: skillName,
+      };
     }
 
     let cursor = index;
@@ -258,11 +367,11 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
       const event = result.events[cursor];
       if (
         cursor > index &&
-        (
-          event.type === 'ACTION' ||
-          event.type === 'STUNNED_SKIP' ||
-          (event.type === 'STATUS_EFFECT_RESOLVE' && event.phase === 'onRoundStart' && event.hpDelta !== 0)
-        )
+        (event.type === "ACTION" ||
+          event.type === "STUNNED_SKIP" ||
+          (event.type === "STATUS_EFFECT_RESOLVE" &&
+            event.phase === "onRoundStart" &&
+            event.hpDelta !== 0))
       ) {
         break;
       }
@@ -270,7 +379,7 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
       tickEndIndex = cursor;
       logLine = formatEventLine(event, leftId, leftName, rightId, rightName);
 
-      if (event.type === 'DAMAGE') {
+      if (event.type === "DAMAGE") {
         if (event.targetId === leftId) {
           actionHpDelta += leftHp - event.targetHpAfter;
           leftHp = event.targetHpAfter;
@@ -281,20 +390,26 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
         }
       }
 
-      if (event.type === 'HIT_RESULT' && event.actorId === mainEvent.actorId) {
+      if (event.type === "HIT_RESULT" && event.actorId === mainEvent.actorId) {
         didHit = event.didHit;
       }
 
-      if (event.type === 'COOLDOWN_SET') {
+      if (event.type === "COOLDOWN_SET") {
         if (event.actorId === leftId) {
-          leftCooldowns = { ...leftCooldowns, [event.skillId]: event.cooldownRemainingTurns };
+          leftCooldowns = {
+            ...leftCooldowns,
+            [event.skillId]: event.cooldownRemainingTurns,
+          };
         }
         if (event.actorId === rightId) {
-          rightCooldowns = { ...rightCooldowns, [event.skillId]: event.cooldownRemainingTurns };
+          rightCooldowns = {
+            ...rightCooldowns,
+            [event.skillId]: event.cooldownRemainingTurns,
+          };
         }
       }
 
-      if (event.type === 'ROUND_END') {
+      if (event.type === "ROUND_END") {
         leftCooldowns = decrementCooldowns(leftCooldowns);
         rightCooldowns = decrementCooldowns(rightCooldowns);
         displayLeftHp = leftHp;
@@ -303,7 +418,7 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
         displayRightCooldowns = { ...rightCooldowns };
       }
 
-      if (event.type === 'BATTLE_END') {
+      if (event.type === "BATTLE_END") {
         displayLeftHp = leftHp;
         displayRightHp = rightHp;
         displayLeftCooldowns = { ...leftCooldowns };
@@ -313,7 +428,7 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
       cursor += 1;
     }
 
-    if (mainEvent.type === 'STUNNED_SKIP') {
+    if (mainEvent.type === "STUNNED_SKIP") {
       actionLabelText = `${formatCombatantName(mainEvent.actorId, leftId, leftName, rightId, rightName)} is stunned and lost the turn!`;
     } else {
       const actionName = lastUsedSkillByActor[mainEvent.actorId] ?? skillName;
@@ -337,9 +452,9 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
       displayRightCooldowns: { ...displayRightCooldowns },
       actionLabelSide,
       actionLabelText,
-      leftFlash: leftDelta < 0 ? 'damage' : leftDelta > 0 ? 'recover' : null,
-      rightFlash: rightDelta < 0 ? 'damage' : rightDelta > 0 ? 'recover' : null,
-      logLine
+      leftFlash: leftDelta < 0 ? "damage" : leftDelta > 0 ? "recover" : null,
+      rightFlash: rightDelta < 0 ? "damage" : rightDelta > 0 ? "recover" : null,
+      logLine,
     });
 
     index = cursor;
@@ -348,12 +463,12 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
   const lastFrame = frames[frames.length - 1];
   if (
     lastFrame !== undefined &&
-    (
-      lastFrame.displayLeftHp !== displayLeftHp ||
+    (lastFrame.displayLeftHp !== displayLeftHp ||
       lastFrame.displayRightHp !== displayRightHp ||
-      JSON.stringify(lastFrame.displayLeftCooldowns) !== JSON.stringify(displayLeftCooldowns) ||
-      JSON.stringify(lastFrame.displayRightCooldowns) !== JSON.stringify(displayRightCooldowns)
-    )
+      JSON.stringify(lastFrame.displayLeftCooldowns) !==
+        JSON.stringify(displayLeftCooldowns) ||
+      JSON.stringify(lastFrame.displayRightCooldowns) !==
+        JSON.stringify(displayRightCooldowns))
   ) {
     frames.push({
       ...lastFrame,
@@ -362,7 +477,7 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
       displayLeftCooldowns: { ...displayLeftCooldowns },
       displayRightCooldowns: { ...displayRightCooldowns },
       leftFlash: null,
-      rightFlash: null
+      rightFlash: null,
     });
   }
 
@@ -370,8 +485,12 @@ function buildFrames(result: BattleResult): ReplayFrame[] {
 }
 
 export default function BattleDashboardPage() {
-  const [leftCharacter, setLeftCharacter] = useState<CombatantSnapshot>(() => buildDefaultCharacter('10001', 'left'));
-  const [rightCharacter, setRightCharacter] = useState<CombatantSnapshot>(() => buildDefaultCharacter('20001', 'right'));
+  const [leftCharacter, setLeftCharacter] = useState<CombatantSnapshot>(() =>
+    buildDefaultCharacter("10001", "left"),
+  );
+  const [rightCharacter, setRightCharacter] = useState<CombatantSnapshot>(() =>
+    buildDefaultCharacter("20001", "right"),
+  );
   const [result, setResult] = useState<BattleResult | null>(null);
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -389,7 +508,9 @@ export default function BattleDashboardPage() {
     const leftName = result.playerInitial.name ?? leftId;
     const rightName = result.enemyInitial.name ?? rightId;
 
-    return result.events.map((event) => formatEventLine(event, leftId, leftName, rightId, rightName));
+    return result.events.map((event) =>
+      formatEventLine(event, leftId, leftName, rightId, rightName),
+    );
   }, [result]);
   const visibleBattleLogLines = useMemo(() => {
     const cursor = currentFrame?.logCursorIndex ?? -1;
@@ -401,14 +522,14 @@ export default function BattleDashboardPage() {
     setIsPlaying(false);
     setCurrentFrameIndex(0);
 
-    const response = await fetch('/api/combat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const response = await fetch("/api/combat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         playerInitial: leftCharacter,
         enemyInitial: rightCharacter,
-        seed: randomInt(1, 1000000)
-      })
+        seed: randomInt(1, 1000000),
+      }),
     });
 
     if (!response.ok) {
@@ -456,71 +577,123 @@ export default function BattleDashboardPage() {
 
   const leftHp = currentFrame?.displayLeftHp ?? leftCharacter.hp;
   const rightHp = currentFrame?.displayRightHp ?? rightCharacter.hp;
-  const battleId = result?.battleId ?? '—';
-  const leftActionText = currentFrame?.actionLabelSide === 'left' ? currentFrame.actionLabelText : '';
-  const rightActionText = currentFrame?.actionLabelSide === 'right' ? currentFrame.actionLabelText : '';
-  const leftSkills = ['1000', ...leftCharacter.activeSkillIds];
-  const rightSkills = ['1000', ...rightCharacter.activeSkillIds];
+  const battleId = result?.battleId ?? "—";
+  const leftActionText =
+    currentFrame?.actionLabelSide === "left"
+      ? currentFrame.actionLabelText
+      : "";
+  const rightActionText =
+    currentFrame?.actionLabelSide === "right"
+      ? currentFrame.actionLabelText
+      : "";
+  const leftSkills = ["1000", ...leftCharacter.activeSkillIds];
+  const rightSkills = ["1000", ...rightCharacter.activeSkillIds];
   const currentRound = currentFrame?.event.round ?? 1;
   const controlsDisabled = isPlaying || isRequestingBattle;
 
   return (
-    <main style={{ minHeight: '100vh', background: '#000', color: '#fff', padding: '1rem' }}>
-      <section style={{ width: '100%', maxWidth: 1100, margin: '0 auto', display: 'grid', gap: '0.9rem' }}>
-        <header style={{ border: '2px solid #fff', padding: '0.75rem 1rem', fontWeight: 700, letterSpacing: '0.04em' }}>
-          Battle ID: {battleId}
-        </header>
+    <main style={pageStyle}>
+      <section style={shellStyle}>
+        <header style={panelHeaderStyle}>Battle ID: {battleId}</header>
 
-        <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: '1fr' }}>
-          <button type="button" disabled={controlsDisabled} onClick={runBattle} style={{ ...buttonStyle, gridColumn: '1 / -1' }}>
+        <div
+          style={{ display: "grid", gap: "0.5rem", gridTemplateColumns: "1fr" }}
+        >
+          <button
+            type="button"
+            disabled={controlsDisabled}
+            onClick={runBattle}
+            style={{ ...buttonStyle, gridColumn: "1 / -1" }}
+          >
             Simulate Battle
           </button>
         </div>
-        <div style={{ border: '2px solid #fff', padding: '0.55rem 0.8rem', fontWeight: 800, letterSpacing: '0.06em', textAlign: 'center' }}>ROUND {currentRound}</div>
+        <div style={roundBannerStyle}>ROUND {currentRound}</div>
 
-        <section style={{ border: '2px solid #fff' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '2px solid #fff', minHeight: 320 }}>
+        <section style={combatStageStyle}>
+          <div style={arenaGridStyle}>
             <ArenaCell
               name={leftCharacter.name ?? leftCharacter.entityId}
               actionText={leftActionText}
               side="left"
               flash={currentFrame?.leftFlash ?? null}
-              onRandomize={() => setLeftCharacter(buildRandomCharacter('10001', 'left'))}
+              onRandomize={() =>
+                setLeftCharacter(buildRandomCharacter("10001", "left"))
+              }
               randomizeDisabled={controlsDisabled}
-              isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === leftCharacter.entityId}
+              isActive={
+                currentFrame?.event.type === "ACTION" &&
+                "actorId" in currentFrame.event &&
+                currentFrame.event.actorId === leftCharacter.entityId
+              }
             />
             <ArenaCell
               name={rightCharacter.name ?? rightCharacter.entityId}
               actionText={rightActionText}
               side="right"
               flash={currentFrame?.rightFlash ?? null}
-              onRandomize={() => setRightCharacter(buildRandomCharacter('20001', 'right'))}
+              onRandomize={() =>
+                setRightCharacter(buildRandomCharacter("20001", "right"))
+              }
               randomizeDisabled={controlsDisabled}
-              isActive={currentFrame?.event.type === 'ACTION' && 'actorId' in currentFrame.event && currentFrame.event.actorId === rightCharacter.entityId}
+              isActive={
+                currentFrame?.event.type === "ACTION" &&
+                "actorId" in currentFrame.event &&
+                currentFrame.event.actorId === rightCharacter.entityId
+              }
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+          <div style={arenaGridBodyStyle}>
             <StatsCell
               hp={leftHp}
               hpMax={leftCharacter.hpMax}
               initiative={leftCharacter.spd}
               skillIds={leftSkills}
-              cooldowns={currentFrame?.displayLeftCooldowns ?? { '1000': 0, [leftCharacter.activeSkillIds[0]]: 0, [leftCharacter.activeSkillIds[1]]: 0 }}
+              cooldowns={
+                currentFrame?.displayLeftCooldowns ?? {
+                  "1000": 0,
+                  [leftCharacter.activeSkillIds[0]]: 0,
+                  [leftCharacter.activeSkillIds[1]]: 0,
+                }
+              }
             />
             <StatsCell
               hp={rightHp}
               hpMax={rightCharacter.hpMax}
               initiative={rightCharacter.spd}
               skillIds={rightSkills}
-              cooldowns={currentFrame?.displayRightCooldowns ?? { '1000': 0, [rightCharacter.activeSkillIds[0]]: 0, [rightCharacter.activeSkillIds[1]]: 0 }}
+              cooldowns={
+                currentFrame?.displayRightCooldowns ?? {
+                  "1000": 0,
+                  [rightCharacter.activeSkillIds[0]]: 0,
+                  [rightCharacter.activeSkillIds[1]]: 0,
+                }
+              }
             />
           </div>
         </section>
 
-        <details style={{ border: '2px solid #fff', padding: '0.75rem 1rem' }} open>
-          <summary style={{ cursor: 'pointer', fontWeight: 700, marginBottom: '0.5rem' }}>Battle Log</summary>
-          <ol style={{ margin: 0, paddingLeft: '1.2rem', maxHeight: 220, overflowY: 'auto', display: 'grid', gap: '0.3rem' }}>
+        <details style={detailsStyle} open>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontWeight: 700,
+              marginBottom: "0.5rem",
+            }}
+          >
+            Battle Log
+          </summary>
+          <ol
+            style={{
+              margin: 0,
+              paddingLeft: "1.2rem",
+              maxHeight: 220,
+              overflowY: "auto",
+              display: "grid",
+              gap: "0.3rem",
+            }}
+          >
             {visibleBattleLogLines.map((line, index) => (
               <li
                 key={`battle-log-${index}`}
@@ -541,37 +714,68 @@ type ArenaCellProps = {
   actionText: string;
   side: Side;
   isActive: boolean;
-  flash: 'damage' | 'recover' | null;
+  flash: "damage" | "recover" | null;
   onRandomize: () => void;
   randomizeDisabled: boolean;
 };
 
-function ArenaCell({ name, actionText, side, isActive, flash, onRandomize, randomizeDisabled }: ArenaCellProps) {
-  const flashColor = flash === 'damage' ? 'rgba(255, 120, 120, 0.35)' : flash === 'recover' ? 'rgba(120, 255, 160, 0.35)' : undefined;
+function ArenaCell({
+  name,
+  actionText,
+  side,
+  isActive,
+  flash,
+  onRandomize,
+  randomizeDisabled,
+}: ArenaCellProps) {
+  const flashColor =
+    flash === "damage"
+      ? "var(--danger-soft)"
+      : flash === "recover"
+        ? "var(--success-soft)"
+        : undefined;
 
   return (
-    <article style={{ borderRight: side === 'left' ? '2px solid #fff' : undefined, padding: '0.75rem', display: 'grid', gridTemplateRows: 'auto 1fr auto', gap: '0.75rem' }}>
-      <p style={{ margin: 0, border: '1px solid #fff', padding: '0.5rem', minHeight: '3rem', background: '#0d0d0d' }}>{actionText}</p>
+    <article
+      style={{
+        ...arenaCellStyle,
+        borderRight: side === "left" ? "1px solid var(--border)" : undefined,
+      }}
+    >
+      <p style={actionTextStyle}>{actionText}</p>
       <div
         style={{
-          border: '2px dashed #fff',
-          display: 'grid',
-          placeItems: 'center',
-          fontSize: '1.25rem',
-          letterSpacing: '0.05em',
-          background: flashColor ?? (isActive ? '#1a1a1a' : '#000'),
-          transition: 'background 0.25s ease, box-shadow 0.25s ease',
-          boxShadow: flashColor ? `0 0 0 2px ${flashColor}` : 'none'
+          border: "2px dashed var(--border-strong)",
+          display: "grid",
+          placeItems: "center",
+          fontSize: "1.25rem",
+          letterSpacing: "0.05em",
+          borderRadius: 18,
+          background:
+            flashColor ??
+            (isActive ? "var(--brand-primary-soft)" : "var(--surface-soft)"),
+          color: "var(--text)",
+          transition: "background 0.25s ease, box-shadow 0.25s ease",
+          boxShadow: flashColor ? `0 0 0 2px ${flashColor}` : "none",
         }}
       >
         {name}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button
           type="button"
           onClick={onRandomize}
           disabled={randomizeDisabled}
-          style={{ width: 28, height: 28, border: '1px solid #fff', borderRadius: 4, background: '#000', color: '#fff', cursor: randomizeDisabled ? 'not-allowed' : 'pointer', opacity: randomizeDisabled ? 0.45 : 1 }}
+          style={{
+            width: 32,
+            height: 32,
+            border: "1px solid var(--border-strong)",
+            borderRadius: 999,
+            background: "var(--surface-strong)",
+            color: "var(--text)",
+            cursor: randomizeDisabled ? "not-allowed" : "pointer",
+            opacity: randomizeDisabled ? 0.45 : 1,
+          }}
           title={`Randomize ${side}`}
         >
           🎲
@@ -589,22 +793,45 @@ type StatsCellProps = {
   cooldowns: Record<string, number>;
 };
 
-function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProps) {
+function StatsCell({
+  hp,
+  hpMax,
+  initiative,
+  skillIds,
+  cooldowns,
+}: StatsCellProps) {
   const hpPercent = Math.max(0, Math.min(100, Math.round((hp / hpMax) * 100)));
-  const initiativePercent = Math.max(0, Math.min(100, Math.round((initiative / 200) * 100)));
+  const initiativePercent = Math.max(
+    0,
+    Math.min(100, Math.round((initiative / 200) * 100)),
+  );
 
   return (
-    <article style={{ borderRight: '2px solid #fff', padding: '0.75rem' }}>
-      <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '0.7rem' }}>
+    <article style={statsCellStyle}>
+      <div style={{ display: "grid", gap: "0.35rem", marginBottom: "0.7rem" }}>
         <span>HP:</span>
-        <div style={{ height: 20, border: '1px solid #fff', background: '#1b1b1b' }}>
-          <div style={{ width: `${hpPercent}%`, height: '100%', background: '#fff' }} />
+        <div style={barTrackStyle}>
+          <div
+            style={{
+              width: `${hpPercent}%`,
+              height: "100%",
+              background:
+                "linear-gradient(90deg, var(--brand-secondary) 0%, var(--grass) 100%)",
+            }}
+          />
         </div>
       </div>
-      <div style={{ display: 'grid', gap: '0.3rem', marginBottom: '0.75rem' }}>
+      <div style={{ display: "grid", gap: "0.3rem", marginBottom: "0.75rem" }}>
         <span>Initiative:</span>
-        <div style={{ height: 12, border: '1px solid #fff', background: '#1b1b1b' }}>
-          <div style={{ width: `${initiativePercent}%`, height: '100%', background: '#9a9a9a' }} />
+        <div style={{ ...barTrackStyle, height: 12 }}>
+          <div
+            style={{
+              width: `${initiativePercent}%`,
+              height: "100%",
+              background:
+                "linear-gradient(90deg, var(--brand-primary) 0%, var(--accent) 100%)",
+            }}
+          />
         </div>
       </div>
       <section>
@@ -614,9 +841,9 @@ function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProp
             const cooldown = cooldowns[skillId] ?? 0;
             return (
               <li key={skillId}>
-                <span>{SKILL_META[skillId]?.icon ?? '◻'} </span>
+                <span>{SKILL_META[skillId]?.icon ?? "◻"} </span>
                 <span>{SKILL_META[skillId]?.name ?? skillId} </span>
-                <small>{cooldown > 0 ? `CD ${cooldown}` : 'Ready'}</small>
+                <small>{cooldown > 0 ? `CD ${cooldown}` : "Ready"}</small>
               </li>
             );
           })}
@@ -627,11 +854,106 @@ function StatsCell({ hp, hpMax, initiative, skillIds, cooldowns }: StatsCellProp
 }
 
 const buttonStyle: CSSProperties = {
-  border: '2px solid #fff',
-  background: '#000',
-  color: '#fff',
-  padding: '0.7rem 0.8rem',
+  border: "1px solid var(--brand-primary-active)",
+  borderRadius: 12,
+  background:
+    "linear-gradient(180deg, var(--brand-primary) 0%, var(--brand-primary-active) 100%)",
+  color: "var(--text-inverse)",
+  padding: "0.7rem 0.8rem",
   fontWeight: 700,
-  letterSpacing: '0.03em',
-  cursor: 'pointer'
+  letterSpacing: "0.03em",
+  boxShadow: "0 12px 24px rgba(118, 174, 218, 0.28)",
+  cursor: "pointer",
+};
+
+const pageStyle: CSSProperties = {
+  minHeight: "100vh",
+  padding: "1rem",
+  background:
+    "radial-gradient(circle at top left, rgba(118, 174, 218, 0.12), transparent 24%), linear-gradient(180deg, var(--cloud) 0%, var(--page) 40%, var(--page-alt) 100%)",
+  color: "var(--text)",
+};
+
+const shellStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 1100,
+  margin: "0 auto",
+  display: "grid",
+  gap: "0.9rem",
+};
+
+const glassPanelStyle: CSSProperties = {
+  border: "1px solid var(--border-soft)",
+  borderRadius: 18,
+  background:
+    "linear-gradient(180deg, var(--haze) 0%, rgba(255, 255, 255, 0.1) 100%), var(--surface)",
+  boxShadow: "var(--shadow-elevated)",
+  backdropFilter: "blur(18px) saturate(160%)",
+  WebkitBackdropFilter: "blur(18px) saturate(160%)",
+};
+
+const panelHeaderStyle: CSSProperties = {
+  ...glassPanelStyle,
+  padding: "0.75rem 1rem",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+};
+
+const roundBannerStyle: CSSProperties = {
+  ...glassPanelStyle,
+  padding: "0.55rem 0.8rem",
+  fontWeight: 800,
+  letterSpacing: "0.06em",
+  textAlign: "center",
+};
+
+const combatStageStyle: CSSProperties = {
+  ...glassPanelStyle,
+  overflow: "hidden",
+};
+
+const arenaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  borderBottom: "1px solid var(--border)",
+  minHeight: 320,
+};
+
+const arenaGridBodyStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+};
+
+const detailsStyle: CSSProperties = {
+  ...glassPanelStyle,
+  padding: "0.75rem 1rem",
+};
+
+const arenaCellStyle: CSSProperties = {
+  padding: "0.75rem",
+  display: "grid",
+  gridTemplateRows: "auto 1fr auto",
+  gap: "0.75rem",
+};
+
+const actionTextStyle: CSSProperties = {
+  margin: 0,
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: "0.5rem",
+  minHeight: "3rem",
+  background: "var(--surface-strong)",
+};
+
+const statsCellStyle: CSSProperties = {
+  borderRight: "1px solid var(--border)",
+  padding: "0.75rem",
+};
+
+const barTrackStyle: CSSProperties = {
+  height: 20,
+  border: "1px solid var(--border)",
+  borderRadius: 999,
+  overflow: "hidden",
+  background: "rgba(255, 255, 255, 0.72)",
 };

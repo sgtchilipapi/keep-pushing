@@ -1,11 +1,24 @@
-import './globals.css';
+import "./globals.css";
 
 import type { Metadata } from "next";
+import { Fraunces, Manrope } from "next/font/google";
 import type { ReactNode } from "react";
+
+const bodyFont = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const displayFont = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Keep Pushing",
-  description: "Vertical slice scaffold"
+  description: "Bright atmospheric tactical run prototype.",
 };
 
 type RootLayoutProps = {
@@ -15,7 +28,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+        {children}
+      </body>
     </html>
   );
 }
