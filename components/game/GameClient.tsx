@@ -123,12 +123,12 @@ function formatCountdown(targetTs: number | null): string {
   const minutes = Math.floor((remaining % 3600) / 60);
 
   if (days > 0) {
-    return `${days}d ${hours}h remaining`;
+    return `${days}d ${hours}h`;
   }
   if (hours > 0) {
-    return `${hours}h ${minutes}m remaining`;
+    return `${hours}h ${minutes}m`;
   }
-  return `${minutes}m remaining`;
+  return `${minutes}m`;
 }
 
 function seasonTargetTs(season: CurrentSeasonResponse | null): number | null {
@@ -281,6 +281,44 @@ function HeartIcon(props: { className?: string }) {
       <path
         d="M12 20s-7-4.6-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.4-7 10-7 10z"
         fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function PeopleIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <circle cx="9" cy="9" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="16.5" cy="10.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M4.5 18a4.5 4.5 0 0 1 9 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 18a3.5 3.5 0 0 1 6 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function BackIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={props.className}>
+      <path
+        d="M14.5 6.5 9 12l5.5 5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -512,6 +550,7 @@ type ZonePathDiagramPoint = {
   y: number;
   label: string;
   title: string;
+  nodeId?: string;
   done: boolean;
   current: boolean;
   branchOption: boolean;
@@ -520,6 +559,8 @@ type ZonePathDiagramPoint = {
 type ZonePathDiagramEdge = {
   key: string;
   d: string;
+  fromNodeId?: string;
+  toNodeId?: string;
   branchOption: boolean;
 };
 
@@ -663,6 +704,7 @@ function buildZonePathDiagram(
         y,
         label: state.nodeCurrent ? "X" : "",
         title: `Node: ${formatNodeLabel(node.nodeId)}`,
+        nodeId: node.nodeId,
         done: state.done,
         current: state.nodeCurrent,
         branchOption: state.branchOption,
@@ -690,6 +732,7 @@ function buildZonePathDiagram(
           y,
           label: subnodeCurrent ? "x" : "",
           title: `Subnode ${ordinal} of ${formatNodeLabel(node.nodeId)}`,
+          nodeId: node.nodeId,
           done: subnodeDone,
           current: subnodeCurrent,
           branchOption:
@@ -700,6 +743,8 @@ function buildZonePathDiagram(
         edges.push({
           key: `intra:${node.nodeId}:${subnode.subnodeId}`,
           d: `M ${tailX} ${y} L ${subnodeX} ${y}`,
+          fromNodeId: node.nodeId,
+          toNodeId: node.nodeId,
           branchOption: false,
         });
         tailX = subnodeX;
@@ -737,6 +782,8 @@ function buildZonePathDiagram(
       edges.push({
         key: `edge:${node.nodeId}:${nextNodeId}`,
         d: `M ${from.x + 12} ${from.y} L ${midX} ${from.y} L ${midX} ${to.y} L ${to.x - 22} ${to.y}`,
+        fromNodeId: node.nodeId,
+        toNodeId: nextNodeId,
         branchOption: Boolean(branchOption),
       });
     }
@@ -760,11 +807,12 @@ function buildZonePathDiagram(
       continue;
     }
     const midX = from.x + 18;
-    edges.push({
-      key: `exit:${terminalNodeId}`,
-      d: `M ${from.x + 12} ${from.y} L ${midX} ${from.y} L ${midX} ${exitY} L ${exitX - 18} ${exitY}`,
-      branchOption: false,
-    });
+      edges.push({
+        key: `exit:${terminalNodeId}`,
+        d: `M ${from.x + 12} ${from.y} L ${midX} ${from.y} L ${midX} ${exitY} L ${exitX - 18} ${exitY}`,
+        fromNodeId: terminalNodeId,
+        branchOption: false,
+      });
   }
 
   return {
@@ -1185,94 +1233,126 @@ function ZoneRunMapWindow(props: {
     return null;
   }
 
+  const diagram = buildZonePathDiagram(props.topology, props.activeRun);
   const stages = buildRunWindowStages(props.topology, props.activeRun);
-  const currentDepth = resolveActiveStepperDepth(props.topology, props.activeRun);
+  const highlightedNodeIds = new Set(
+    stages.flatMap((stage) => stage.nodes.map((node) => node.nodeId)),
+  );
 
   return (
-    <div className={styles.mapWindowGrid}>
-      {stages.map((stage) => {
-        const stageLabel =
-          stage.depth < currentDepth
-            ? "Previous"
-            : stage.depth === currentDepth
-              ? "Current"
-              : "Next";
+    <section className={styles.visualMapShell}>
+      <div className={styles.panelTitleRow}>
+        <div className={styles.stack}>
+          <span className={styles.slotEyebrow}>Zone Map</span>
+          <h3 className={styles.panelTitle}>Active route</h3>
+          <p className={styles.panelText}>
+            The full topology stays visible while only the previous, current, and next depth stay highlighted.
+          </p>
+        </div>
+      </div>
 
-        return (
-          <section key={stage.depth} className={styles.mapStageCard}>
-            <div className={styles.panelTitleRow}>
-              <div className={styles.stack}>
-                <span className={styles.slotEyebrow}>{stageLabel}</span>
-                <h3 className={styles.panelTitle}>Depth {stage.depth + 1}</h3>
-              </div>
-            </div>
+      <div className={styles.visualMapFrame}>
+        <svg
+          viewBox={`0 0 ${diagram.width} ${diagram.height}`}
+          className={styles.visualMapSvg}
+          role="img"
+          aria-label="Active zone route map"
+        >
+          {diagram.edges.map((edge) => {
+            const inWindow =
+              edge.fromNodeId === undefined ||
+              edge.toNodeId === undefined ||
+              highlightedNodeIds.has(edge.fromNodeId) ||
+              highlightedNodeIds.has(edge.toNodeId);
 
-            <div className={styles.mapNodeList}>
-              {stage.nodes.map((node) => {
-                const nodeIsCurrent = props.activeRun?.currentNodeId === node.nodeId;
-                const nodeIsDone =
-                  props.activeRun?.enteredNodeIds.includes(node.nodeId) === true &&
-                  !nodeIsCurrent;
-                const nodeIsBranchOption =
-                  props.activeRun?.branchOptions.includes(node.nodeId) === true;
+            return (
+              <path
+                key={edge.key}
+                d={edge.d}
+                className={[
+                  styles.visualMapEdge,
+                  edge.branchOption ? styles.visualMapEdgeBranch : "",
+                  !inWindow ? styles.visualMapEdgeMuted : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              />
+            );
+          })}
 
-                return (
-                  <article
-                    key={node.nodeId}
-                    className={[
-                      styles.mapNodeCard,
-                      nodeIsCurrent ? styles.mapNodeCardCurrent : "",
-                      nodeIsDone ? styles.mapNodeCardDone : "",
-                      nodeIsBranchOption ? styles.mapNodeCardBranch : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
+          {diagram.points.map((point) => {
+            const inWindow =
+              point.kind === "entry" ||
+              point.kind === "exit" ||
+              point.nodeId === undefined ||
+              highlightedNodeIds.has(point.nodeId);
+
+            return (
+              <g
+                key={point.key}
+                className={[
+                  styles.visualMapPoint,
+                  point.done ? styles.visualMapPointDone : "",
+                  point.current ? styles.visualMapPointCurrent : "",
+                  point.branchOption ? styles.visualMapPointBranch : "",
+                  !inWindow ? styles.visualMapPointMuted : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <title>{point.title}</title>
+                {point.kind === "subnode" ? (
+                  <circle cx={point.x} cy={point.y} r={9} />
+                ) : (
+                  <rect x={point.x - 18} y={point.y - 18} width={36} height={36} rx={12} ry={12} />
+                )}
+                {point.label ? (
+                  <text
+                    x={point.x}
+                    y={point.y + 1}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className={styles.visualMapGlyph}
                   >
-                    <div className={styles.panelTitleRow}>
-                      <div className={styles.stack}>
-                        <h4 className={styles.slotTitle}>{formatNodeLabel(node.nodeId)}</h4>
-                        <p className={styles.noteText}>{node.nodeId}</p>
-                      </div>
-                      {nodeIsCurrent ? (
-                        <StatusBadge label="Current" tone="info" />
-                      ) : nodeIsDone ? (
-                        <StatusBadge label="Done" tone="success" />
-                      ) : nodeIsBranchOption ? (
-                        <StatusBadge label="Branch" tone="warning" />
-                      ) : null}
-                    </div>
+                    {point.label}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
 
-                    <div className={styles.mapSubnodeRow}>
-                      {node.subnodes.map((subnode, index) => {
-                        const state = resolveSubnodeState({
-                          activeRun: props.activeRun,
-                          nodeId: node.nodeId,
-                          ordinal: index + 1,
-                        });
-
-                        return (
-                          <span
-                            key={subnode.subnodeId}
-                            className={[
-                              styles.mapSubnodePill,
-                              state.done ? styles.mapSubnodePillDone : "",
-                              state.current ? styles.mapSubnodePillCurrent : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                          >
-                            {index + 1}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </article>
-                );
-              })}
+      <div className={styles.visualMapStageGrid}>
+        {stages.map((stage, index) => (
+          <div key={stage.depth} className={styles.visualMapStageCard}>
+            <span className={styles.slotEyebrow}>
+              {index === 0 ? "Previous" : index === 1 ? "Current" : "Next"}
+            </span>
+            <div className={styles.visualMapStageNodes}>
+              {stage.nodes.map((node) => (
+                <span
+                  key={node.nodeId}
+                  className={[
+                    styles.visualMapStageChip,
+                    props.activeRun?.currentNodeId === node.nodeId
+                      ? styles.visualMapStageChipCurrent
+                      : props.activeRun?.branchOptions.includes(node.nodeId)
+                        ? styles.visualMapStageChipBranch
+                        : props.activeRun?.enteredNodeIds.includes(node.nodeId)
+                          ? styles.visualMapStageChipDone
+                          : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  {formatNodeLabel(node.nodeId)}
+                </span>
+              ))}
             </div>
-          </section>
-        );
-      })}
+          </div>
+        ))}
+      </div>
 
       {props.activeRun?.state === "AWAITING_BRANCH" ? (
         <div className={styles.noteText}>
@@ -1280,7 +1360,7 @@ function ZoneRunMapWindow(props: {
           {props.activeRun.branchOptions.map((nodeId) => formatNodeLabel(nodeId)).join(", ")}
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -1519,6 +1599,11 @@ type CharacterSyncButtonProps = {
 function CharacterSyncButton(props: CharacterSyncButtonProps) {
   const syncState = resolveSyncPanelState(props.character);
   const pendingAck = readPendingSyncAck(props.character.characterId) !== null;
+  const feedbackMessage = pendingAck
+    ? "Submitted tx is waiting for server acknowledgement."
+    : syncState.syncMode === null
+      ? "Chain state is caught up."
+      : null;
 
   return (
     <div className={styles.syncControlStack}>
@@ -1547,13 +1632,9 @@ function CharacterSyncButton(props: CharacterSyncButtonProps) {
         </details>
       </div>
 
-      <div className={styles.syncFeedback}>
-        {pendingAck
-          ? "Submitted tx is waiting for server acknowledgement."
-          : syncState.syncMode === null
-            ? "Chain state is caught up."
-            : "Open sync to settle the oldest pending work."}
-      </div>
+      {feedbackMessage ? (
+        <div className={styles.syncFeedback}>{feedbackMessage}</div>
+      ) : null}
     </div>
   );
 }
@@ -2778,16 +2859,36 @@ export default function GameClient() {
       <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.stack}>
-            <span className={styles.eyebrow}>Reconciled MVP Slice 3</span>
-            <h1 className={styles.title}>RUNANA</h1>
+            <div className={styles.titleRow}>
+              <h1 className={styles.title}>RUNANA</h1>
+              {season ? (
+                <>
+                  <StatusBadge label={season.seasonName} tone={seasonTone(season.phase)} />
+                  <span className={styles.headerMetaText}>
+                    ends in {formatCountdown(seasonTargetTs(season))}
+                  </span>
+                </>
+              ) : null}
+            </div>
             {season ? (
-              <p className={styles.subtitle}>
-                {season.seasonName} · {season.phase} · {seasonCountdownLabel(season)}
-              </p>
+              season.phase === "grace" ? (
+                <p className={styles.subtitle}>Grace period is open for sync and settlement.</p>
+              ) : null
             ) : null}
           </div>
 
           <div className={styles.toolbar}>
+            {shellView !== "landing" ? (
+              <button
+                type="button"
+                className={styles.iconButton}
+                onClick={() => setShellView("roster")}
+                aria-label="Open characters"
+                title="Open characters"
+              >
+                <PeopleIcon className={styles.iconSvg} />
+              </button>
+            ) : null}
             <WalletToolbar
               availability={walletAvailability}
               connectionStatus={walletConnectionStatus}
@@ -2837,35 +2938,34 @@ export default function GameClient() {
         ) : shellView === "run" && character !== null ? (
           <div className={styles.panelGrid}>
             <section className={styles.panel}>
-              <div className={styles.panelTitleRow}>
-                <div className={styles.stack}>
-                  <h2 className={styles.panelTitle}>Run Page</h2>
-                  <p className={styles.panelText}>
-                    Setup, traversal, pause actions, and result handoff all live here.
-                  </p>
-                </div>
-                <div className={styles.buttonRow}>
+              <div className={styles.characterPanelHeader}>
+                <div className={styles.panelBackRow}>
                   <button
                     type="button"
-                    className={styles.button}
+                    className={styles.iconButton}
                     onClick={() => setShellView("character")}
                     disabled={zoneRunPending}
+                    aria-label="Back to character page"
+                    title="Back to character page"
                   >
-                    Character Page
+                    <BackIcon className={styles.iconSvg} />
                   </button>
                 </div>
-              </div>
-
-              <div className={styles.keyValueGrid}>
-                <div className={styles.keyValueItem}>
-                  <span className={styles.keyLabel}>Character</span>
-                  <span className={styles.keyValue}>{character.name}</span>
-                </div>
-                <div className={styles.keyValueItem}>
-                  <span className={styles.keyLabel}>Class</span>
-                  <span className={styles.keyValue}>
-                    {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
-                  </span>
+                <div className={styles.characterPanelTopRow}>
+                  <div className={styles.characterIdentityRow}>
+                    <h2 className={styles.characterHeroName}>{character.name}</h2>
+                    <span className={styles.classTag}>
+                      {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
+                    </span>
+                    <span className={styles.secondaryTag}>Lvl {character.level}</span>
+                    <span className={styles.secondaryTag}>
+                      Exp {character.exp}/{nextLevelExpTarget(character.level)}
+                    </span>
+                  </div>
+                  <CharacterSyncButton
+                    character={character}
+                    onOpen={() => void handleOpenSync()}
+                  />
                 </div>
               </div>
             </section>
@@ -2931,105 +3031,49 @@ export default function GameClient() {
             onOpenCharacter={(characterId) => void handleOpenCharacter(characterId)}
           />
         ) : (
-          <div className={styles.dashboardGrid}>
-            <div className={styles.panelGrid}>
-              <section className={styles.panel}>
-                <div className={styles.panelTitleRow}>
-                  <div className={styles.stack}>
-                    <h2 className={styles.panelTitle}>Character Page</h2>
-                    <p className={styles.panelText}>
-                      Identity and progression first. Sync stays visible, but
-                      the strategic next move is to start a run.
-                    </p>
+          <div className={`${styles.panelGrid} ${styles.characterStage}`}>
+            <section className={`${styles.panel} ${styles.characterPanelFull}`}>
+              <div className={styles.characterPanelHeader}>
+                <div className={styles.characterPanelTopRow}>
+                  <div className={styles.characterIdentityRow}>
+                    <h2 className={styles.characterHeroName}>{character.name}</h2>
+                    <span className={styles.classTag}>
+                      {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
+                    </span>
+                    <span className={styles.secondaryTag}>Lvl {character.level}</span>
+                    <span className={styles.secondaryTag}>
+                      Exp {character.exp}/{nextLevelExpTarget(character.level)}
+                    </span>
                   </div>
-                  <div className={styles.buttonRow}>
-                    <button
-                      type="button"
-                      className={styles.button}
-                      onClick={() => setShellView("roster")}
-                    >
-                      Characters
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.button}
-                      onClick={() => void handleOpenSync()}
-                    >
-                      Sync
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.buttonPrimary}`}
-                      onClick={() => setShellView("run")}
-                      disabled={zoneRunPending || !character.battleEligible}
-                    >
-                      {character.activeZoneRun ? "Resume Run" : "Start Run"}
-                    </button>
-                  </div>
+                  <CharacterSyncButton
+                    character={character}
+                    onOpen={() => void handleOpenSync()}
+                  />
                 </div>
+              </div>
 
-                <div className={styles.characterSummaryGrid}>
-                  <div className={styles.characterSummaryCell}>
-                    <span className={styles.characterSummaryValue}>
-                      Name: {character.name}
-                    </span>
-                  </div>
-                  <div className={styles.characterSummaryCell}>
-                    <span className={styles.characterSummaryValue}>
-                      Class: {classCatalog.find((item) => item.classId === character.classId)?.displayName ?? character.classId}
-                    </span>
-                  </div>
-                  <div
-                    className={`${styles.characterSummaryCell} ${styles.characterSummaryActions}`}
-                  >
-                    <CharacterSyncButton
-                      character={character}
-                      onOpen={() => void handleOpenSync()}
-                    />
-                  </div>
-
-                  <div className={styles.characterSummaryCell}>
-                    <span className={styles.characterSummaryValue}>
-                      LVL: {character.level}
-                    </span>
-                  </div>
-                  <div className={styles.characterSummaryCell}>
-                    <span className={styles.characterSummaryValue}>
-                      EXP: {character.exp}/{nextLevelExpTarget(character.level)}
-                    </span>
-                  </div>
-                  <div className={styles.characterSummaryCell}>
+              <div className={styles.characterSummaryGrid}>
+                <div className={styles.characterSummaryCell}>
+                  {character.syncPhase !== "LOCAL_ONLY" ? (
                     <StatusBadge
                       label={character.syncPhase}
                       tone={settlementTone(character.syncPhase)}
                     />
-                  </div>
-
-                  <div className={styles.characterSummaryCell}>
-                    <span className={styles.characterSummaryMetric}>
-                      <HeartIcon className={styles.inlineMetricIcon} />
-                      <span>
-                        : {character.stats.hp}/{character.stats.hpMax}
-                      </span>
-                    </span>
-                  </div>
-                  <div className={styles.characterSummaryCell}>
-                    {season ? (
-                      <span className={styles.characterSummaryValue}>
-                        {season.seasonName}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className={styles.characterSummaryCell}>
-                    {season ? (
-                      <span className={styles.metaText}>
-                        {seasonCountdownLabel(season)}
-                      </span>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
-              </section>
-            </div>
+              </div>
+
+              <div className={styles.panelFooterRow}>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.buttonPrimary}`}
+                  onClick={() => setShellView("run")}
+                  disabled={zoneRunPending || !character.battleEligible}
+                >
+                  {character.activeZoneRun ? "Resume Run" : "Start Run"}
+                </button>
+              </div>
+            </section>
           </div>
         )}
       </div>
