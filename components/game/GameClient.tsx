@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 
 import type {
   AcknowledgeFirstSyncRouteResponse,
-  AcknowledgeSettlementRouteResponse,
   PrepareFirstSyncRouteResponse,
 } from "../../types/api/solana";
+import type {
+  SettlementV1FinalizeData,
+  SettlementV1PrepareData,
+  SettlementV1ResponseEnvelope,
+  SettlementV1PresignData,
+} from "../../types/api/settlementV1";
 import type {
   AccountMode,
   CharacterClassCatalogItem,
@@ -20,7 +25,6 @@ import type {
   CreateCharacterResponse,
   CurrentSeasonResponse,
   RunShareResponse,
-  SettlementPrepareResponse,
 } from "../../types/api/frontend";
 import type {
   ActiveZoneRunSnapshot,
@@ -44,6 +48,10 @@ import {
   type WalletAvailability,
   type WalletConnectionStatus,
 } from "../../lib/solana/phantomBrowser";
+import {
+  deserializeLegacyOrVersionedTransactionBase64,
+  serializeLegacyOrVersionedTransactionBase64,
+} from "../../lib/solana/playerOwnedV0Transactions";
 import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillMetadata";
 import { getSkillDef } from "../../engine/battle/skillRegistry";
 
@@ -60,6 +68,14 @@ type ShellView = "landing" | "roster" | "create" | "character" | "run" | "sync";
 
 type ApiErrorShape = {
   error?: string;
+};
+
+type ApiEnvelopeErrorShape = {
+  ok?: false;
+  error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 type AuthNonceResponse = {
@@ -122,6 +138,45 @@ async function apiRequest<T>(
   }
 
   return data as T;
+}
+
+async function apiEnvelopeRequest<T>(
+  input: RequestInfo,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  const data = (await response.json().catch(() => null)) as
+    | SettlementV1ResponseEnvelope<T>
+    | ApiEnvelopeErrorShape
+    | null;
+
+  if (!response.ok) {
+    const code =
+      isObject(data) &&
+      "error" in data &&
+      isObject(data.error) &&
+      typeof data.error.code === "string"
+        ? data.error.code
+        : `Request failed with status ${response.status}`;
+    const error = new Error(code) as ApiError;
+    error.status = response.status;
+    throw error;
+  }
+
+  if (!isObject(data) || data.ok !== true || !("data" in data)) {
+    const error = new Error("Malformed API envelope.") as ApiError;
+    error.status = response.status;
+    throw error;
+  }
+
+  return data.data as T;
 }
 
 function getApiErrorStatus(error: unknown): number | null {
@@ -418,6 +473,7 @@ type PendingSyncAckRecord = {
   kind: "first_sync" | "settlement";
   characterId: string;
   transactionSignature: string;
+  prepareRequestId?: string;
   settlementBatchId?: string;
   prepared: unknown;
 };
@@ -1926,13 +1982,12 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
       return;
     }
 
-    const response = await apiRequest<AcknowledgeSettlementRouteResponse>(
-      "/api/solana/settlement/ack",
+    const response = await apiEnvelopeRequest<SettlementV1FinalizeData>(
+      "/api/v1/settlement/finalize",
       {
         method: "POST",
         body: JSON.stringify({
-          settlementBatchId: record.settlementBatchId,
-          prepared: record.prepared,
+          prepareRequestId: record.prepareRequestId,
           transactionSignature: record.transactionSignature,
         }),
       },
@@ -2055,44 +2110,52 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
         }
       } else {
         setStepMessage("Preparing oldest pending settlement batch");
-        const prepared = await apiRequest<SettlementPrepareResponse>(
-          "/api/solana/settlement/prepare",
+        const prepared = await apiEnvelopeRequest<SettlementV1PrepareData>(
+          "/api/v1/settlement/prepare",
           {
             method: "POST",
             body: JSON.stringify({
               characterId: character.characterId,
-              authority: props.walletPublicKey,
+              idempotencyKey: crypto.randomUUID(),
             }),
           },
         );
-
-        if (prepared.phase === "submitted") {
-          await refreshAll();
-          setNotice("The oldest settlement batch is already in flight.");
-          return;
-        }
-        if (prepared.phase !== "sign_transaction") {
-          throw new Error(
-            "Unexpected settlement response: expected sign_transaction phase.",
-          );
-        }
 
         props.setWalletActionStatus("signing_transaction");
         setStepMessage("Submitting with Phantom");
         const submitted = await signAndSendPreparedPlayerOwnedTransaction(
           provider,
           prepared.preparedTransaction,
+          {
+            presignTransaction: async (transaction) => {
+              const presigned = await apiEnvelopeRequest<SettlementV1PresignData>(
+                "/api/v1/settlement/presign",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    prepareRequestId: prepared.prepareRequestId,
+                    presignToken: prepared.presignToken,
+                    transactionBase64:
+                      serializeLegacyOrVersionedTransactionBase64(transaction),
+                  }),
+                },
+              );
+
+              return deserializeLegacyOrVersionedTransactionBase64(
+                presigned.transactionBase64,
+              );
+            },
+          },
         );
 
         try {
-          setStepMessage("Acknowledging settlement");
-          const response = await apiRequest<AcknowledgeSettlementRouteResponse>(
-            "/api/solana/settlement/ack",
+          setStepMessage("Finalizing settlement");
+          const response = await apiEnvelopeRequest<SettlementV1FinalizeData>(
+            "/api/v1/settlement/finalize",
             {
               method: "POST",
               body: JSON.stringify({
-                settlementBatchId: prepared.settlementBatchId,
-                prepared: prepared.preparedTransaction,
+                prepareRequestId: prepared.prepareRequestId,
                 transactionSignature: submitted.transactionSignature,
               }),
             },
@@ -2111,6 +2174,7 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             kind: "settlement",
             characterId: character.characterId,
             transactionSignature: submitted.transactionSignature,
+            prepareRequestId: prepared.prepareRequestId,
             settlementBatchId: prepared.settlementBatchId,
             prepared: prepared.preparedTransaction,
           };

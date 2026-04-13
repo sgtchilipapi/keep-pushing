@@ -23,6 +23,31 @@ function toBase64(value: Uint8Array): string {
   return Buffer.from(value).toString('base64');
 }
 
+export function serializeLegacyOrVersionedTransactionBase64(
+  transaction: Transaction | VersionedTransaction,
+): string {
+  const maybeLegacy = transaction as Transaction & { serialize?: unknown };
+  if (typeof maybeLegacy.serialize === 'function') {
+    return toBase64(
+      maybeLegacy.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      }),
+    );
+  }
+
+  const maybeVersioned = transaction as VersionedTransaction & {
+    serialize?: unknown;
+  };
+  if (typeof maybeVersioned.serialize === 'function') {
+    return toBase64(maybeVersioned.serialize());
+  }
+
+  throw new Error(
+    'ERR_INVALID_SIGNED_TRANSACTION: transaction did not expose recognizable legacy or versioned bytes',
+  );
+}
+
 export async function buildPreparedVersionedTransaction(args: {
   connection: Connection;
   feePayer: PublicKey;

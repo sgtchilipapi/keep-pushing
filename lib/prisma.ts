@@ -513,6 +513,57 @@ export type SettlementSubmissionAttemptRecord = {
   resolvedAt: Date | null;
 };
 
+export type SettlementRequestStatus =
+  | 'PREPARED'
+  | 'PRESIGNED'
+  | 'SUBMITTED'
+  | 'CONFIRMED'
+  | 'INVALIDATED'
+  | 'FAILED';
+
+export type SettlementRequestRecord = {
+  id: string;
+  characterId: string;
+  sessionId: string | null;
+  walletAddress: string;
+  batchId: number;
+  batchHash: string;
+  prepareMessageHash: string;
+  presignedMessageHash: string | null;
+  status: SettlementRequestStatus;
+  invalidReasonCode: string | null;
+  idempotencyKey: string;
+  preparedAt: Date | null;
+  presignedAt: Date | null;
+  finalizedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateSettlementRequestInput = {
+  characterId: string;
+  sessionId?: string | null;
+  walletAddress: string;
+  batchId: number;
+  batchHash: string;
+  prepareMessageHash: string;
+  idempotencyKey: string;
+  status?: SettlementRequestStatus;
+  preparedAt?: Date | null;
+  expiresAt?: Date | null;
+};
+
+export type UpdateSettlementRequestInput = {
+  status: SettlementRequestStatus;
+  presignedMessageHash?: string | null;
+  invalidReasonCode?: string | null;
+  preparedAt?: Date | null;
+  presignedAt?: Date | null;
+  finalizedAt?: Date | null;
+  expiresAt?: Date | null;
+};
+
 export type CreateSettlementSubmissionAttemptInput = {
   settlementBatchId: string;
   attemptNumber: number;
@@ -729,6 +780,26 @@ type SettlementSubmissionAttemptRow = {
   updatedAt: Date;
   submittedAt: Date | null;
   resolvedAt: Date | null;
+};
+
+type SettlementRequestRow = {
+  id: string;
+  characterId: string;
+  sessionId: string | null;
+  walletAddress: string;
+  batchId: string | number;
+  batchHash: string;
+  prepareMessageHash: string;
+  presignedMessageHash: string | null;
+  status: SettlementRequestStatus;
+  invalidReasonCode: string | null;
+  idempotencyKey: string;
+  preparedAt: Date | null;
+  presignedAt: Date | null;
+  finalizedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 function parseNullableSafeInteger(value: string | number | null | undefined, field: string): number | null {
@@ -1117,6 +1188,28 @@ function mapSettlementSubmissionAttempt(row: SettlementSubmissionAttemptRow): Se
     updatedAt: row.updatedAt,
     submittedAt: row.submittedAt,
     resolvedAt: row.resolvedAt
+  };
+}
+
+function mapSettlementRequest(row: SettlementRequestRow): SettlementRequestRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    sessionId: row.sessionId,
+    walletAddress: row.walletAddress,
+    batchId: parseRequiredSafeInteger(row.batchId, 'batchId'),
+    batchHash: row.batchHash,
+    prepareMessageHash: row.prepareMessageHash,
+    presignedMessageHash: row.presignedMessageHash,
+    status: row.status,
+    invalidReasonCode: row.invalidReasonCode,
+    idempotencyKey: row.idempotencyKey,
+    preparedAt: row.preparedAt,
+    presignedAt: row.presignedAt,
+    finalizedAt: row.finalizedAt,
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -3602,6 +3695,173 @@ export const prisma = {
       );
 
       return result.rows[0] ? mapSettlementSubmissionAttempt(result.rows[0]) : null;
+    }
+  },
+  settlementRequest: {
+    async create(input: CreateSettlementRequestInput) {
+      const result = await pool.query<SettlementRequestRow>(
+        `INSERT INTO "SettlementRequest"
+          (
+            id,
+            "characterId",
+            "sessionId",
+            "walletAddress",
+            "batchId",
+            "batchHash",
+            "prepareMessageHash",
+            "presignedMessageHash",
+            "status",
+            "invalidReasonCode",
+            "idempotencyKey",
+            "preparedAt",
+            "presignedAt",
+            "finalizedAt",
+            "expiresAt",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        RETURNING
+          id,
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "batchId",
+          "batchHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.characterId,
+          input.sessionId ?? null,
+          input.walletAddress,
+          input.batchId,
+          input.batchHash,
+          input.prepareMessageHash,
+          null,
+          input.status ?? 'PREPARED',
+          null,
+          input.idempotencyKey,
+          input.preparedAt ?? null,
+          null,
+          null,
+          input.expiresAt ?? null,
+          new Date(),
+        ]
+      );
+
+      return mapSettlementRequest(result.rows[0]);
+    },
+    async findById(id: string) {
+      const result = await pool.query<SettlementRequestRow>(
+        `SELECT
+          id,
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "batchId",
+          "batchHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementRequest"
+        WHERE id = $1
+        LIMIT 1`,
+        [id]
+      );
+
+      return result.rows[0] ? mapSettlementRequest(result.rows[0]) : null;
+    },
+    async findByCharacterAndIdempotencyKey(characterId: string, idempotencyKey: string) {
+      const result = await pool.query<SettlementRequestRow>(
+        `SELECT
+          id,
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "batchId",
+          "batchHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementRequest"
+        WHERE "characterId" = $1
+          AND "idempotencyKey" = $2
+        LIMIT 1`,
+        [characterId, idempotencyKey]
+      );
+
+      return result.rows[0] ? mapSettlementRequest(result.rows[0]) : null;
+    },
+    async update(id: string, input: UpdateSettlementRequestInput) {
+      const result = await pool.query<SettlementRequestRow>(
+        `UPDATE "SettlementRequest"
+        SET
+          "status" = $2,
+          "presignedMessageHash" = $3,
+          "invalidReasonCode" = $4,
+          "preparedAt" = $5,
+          "presignedAt" = $6,
+          "finalizedAt" = $7,
+          "expiresAt" = $8,
+          "updatedAt" = $9
+        WHERE id = $1
+        RETURNING
+          id,
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "batchId",
+          "batchHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          id,
+          input.status,
+          input.presignedMessageHash ?? null,
+          input.invalidReasonCode ?? null,
+          input.preparedAt ?? null,
+          input.presignedAt ?? null,
+          input.finalizedAt ?? null,
+          input.expiresAt ?? null,
+          new Date(),
+        ]
+      );
+
+      return result.rows[0] ? mapSettlementRequest(result.rows[0]) : null;
     }
   }
 };

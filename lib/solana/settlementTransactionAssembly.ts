@@ -24,6 +24,7 @@ export interface PrepareSettlementVersionedTransactionArgs {
   addressLookupTableAccounts?: AddressLookupTableAccount[];
   commitment?: Commitment;
   clusterId?: number;
+  partialSignSponsor?: boolean;
 }
 
 export interface PreparedSettlementVersionedTransaction extends PreparedVersionedTransaction {
@@ -55,7 +56,8 @@ export async function buildPreparedSettlementVersionedTransaction(
     instructions: instructionBundle.instructions,
     addressLookupTableAccounts: args.addressLookupTableAccounts,
     commitment: args.commitment,
-    partialSigners: feePayer.equals(args.serverSigner.publicKey)
+    partialSigners:
+      (args.partialSignSponsor ?? true) && feePayer.equals(args.serverSigner.publicKey)
       ? [args.serverSigner]
       : [],
   });
