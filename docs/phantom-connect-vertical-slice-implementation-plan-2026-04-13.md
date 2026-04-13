@@ -4,38 +4,84 @@
 
 This document is the execution plan to move `keep-pushing` from the current extension-style wallet + anonymous user model to a Phantom Connect + backend-authenticated + session-gated architecture, while preserving required gameplay behavior and aligning with `runana-program-validation` signer constraints. **If the target product behavior conflicts with current program constraints, this plan prioritizes target behavior and includes explicit runana-program changes.**
 
+Decision clarified for this plan:
+- Anonymous accounts are removed from scope.
+- This migration is a deliberate breaking change.
+- There is no legacy anon compatibility window and no anon progression migration/backfill requirement.
+
 Baseline reviewed:
 - `docs/phantom-connect-gap-analysis-2026-04-13.md`
 - existing API/UI/Solana codepaths in `app/api/**`, `components/game/**`, `lib/solana/**`, `types/api/solana.ts`, `prisma/schema.prisma`
-- program artifact `docs/runana-program-validation.zip` (inspected from `programs/runana-program/src/lib.rs` + tests)
+- local program repo `../runana-program`, especially:
+  - `programs/runana-program/src/lib.rs`
+  - `tests/src/fixtures.rs`
+  - `tests/src/integration_helpers.rs`
+  - `tests/src/test_initialize.rs`
+  - `tests/src/test_slice2_replay_and_sequencing.rs`
 
 ---
 
-## 1) Program findings from `runana-program-validation` + required deltas to satisfy target behavior
+## 1) Program findings from the local `runana-program` repo + required deltas to satisfy target behavior
 
 ## 1.1 Character creation signer/funding model (hard constraint)
-- `CreateCharacter` requires `payer == authority` (`PlayerMustSelfFund`).
-- Current implication: character creation is client-paid/client-signed today.
+- `CreateCharacter<'info>` in `programs/runana-program/src/lib.rs` constrains `payer.key() == authority.key()` and uses `payer = payer` for all init accounts.
+- `InitializeCharacterZoneProgressPage<'info>` repeats the same `payer == authority` constraint for later page initialization.
+- Current implication: both initial character creation and any later page bootstrap are player-paid/player-signed today.
 - **Target requirement (updated): backend sponsor pays fees for character creation** while player still signs authority actions.
-- Required delta: relax `payer == authority` in program and replace with explicit `authority` signer + policy/rate controls.
+- Required delta:
+  - remove the `PlayerMustSelfFund` constraint from both account structs
+  - preserve `authority: Signer<'info>` and existing authority-derived PDA seeds
+  - keep payer as a distinct signer so a backend/relayer can fund rent without owning gameplay authority
+  - update localnet harness helpers to exercise `sponsor payer + player authority` instead of only `player payer`
 
 ## 1.2 Settlement signer model
-- `ApplyBattleSettlementBatchV1` requires `player_authority: Signer`, but does **not** include payer account in instruction context.
-- The program validates server attestation via ed25519 verification instruction(s) found in prior instructions sysvar scan.
+- `ApplyBattleSettlementBatchV1<'info>` already accepts `player_authority: Signer` and does **not** include a payer account in the instruction context.
+- On-chain implication: sponsored settlement fees are already compatible at the transaction layer; the fee payer can be different from `player_authority` without changing the instruction accounts.
+- The actual blocker is `verify_server_attestation_preinstruction(...)`, which scans the instructions sysvar for a prior ed25519 verification signed by `program_config.trusted_server_signer`.
 - **Target requirement (updated): settlement is backend-sponsored for fees; player signs authority, and server should not be required to provide extra business-authorization signatures beyond fee-payer duties.**
-- Required delta: remove/replace trusted-server ed25519 attestation requirement if it conflicts with “server does not need to sign” policy.
+- Required delta:
+  - keep sponsored fee payer entirely off-instruction
+  - replace server-attestation-as-business-auth with player-authorization-as-business-auth
+  - move settlement authorization verification to the player's canonical permit message, not a backend attestation
 
 ## 1.3 Canonical-message/signature scheme constraints
-- Current program stores `trusted_server_signer` and verifies server attestation.
-- Canonical player authorization message supports both raw and wallet-text schemes; wallet-text is compatible with Phantom message UX.
+- `ProgramConfigAccount` and `InitializeProgramConfigArgs` currently store `trusted_server_signer`.
+- `canonical_player_authorization_message(...)` and wallet-text support already exist in `lib.rs`, which is useful for Phantom-compatible message prompts.
+- The current codepath does not yet make that player permit the sole settlement authorization primitive.
 - **Target requirement (updated): player-signed authorization should be sufficient for business authorization; backend sponsor participates for fee payment only.**
-- Implication: presign flow must strictly bind payload/domain/signer scheme to prevent replay, even if server-attestation signing is removed.
+- Required delta:
+  - add an explicit settlement authorization mode in `ProgramConfigAccount` and `InitializeProgramConfigArgs`
+  - use a compatibility enum such as `DualServerAndPlayer` -> `PlayerOnly`
+  - keep `trusted_server_signer` temporarily for dual-mode rollout, then remove or deprecate after cutover
+  - wire the canonical player authorization message into settlement verification so batch hash, batch id, character root, cluster id, and signature scheme stay replay-safe
 
 ## 1.4 Embedded-wallet compatibility callout
 - Current app logic enforces `authority == feePayer` for settlement in backend route/service.
 - This is incompatible with sponsored settlement objective and unnecessary per on-chain settlement instruction requirements.
 
-## 1.5 Program change policy for this plan
+## 1.5 Concrete program implementation delta
+- `programs/runana-program/src/lib.rs`
+  - update `CreateCharacter<'info>` and `InitializeCharacterZoneProgressPage<'info>` to allow distinct `payer` and `authority`
+  - extend `ProgramConfigAccount` / `InitializeProgramConfigArgs` with `settlement_authorization_mode`
+  - add a `verify_player_authorization_preinstruction(...)` path that validates the player's ed25519 permit against `canonical_player_authorization_message(...)`
+  - replace direct calls to `verify_server_attestation_preinstruction(...)` inside `apply_battle_settlement_batch_v1(...)` with a mode-aware `verify_settlement_authorization(...)`
+  - keep `player_authority: Signer<'info>` as the gameplay authority check; do not add a settlement payer account
+- `tests/src/fixtures.rs`
+  - include the authorization-mode fixture field
+  - generate canonical player-only fixture variants in addition to legacy dual-sign variants
+- `tests/src/integration_helpers.rs`
+  - add sponsor-payer create helpers
+  - split ed25519 preinstruction builders into dual-mode and player-only variants
+- `tests/src/test_initialize.rs`
+  - replace the current "payer must equal authority" expectation with sponsor-payer success coverage
+  - add a negative test that still fails when the player authority signer is missing or mismatched
+- `tests/src/test_slice2_replay_and_sequencing.rs`
+  - retain player-permit mismatch coverage
+  - move server-attestation mismatch coverage under explicit dual-mode compatibility tests only
+- `migrations/deploy.ts`
+  - initialize the new program-config authorization mode when bootstrapping local deployments
+
+## 1.6 Program change policy for this plan
 - **Desired implementation prevails.** If any runtime/program constraint blocks target Phantom Connect behavior, the plan adds a runana-program change slice rather than degrading product behavior.
 - Program changes are first-class deliverables (IDL/version bump, migration/backfill, compatibility window, and chain fixture updates).
 
@@ -56,6 +102,7 @@ Baseline reviewed:
 - Character creation: client-only signing/sending allowed; backend prepare/finalize under session.
 - Settlement: prepare -> client calls Phantom `signAndSendTransaction` with `presignTransaction` callback -> backend presign verifies canonical tx and applies sponsor fee-payer signature -> finalize.
 - Transfers: check/finalize with policy gate; all allowed transfer modes are backend sponsor-paid while client remains the authority signer.
+- No anonymous login or legacy anonymous-gameplay path remains in the target state.
 
 ## 2.3 Auth/session boundaries
 - Frontend trusted for UX orchestration only.
@@ -86,28 +133,59 @@ Baseline reviewed:
 
 ## 3) Vertical slices (execution order)
 
-## Slice 0 — Runana program alignment (only where target behavior is blocked)
+## Slice 0 — Runana program alignment (mandatory)
 
 ### Scope
-Add explicit on-chain changes if needed to satisfy target Phantom Connect behavior without compromising trust guarantees.
+Apply the confirmed on-chain changes required to satisfy target Phantom Connect behavior without compromising trust guarantees. This slice must complete before app-side v1 character-create and settlement work.
 
 ### Touchpoints
-- Program source from artifact baseline (`programs/runana-program/src/lib.rs` in runana repo).
+- Program source in `../runana-program/programs/runana-program/src/lib.rs`.
+- Generated IDL/client bindings consumed by `keep-pushing`, especially `lib/solana/runanaProgram.ts`, `lib/solana/runanaCharacterInstructions.ts`, and `lib/solana/runanaSettlementInstructions.ts`.
 - Client builders in `lib/solana/runana*`, `lib/solana/*Instructions.ts`, `lib/solana/settlementTransactionAssembly.ts`.
 - Backend verifiers in new `lib/solana/settlementPresign.ts`.
 
-### Candidate program deltas (gated by incompatibility findings)
-- `create_character`: remove `payer == authority` and allow sponsor `payer` with player `authority` signer preserved.
-- `apply_battle_settlement_batch_v1`: remove mandatory trusted-server ed25519 attestation (or gate as optional version) so settlement does not require server business-signature.
-- transfer path (if program-mediated): enforce player authority signatures with sponsor payer and no server business-signature requirement.
-- signature-domain versioning: add explicit domain version byte for forward-safe replay protection under new signer model.
+### Exact implementation tasks in `runana-program`
+1. Character funding decoupling
+- edit `CreateCharacter<'info>` and `InitializeCharacterZoneProgressPage<'info>` in `programs/runana-program/src/lib.rs`
+- delete the `payer.key() == authority.key()` constraint while keeping `authority` as a required signer
+- verify PDA derivations remain authority-bound, not payer-bound
+- update `tests/src/integration_helpers.rs` so the relayer can act as fee payer while the canonical player still signs
+
+2. Settlement authorization mode
+- add a small enum or `u8` mode field to `ProgramConfigAccount` and `InitializeProgramConfigArgs`
+- recommended modes:
+  - `0 = DualServerAndPlayer`
+  - `1 = PlayerOnly`
+- bump the program/account version and IDL so app code can branch cleanly during rollout
+
+3. Settlement verifier rewrite
+- replace `verify_server_attestation_preinstruction(...)` with a mode-aware `verify_settlement_authorization(...)`
+- in `PlayerOnly` mode:
+  - scan prior ed25519 instruction(s) for a signature by `player_authority`
+  - recompute `canonical_player_authorization_message(...)`
+  - require the permit message to bind `program_id`, cluster id, character root, batch hash, batch id, and signature scheme
+- in `DualServerAndPlayer` mode:
+  - keep current trusted-server compatibility behavior temporarily for old clients/tests
+
+4. Error and compatibility cleanup
+- deprecate `PlayerMustSelfFund` from the create path
+- replace server-specific settlement errors/messages with authorization-mode-aware errors where needed
+- keep `trusted_server_signer` readable during the migration window even if `PlayerOnly` becomes the default for new deployments
+
+5. Test harness and fixtures
+- update `tests/src/fixtures.rs` to emit config fixtures for both authorization modes
+- update `tests/src/test_initialize.rs` to prove sponsor-paid character creation succeeds
+- update `tests/src/test_slice2_replay_and_sequencing.rs` so replay and wrong-permit failures still hold in player-only mode
+- add one compatibility test proving dual-mode still accepts legacy server-attested settlement during the transition window
 
 ### Security controls
 - every program delta must preserve: character authority binding, anti-replay, and canonical payload integrity.
 - any payer relaxation must include anti-spam constraints (rent funding limits + backend policy + per-wallet cooldown).
+- player-only settlement authorization must continue to bind the canonical permit message to the exact sealed batch hash and signer scheme.
 
 ### Test strategy
 - runana program unit/integration tests for new signer model and replay guarantees.
+- contract test that proves regenerated `keep-pushing` instruction builders/IDL bindings still serialize the upgraded `runana-program` interfaces correctly.
 - app integration tests against upgraded IDL + fixtures before enabling feature flags.
 
 ### Rollout
@@ -117,13 +195,14 @@ Add explicit on-chain changes if needed to satisfy target Phantom Connect behavi
 ### Acceptance criteria
 - Target Phantom Connect flow works end-to-end in embedded mode with no behavior downgrade.
 - Program invariants remain provably enforced by tests.
+- Updated IDL/types and app-side instruction builders are regenerated and wired into `keep-pushing` before Slice C or Slice D begins.
 
 ---
 
 ## Slice A — Auth foundation: nonce + verify + sessions
 
 ### Scope
-Implement wallet-proof login and backend session infrastructure; keep existing gameplay endpoints temporarily dual-mode behind feature flag.
+Implement wallet-proof login and backend session infrastructure as the only supported entry path.
 
 ### Touchpoints
 - Backend API: new `/app/api/v1/auth/nonce/route.ts`, `/app/api/v1/auth/verify/route.ts`, `/app/api/v1/auth/logout/route.ts`
@@ -155,10 +234,14 @@ Implement wallet-proof login and backend session infrastructure; keep existing g
 ### Tests
 - unit: message canonicalization + signature verification.
 - integration: nonce replay rejection; expired nonce; session cookie set/cleared.
+- security regression:
+  - session rotation on login issues a fresh token and invalidates the old session where applicable
+  - revoked and expired sessions are rejected consistently
+  - logout invalidates server-side session state, not only the browser cookie
 
 ### Rollout / flags
 - `FF_PHANTOM_CONNECT_AUTH` (off by default).
-- Dual-path compatibility for one release window (`/api/auth/anon` retained but hidden from UI).
+- No anon compatibility path: `/api/auth/anon` is removed or hard-fails once this slice is enabled.
 
 ### Acceptance criteria
 - No gameplay route accepts caller-controlled `userId` when flag enabled.
@@ -197,6 +280,11 @@ Move core routes from `userId` query/body to session-resolved identity and intro
 ### Tests
 - API tests ensure unauthorized when session absent/expired.
 - regression tests for existing flows under session context.
+- CSRF/origin enforcement tests:
+  - cross-origin cookie-authenticated POST requests are rejected
+  - same-origin authenticated POST requests still succeed
+- breaking-change tests:
+  - `/api/auth/anon` and legacy `userId`-driven routes fail explicitly once the new auth/session path is active
 
 ### Rollout / flags
 - `FF_V1_SESSION_ENFORCEMENT` incremental by route family.
@@ -237,6 +325,8 @@ Refactor to `/v1/characters/create/prepare|finalize` using session identity and 
 ### Tests
 - integration: prepare->wallet sign/send->finalize success.
 - negative: authority mismatch, duplicate finalize, stale prepare token.
+- end-to-end app test for sponsored character creation:
+  - session-authenticated `prepare -> wallet sign/send -> finalize` succeeds with backend fee sponsorship and player authority preserved
 
 ### Rollout / flags
 - `FF_V1_CHARACTER_CREATE`.
@@ -398,6 +488,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 
 ### Tests
 - end-to-end integration suite across slices A-E with deterministic fixtures and seeded db.
+- include coverage that legacy anon entrypoints and legacy `userId` request shapes are rejected after the breaking-change rollout.
 
 ### Rollout
 - observability mandatory before broadening flags.
@@ -412,12 +503,12 @@ Cross-cutting production-readiness controls for all v1 flows.
 ## 4.1 Existing files likely to be edited
 
 ### `app/api`
-- `app/api/auth/anon/route.ts` (deprecate/flag or compatibility wrapper)
-- `app/api/solana/character/create/prepare/route.ts` (bridge/deprecation notice)
-- `app/api/solana/character/create/submit/route.ts` (bridge/deprecation notice)
-- `app/api/solana/settlement/prepare/route.ts` (bridge/deprecation notice)
-- `app/api/solana/settlement/submit/route.ts` (bridge/deprecation notice)
-- `app/api/solana/settlement/ack/route.ts` (bridge/deprecation notice)
+- `app/api/auth/anon/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/character/create/prepare/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/character/create/submit/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/settlement/prepare/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/settlement/submit/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/settlement/ack/route.ts` (remove or convert to explicit breaking-change error)
 
 ### `components`
 - `components/game/GameClient.tsx` (remove anon bootstrap + userId transport; integrate Phantom Connect auth and presign callback orchestration)
@@ -428,7 +519,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `lib/solana/characterCreation.ts` (session-aware create prepare/finalize helper split)
 
 ### `types`
-- `types/api/solana.ts` (retain legacy; add deprecation tags and/or slim wrapper types)
+- `types/api/solana.ts` (shrink to only the still-supported surfaces or remove once v1 types fully replace it)
 
 ### `prisma`
 - `prisma/schema.prisma` (new auth/session/settlement-request/audit models and user wallet fields)
@@ -476,6 +567,19 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `tests/integration/settlementPresignFlow.test.ts`
 - `tests/integration/transfersFlow.test.ts`
 - `tests/integration/rateLimitAndAudit.test.ts`
+
+## 4.3 `runana-program` repo files expected to change
+
+### Program source
+- `../runana-program/programs/runana-program/src/lib.rs`
+- `../runana-program/migrations/deploy.ts`
+
+### Program tests and helpers
+- `../runana-program/tests/src/fixtures.rs`
+- `../runana-program/tests/src/integration_helpers.rs`
+- `../runana-program/tests/src/test_initialize.rs`
+- `../runana-program/tests/src/test_slice2_replay_and_sequencing.rs`
+- additional slice tests under `../runana-program/tests/src/test_slice3_*.rs` through `test_slice6_*.rs` if they rely on legacy dual-sign preinstructions
 
 ---
 
@@ -550,24 +654,28 @@ Cross-cutting production-readiness controls for all v1 flows.
 2. **Phantom Connect SDK integration complexity** (embedded + injected parity).
    - Mitigation: adapter interface and e2e smoke tests for both wallet modes.
 3. **Legacy `userId` contract surface area** broad across routes.
-   - Mitigation: phased v1 namespace + bridge routes + telemetry-driven cutover.
+   - Mitigation: phased v1 namespace + direct route replacement/removal + telemetry-driven cutover.
 4. **Replay/idempotency bugs in presign/finalize**.
    - Mitigation: DB unique constraints and deterministic idempotency keys.
-5. **Program-level attestation formatting mismatch**.
-   - Mitigation: canonical message builders shared by prepare/presign; fixture tests using validation artifact vectors.
+5. **Program authorization-mode migration risk**.
+   - Mitigation: keep dual-mode support briefly, share canonical message builders between app presign and on-chain verification, and pin fixtures in both repos to the same batch-hash vectors.
 6. **Operational blind spots** during migration.
    - Mitigation: ship audit + metrics before enabling broad flags.
 
 Fallback designs:
 - If a blocker appears, modify runana-program + backend/client to preserve the target sponsor-paid + player-signed model across create/settlement/transfers.
+- Do not reintroduce anon as a fallback.
 
 ---
 
 ## 8) Implementation timeline and critical path
 
-## Phase -1 (1-3 days, conditional): program delta design
-- if incompatibility exists, land runana-program spec/IDL change proposal first.
-- define migration and compatibility matrix before app route work begins.
+## Phase -1 (1-3 days): program delta implementation
+- land the `runana-program` changes first in `../runana-program`:
+  - decouple payer from authority for character creation/page init
+  - add settlement authorization mode
+  - switch settlement business authorization to player permit verification
+- generate the updated IDL/types and define the compatibility matrix before app route work begins.
 
 ## Phase 0 (1-2 days): foundations
 - add DB models/migrations for auth/session/request/audit.
@@ -591,10 +699,10 @@ Fallback designs:
 
 ## Phase 5 (2 days): hardening and rollout
 - rate limits, alerts, dashboards, docs, staged flag rollout.
-- disable legacy anon/userId frontend path after stable canary.
+- remove legacy anon/userId frontend and API paths as part of the breaking-change rollout.
 
 ### Critical path dependencies
-1. (Conditional) runana-program delta + IDL/version readiness
+1. runana-program delta + IDL/version readiness
 2. DB schema (sessions/nonces/settlement_requests)
 3. session middleware
 4. settlement canonical presign verifier
@@ -615,5 +723,4 @@ Fallback designs:
 - [ ] Rate limiting active on auth + settlement + transfer routes.
 - [ ] Audit log populated for all tx/auth critical events.
 - [ ] Metrics/alerts deployed and validated.
-- [ ] Legacy anon flow disabled in UI and scheduled for API removal.
-
+- [ ] Legacy anon flow removed from UI and legacy anon endpoints removed or hard-failed.
