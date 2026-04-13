@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSession,
+} from "../../../../../../lib/auth/requireSession";
+import {
   submitSolanaCharacterCreation,
   type SubmitSolanaCharacterCreationInput,
 } from "../../../../../../lib/solana/characterCreation";
@@ -50,8 +55,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = await requireSession(request);
+    const prepared = body.prepared as SubmitSolanaCharacterCreationInput["prepared"];
+    if (prepared.authority !== actor.session.walletAddress) {
+      throw new SessionForbiddenError(
+        "ERR_AUTH_WALLET_FORBIDDEN: prepared authority does not match the active session wallet",
+      );
+    }
     const result = await submitSolanaCharacterCreation({
-      prepared: body.prepared as SubmitSolanaCharacterCreationInput["prepared"],
+      prepared,
       signedMessageBase64:
         typeof body.signedMessageBase64 === "string"
           ? body.signedMessageBase64
@@ -64,6 +76,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error
         ? error.message

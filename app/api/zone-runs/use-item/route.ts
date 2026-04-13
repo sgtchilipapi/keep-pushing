@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { useZoneRunConsumableItem } from "../../../../lib/combat/zoneRunService";
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSessionCharacterAccess,
+} from "../../../../lib/auth/requireSession";
+import { executeZoneRunConsumableItem } from "../../../../lib/combat/zoneRunService";
 import { readRequiredIdempotencyKey, statusForZoneRunError } from "../routeSupport";
 
 export async function POST(request: Request) {
@@ -33,12 +38,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await useZoneRunConsumableItem({
+    await requireSessionCharacterAccess(request, body.characterId);
+    const result = await executeZoneRunConsumableItem({
       characterId: body.characterId,
       itemId: body.itemId,
     });
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : "Failed to use zone-run item.";
     return NextResponse.json({ error: message }, { status: statusForZoneRunError(message) });
   }

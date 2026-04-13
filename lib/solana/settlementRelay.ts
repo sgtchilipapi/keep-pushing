@@ -32,7 +32,7 @@ import {
 } from './settlementTransactionAssembly';
 import {
   createRunanaConnection,
-  loadRunanaTrustedServerSigner,
+  loadRunanaSponsorPayer,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
@@ -176,10 +176,11 @@ export async function prepareSolanaSettlement(
   assertNonEmptyString(input.authority, 'authority');
 
   const authority = toPublicKey(input.authority, 'authority');
-  const feePayer = toPublicKey(input.feePayer ?? input.authority, 'feePayer');
-  if (!authority.equals(feePayer)) {
-    throw new Error('ERR_PLAYER_MUST_PAY: battle_settlement requires feePayer to match authority');
-  }
+  const sponsorSigner = deps.serverSigner ?? loadRunanaSponsorPayer().signer;
+  const feePayer = toPublicKey(
+    input.feePayer ?? sponsorSigner.publicKey.toBase58(),
+    'feePayer',
+  );
 
   const connection = (deps.connection ?? createRunanaConnection()) as Connection;
   const commitment = deps.commitment ?? resolveRunanaCommitment();
@@ -250,7 +251,6 @@ export async function prepareSolanaSettlement(
     };
   }
 
-  const serverSigner = deps.serverSigner ?? loadRunanaTrustedServerSigner().signer;
   const addressLookupTableAccounts =
     deps.addressLookupTableAccounts ??
     (await resolveRunanaSettlementLookupTablesOrAutoCreate({
@@ -273,7 +273,7 @@ export async function prepareSolanaSettlement(
       envelope,
       payload: sealed.payload,
       feePayer,
-      serverSigner,
+      serverSigner: sponsorSigner,
       addressLookupTableAccounts,
       commitment,
       clusterId,

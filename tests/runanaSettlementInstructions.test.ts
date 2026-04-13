@@ -77,6 +77,7 @@ function buildEnvelope(serverSigner: Keypair): SettlementInstructionAccountEnvel
     programConfig: {
       pubkey: programConfig,
       trustedServerSigner: serverSigner.publicKey,
+      settlementAuthorizationMode: 0,
     },
     characterRoot: {
       pubkey: characterRoot,
@@ -205,6 +206,7 @@ function buildCompactEnvelope(serverSigner: Keypair): SettlementInstructionAccou
     programConfig: {
       pubkey: programConfig,
       trustedServerSigner: serverSigner.publicKey,
+      settlementAuthorizationMode: 0,
     },
     characterRoot: {
       pubkey: characterRoot,
@@ -307,7 +309,7 @@ describe('runanaSettlementInstructions', () => {
     expect(instruction.data.subarray(0, 8).toString('hex')).toBe('b8533f822811dde6');
   });
 
-  it('assembles dual ed25519 preinstructions ahead of the settlement instruction', () => {
+  it('assembles the dual-mode server attestation preinstruction ahead of the settlement instruction', () => {
     const serverSigner = Keypair.generate();
     const envelope = buildEnvelope(serverSigner);
     const payload = buildPayload();
@@ -327,10 +329,9 @@ describe('runanaSettlementInstructions', () => {
       serverSigner,
     });
 
-    expect(bundle.instructions).toHaveLength(3);
+    expect(bundle.instructions).toHaveLength(2);
     expect(bundle.instructions[0].programId.toBase58()).toBe(Ed25519Program.programId.toBase58());
-    expect(bundle.instructions[1].programId.toBase58()).toBe(Ed25519Program.programId.toBase58());
-    expect(bundle.instructions[2].programId.toBase58()).toBe(RUNANA_PROGRAM_ID.toBase58());
+    expect(bundle.instructions[1].programId.toBase58()).toBe(RUNANA_PROGRAM_ID.toBase58());
     expect(Buffer.from(bundle.messages.serverAttestationMessage).toString('hex')).toBe(
       Buffer.from(canonicalMessages.serverAttestationMessage).toString('hex'),
     );
@@ -382,13 +383,12 @@ describe('runanaSettlementInstructions', () => {
     });
 
     expect(transaction.message.addressTableLookups).toHaveLength(1);
-    expect(transaction.message.compiledInstructions).toHaveLength(3);
+    expect(transaction.message.compiledInstructions).toHaveLength(2);
     expect(
       transaction.message.compiledInstructions.map((instruction) =>
         accountKeys.get(instruction.programIdIndex)?.toBase58(),
       ),
     ).toEqual([
-      Ed25519Program.programId.toBase58(),
       Ed25519Program.programId.toBase58(),
       RUNANA_PROGRAM_ID.toBase58(),
     ]);

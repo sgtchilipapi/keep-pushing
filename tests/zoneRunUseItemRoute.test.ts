@@ -1,9 +1,19 @@
 jest.mock("../lib/combat/zoneRunService", () => ({
-  useZoneRunConsumableItem: jest.fn(),
+  executeZoneRunConsumableItem: jest.fn(),
 }));
+const authMock = {
+  requireSessionCharacterAccess: jest.fn(),
+};
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
+  };
+});
 
 import { POST } from "../app/api/zone-runs/use-item/route";
-import { useZoneRunConsumableItem } from "../lib/combat/zoneRunService";
+import { executeZoneRunConsumableItem } from "../lib/combat/zoneRunService";
 
 async function postUseItem(body: unknown, requestKey = "req-1"): Promise<Response> {
   return POST(
@@ -21,10 +31,13 @@ async function postUseItem(body: unknown, requestKey = "req-1"): Promise<Respons
 describe("POST /api/zone-runs/use-item", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSessionCharacterAccess.mockResolvedValue({
+      user: { id: "user-1", primaryWalletAddress: "wallet-1" },
+    });
   });
 
   it("maps unsupported item use to a conflict response", async () => {
-    (useZoneRunConsumableItem as jest.Mock).mockRejectedValue(
+    (executeZoneRunConsumableItem as jest.Mock).mockRejectedValue(
       new Error("ERR_ZONE_RUN_ITEMS_UNSUPPORTED: consumable item potion is not supported during zone runs"),
     );
 
@@ -35,7 +48,11 @@ describe("POST /api/zone-runs/use-item", () => {
     const json = await response.json();
 
     expect(response.status).toBe(409);
-    expect(useZoneRunConsumableItem).toHaveBeenCalledWith({
+    expect(authMock.requireSessionCharacterAccess).toHaveBeenCalledWith(
+      expect.any(Request),
+      "character-1",
+    );
+    expect(executeZoneRunConsumableItem).toHaveBeenCalledWith({
       characterId: "character-1",
       itemId: "potion",
     });
@@ -52,6 +69,6 @@ describe("POST /api/zone-runs/use-item", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(useZoneRunConsumableItem).not.toHaveBeenCalled();
+    expect(executeZoneRunConsumableItem).not.toHaveBeenCalled();
   });
 });

@@ -40,9 +40,8 @@ export async function buildPreparedSettlementVersionedTransaction(
   args: PrepareSettlementVersionedTransactionArgs,
 ): Promise<PreparedSettlementVersionedTransaction> {
   const feePayer = args.feePayer ?? args.envelope.playerAuthority;
-  if (!feePayer.equals(args.envelope.playerAuthority)) {
-    throw new Error('ERR_PLAYER_MUST_PAY: battle_settlement requires feePayer to match authority');
-  }
+  const requiresServerAttestation =
+    args.envelope.programConfig.settlementAuthorizationMode === 0;
 
   const instructionBundle = buildSettlementTransactionInstructions({
     payload: args.payload,
@@ -56,6 +55,9 @@ export async function buildPreparedSettlementVersionedTransaction(
     instructions: instructionBundle.instructions,
     addressLookupTableAccounts: args.addressLookupTableAccounts,
     commitment: args.commitment,
+    partialSigners: feePayer.equals(args.serverSigner.publicKey)
+      ? [args.serverSigner]
+      : [],
   });
 
   return {

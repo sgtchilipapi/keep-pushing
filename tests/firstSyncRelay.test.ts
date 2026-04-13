@@ -229,6 +229,7 @@ describe('firstSyncRelay', () => {
     prepareFirstSyncRebaseMock.mockResolvedValue(buildPreparedRebase(authority.publicKey.toBase58()));
     fetchProgramConfigAccountMock.mockResolvedValue({
       trustedServerSigner: serverSigner.publicKey,
+      settlementAuthorizationMode: 0,
     } as Awaited<ReturnType<typeof fetchProgramConfigAccount>>);
 
     const result = await prepareSolanaFirstSync(
@@ -297,6 +298,7 @@ describe('firstSyncRelay', () => {
     prepareFirstSyncRebaseMock.mockResolvedValue(preparedRebase);
     fetchProgramConfigAccountMock.mockResolvedValue({
       trustedServerSigner: serverSigner.publicKey,
+      settlementAuthorizationMode: 0,
     } as Awaited<ReturnType<typeof fetchProgramConfigAccount>>);
 
     const result = await prepareSolanaFirstSync(
@@ -370,6 +372,7 @@ describe('firstSyncRelay', () => {
     }));
     fetchProgramConfigAccountMock.mockResolvedValue({
       trustedServerSigner: serverSigner.publicKey,
+      settlementAuthorizationMode: 0,
     } as Awaited<ReturnType<typeof fetchProgramConfigAccount>>);
 
     const result = await prepareSolanaFirstSync(

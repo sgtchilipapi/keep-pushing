@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSessionCharacterAccess,
+} from "../../../../../../lib/auth/requireSession";
+import {
   prepareSolanaCharacterCreation,
   type PrepareSolanaCharacterCreationInput,
 } from "../../../../../../lib/solana/characterCreation";
@@ -40,11 +45,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = await requireSessionCharacterAccess(
+      request,
+      typeof body.characterId === "string" ? body.characterId : "",
+    );
     const result = await prepareSolanaCharacterCreation({
       characterId:
         typeof body.characterId === "string" ? body.characterId : "",
-      authority: typeof body.authority === "string" ? body.authority : "",
-      feePayer: typeof body.feePayer === "string" ? body.feePayer : undefined,
+      authority: actor.session.walletAddress,
+      feePayer: undefined,
       initialUnlockedZoneId:
         typeof body.initialUnlockedZoneId === "number"
           ? body.initialUnlockedZoneId
@@ -55,6 +64,12 @@ export async function POST(request: Request) {
       status: result.phase === "sign_transaction" ? 201 : 200,
     });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error
         ? error.message

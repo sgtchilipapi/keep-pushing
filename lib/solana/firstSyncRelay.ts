@@ -51,7 +51,7 @@ import {
 import { settlementBatchRecordToPayload } from './settlementSealing';
 import {
   createRunanaConnection,
-  loadRunanaTrustedServerSigner,
+  loadRunanaSponsorPayer,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
@@ -62,6 +62,8 @@ import {
   deriveProgramConfigPda,
   RUNANA_CLUSTER_ID_LOCALNET,
 } from './runanaProgram';
+
+const SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1 = 0;
 
 type FirstSyncRelayConnection = Pick<Connection, 'getAccountInfo' | 'getLatestBlockhash'>;
 type FirstSyncSubmissionConnection = Pick<
@@ -307,10 +309,11 @@ export async function prepareSolanaFirstSync(
   assertNonEmptyString(input.authority, 'authority');
 
   const authority = toPublicKey(input.authority, 'authority');
-  const feePayer = toPublicKey(input.feePayer ?? input.authority, 'feePayer');
-  if (!authority.equals(feePayer)) {
-    throw new Error('ERR_PLAYER_MUST_PAY: player_owned_instruction requires feePayer to match authority');
-  }
+  const sponsorSigner = deps.serverSigner ?? loadRunanaSponsorPayer().signer;
+  const feePayer = toPublicKey(
+    input.feePayer ?? sponsorSigner.publicKey.toBase58(),
+    'feePayer',
+  );
 
   const connection = (deps.connection ?? createRunanaConnection()) as Connection;
   const commitment = deps.commitment ?? resolveRunanaCommitment();
@@ -414,8 +417,13 @@ export async function prepareSolanaFirstSync(
     deriveProgramConfigPda(programId),
     commitment,
   );
-  const serverSigner = deps.serverSigner ?? loadRunanaTrustedServerSigner().signer;
-  if (!programConfig.trustedServerSigner.equals(serverSigner.publicKey)) {
+  const requiresServerAttestation =
+    programConfig.settlementAuthorizationMode ===
+    SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1;
+  if (
+    requiresServerAttestation &&
+    !programConfig.trustedServerSigner.equals(sponsorSigner.publicKey)
+  ) {
     throw new Error(
       'ERR_UNTRUSTED_SERVER_SIGNER_KEYPAIR: server signer keypair did not match program config',
     );
@@ -437,15 +445,23 @@ export async function prepareSolanaFirstSync(
     characterRootPubkey: characterRoot,
     programId,
   });
-  const serverAttestationInstruction = Ed25519Program.createInstructionWithPrivateKey({
-    privateKey: serverSigner.secretKey,
-    message: canonicalMessages.serverAttestationMessage,
-  });
   const settlementInstruction = buildApplyBattleSettlementBatchV1Instruction({
     payload,
     instructionAccounts: settlementInstructionAccounts,
     programId,
   });
+  const instructions = [
+    createInstruction.instruction,
+    ...(requiresServerAttestation
+      ? [
+          Ed25519Program.createInstructionWithPrivateKey({
+            privateKey: sponsorSigner.secretKey,
+            message: canonicalMessages.serverAttestationMessage,
+          }),
+        ]
+      : []),
+    settlementInstruction,
+  ];
 
   const addressLookupTableAccounts =
     deps.addressLookupTableAccounts ??
@@ -464,13 +480,10 @@ export async function prepareSolanaFirstSync(
     preparedVersioned = await buildPreparedTx({
       connection,
       feePayer,
-      instructions: [
-        createInstruction.instruction,
-        serverAttestationInstruction,
-        settlementInstruction,
-      ],
+      instructions,
       addressLookupTableAccounts,
       commitment,
+      partialSigners: [sponsorSigner],
     });
   } catch (error) {
     if (

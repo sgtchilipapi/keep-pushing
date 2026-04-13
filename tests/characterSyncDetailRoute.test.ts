@@ -1,16 +1,29 @@
 const serviceMock = {
   getCharacterSyncDetail: jest.fn(),
 };
+const authMock = {
+  requireSessionCharacterAccess: jest.fn(),
+};
 
 jest.mock("../lib/characterAppService", () => ({
   getCharacterSyncDetail: serviceMock.getCharacterSyncDetail,
 }));
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
+  };
+});
 
 import { GET } from "../app/api/characters/[characterId]/sync/route";
 
 describe("GET /api/characters/:characterId/sync", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSessionCharacterAccess.mockResolvedValue({
+      user: { id: "user-1", primaryWalletAddress: "wallet-1" },
+    });
   });
 
   it("returns the sync detail payload", async () => {
@@ -62,12 +75,16 @@ describe("GET /api/characters/:characterId/sync", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/characters/character-1/sync?userId=user-1"),
+      new Request("http://localhost/api/characters/character-1/sync"),
       { params: { characterId: "character-1" } },
     );
     const json = await response.json();
 
     expect(response.status).toBe(200);
+    expect(serviceMock.getCharacterSyncDetail).toHaveBeenCalledWith(
+      "character-1",
+      "user-1",
+    );
     expect(json.character.characterId).toBe("character-1");
     expect(json.sync.mode).toBe("first_sync");
   });

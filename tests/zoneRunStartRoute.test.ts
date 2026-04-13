@@ -1,6 +1,16 @@
 jest.mock("../lib/combat/zoneRunService", () => ({
   startZoneRun: jest.fn(),
 }));
+const authMock = {
+  requireSessionCharacterAccess: jest.fn(),
+};
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
+  };
+});
 
 import { POST } from "../app/api/zone-runs/start/route";
 import { startZoneRun } from "../lib/combat/zoneRunService";
@@ -21,6 +31,9 @@ async function postStart(body: unknown, requestKey = "req-1"): Promise<Response>
 describe("POST /api/zone-runs/start", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSessionCharacterAccess.mockResolvedValue({
+      user: { id: "user-1", primaryWalletAddress: "wallet-1" },
+    });
   });
 
   it("returns the started active zone run snapshot", async () => {
@@ -56,6 +69,10 @@ describe("POST /api/zone-runs/start", () => {
     const json = await response.json();
 
     expect(response.status).toBe(201);
+    expect(authMock.requireSessionCharacterAccess).toHaveBeenCalledWith(
+      expect.any(Request),
+      "character-1",
+    );
     expect(startZoneRun).toHaveBeenCalledWith({
       characterId: "character-1",
       zoneId: 2,

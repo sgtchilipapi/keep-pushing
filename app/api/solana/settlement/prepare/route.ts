@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSessionCharacterAccess,
+} from '../../../../../lib/auth/requireSession';
+import {
   prepareSolanaSettlement,
 } from '../../../../../lib/solana/settlementRelay';
 import type { PrepareSettlementRouteRequest } from '../../../../../types/api/solana';
@@ -46,10 +51,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = await requireSessionCharacterAccess(
+      request,
+      typeof body.characterId === 'string' ? body.characterId : '',
+    );
     const result = await prepareSolanaSettlement({
       characterId: typeof body.characterId === 'string' ? body.characterId : '',
-      authority: typeof body.authority === 'string' ? body.authority : '',
-      feePayer: typeof body.feePayer === 'string' ? body.feePayer : undefined,
+      authority: actor.session.walletAddress,
+      feePayer: undefined,
       relayRequestId: typeof body.relayRequestId === 'string' ? body.relayRequestId : undefined,
       playerAuthorizationSignatureBase64:
         typeof body.playerAuthorizationSignatureBase64 === 'string'
@@ -59,6 +68,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : 'Failed to prepare Solana settlement.';
     return NextResponse.json({ error: message }, { status: statusForError(message) });
   }

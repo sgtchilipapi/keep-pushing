@@ -146,6 +146,11 @@ export interface RunanaTrustedServerSigner {
   signerPath: string;
 }
 
+export interface RunanaSponsorPayer {
+  signer: Keypair;
+  signerPath: string;
+}
+
 export function loadRunanaBootstrapAuthorities(
   env: NodeJS.ProcessEnv = process.env,
 ): RunanaBootstrapAuthorities {
@@ -179,6 +184,29 @@ export function loadRunanaTrustedServerSigner(
   if (!signerPath) {
     throw new Error(
       'ERR_MISSING_SERVER_SIGNER_KEYPAIR_PATH: set RUNANA_SERVER_SIGNER_KEYPAIR_PATH to the trusted server signer keypair JSON path',
+    );
+  }
+
+  return {
+    signer: loadKeypairFromFile(signerPath),
+    signerPath,
+  };
+}
+
+export function loadRunanaSponsorPayer(
+  env: NodeJS.ProcessEnv = process.env,
+): RunanaSponsorPayer {
+  const signerPath =
+    env.RUNANA_SPONSOR_KEYPAIR_PATH?.trim() ??
+    env.RUNANA_PAYER_KEYPAIR_PATH?.trim() ??
+    env.RUNANA_SERVER_SIGNER_KEYPAIR_PATH?.trim() ??
+    env.RUNANA_TRUSTED_SERVER_SIGNER_KEYPAIR_PATH?.trim() ??
+    findLatestManualTestKeypairPath('server.json', env) ??
+    undefined;
+
+  if (!signerPath) {
+    throw new Error(
+      'ERR_MISSING_SPONSOR_KEYPAIR_PATH: set RUNANA_SPONSOR_KEYPAIR_PATH or RUNANA_SERVER_SIGNER_KEYPAIR_PATH to the sponsor signer keypair JSON path',
     );
   }
 

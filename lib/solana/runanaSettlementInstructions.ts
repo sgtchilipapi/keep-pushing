@@ -49,6 +49,8 @@ export interface BuildSettlementTransactionInstructionsArgs {
   clusterId?: number;
 }
 
+const SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1 = 0;
+
 function assertSafeInteger(value: number, field: string, minimum = 0): void {
   if (!Number.isSafeInteger(value) || value < minimum) {
     throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must be a safe integer >= ${minimum}`);
@@ -287,7 +289,13 @@ export function buildSettlementTransactionInstructions(
   messages: CanonicalSettlementMessages;
 } {
   const clusterId = args.clusterId ?? RUNANA_CLUSTER_ID_LOCALNET;
-  if (!args.serverSigner.publicKey.equals(args.envelope.programConfig.trustedServerSigner)) {
+  const requiresServerAttestation =
+    args.envelope.programConfig.settlementAuthorizationMode ===
+    SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1;
+  if (
+    requiresServerAttestation &&
+    !args.serverSigner.publicKey.equals(args.envelope.programConfig.trustedServerSigner)
+  ) {
     throw new Error(
       'ERR_UNTRUSTED_SERVER_SIGNER_KEYPAIR: server signer keypair did not match program config',
     );
@@ -301,18 +309,24 @@ export function buildSettlementTransactionInstructions(
     clusterId,
   });
 
-  const serverAttestationInstruction = Ed25519Program.createInstructionWithPrivateKey({
-    privateKey: args.serverSigner.secretKey,
-    message: messages.serverAttestationMessage,
-  });
   const settlementInstruction = buildApplyBattleSettlementBatchV1Instruction({
     payload: args.payload,
     instructionAccounts: args.envelope.instructionAccounts,
     programId: args.envelope.programId,
   });
 
+  const instructions = requiresServerAttestation
+    ? [
+        Ed25519Program.createInstructionWithPrivateKey({
+          privateKey: args.serverSigner.secretKey,
+          message: messages.serverAttestationMessage,
+        }),
+        settlementInstruction,
+      ]
+    : [settlementInstruction];
+
   return {
-    instructions: [serverAttestationInstruction, settlementInstruction],
+    instructions,
     messages,
   };
 }

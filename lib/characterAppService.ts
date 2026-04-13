@@ -25,7 +25,7 @@ const STARTER_PASSIVES = ["2001", "2002"];
 export type AccountMode = "anon" | "wallet-linked";
 
 function resolveAccountModeForUser(): AccountMode {
-  return "anon";
+  return "wallet-linked";
 }
 
 function slotsTotalForAccountMode(accountMode: AccountMode): number {

@@ -1,16 +1,39 @@
 const serviceMock = {
   getFirstCharacterDetailForUser: jest.fn(),
 };
+const authMock = {
+  requireSession: jest.fn(),
+};
 
 jest.mock("../lib/characterAppService", () => ({
   getFirstCharacterDetailForUser: serviceMock.getFirstCharacterDetailForUser,
 }));
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSession: authMock.requireSession,
+  };
+});
 
 import { GET } from "../app/api/character/route";
 
 describe("GET /api/character", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSession.mockResolvedValue({
+      session: {
+        id: "session-1",
+        userId: "user-1",
+        walletAddress: "wallet-1",
+        expiresAt: new Date("2026-05-01T00:00:00.000Z"),
+        revokedAt: null,
+      },
+      user: {
+        id: "user-1",
+        primaryWalletAddress: "wallet-1",
+      },
+    });
   });
 
   it("returns the character with chain and sync details", async () => {
@@ -86,11 +109,14 @@ describe("GET /api/character", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/character?userId=user-1"),
+      new Request("http://localhost/api/character"),
     );
     const json = await response.json();
 
     expect(response.status).toBe(200);
+    expect(serviceMock.getFirstCharacterDetailForUser).toHaveBeenCalledWith(
+      "user-1",
+    );
     expect(json.character.characterId).toBe("character-1");
     expect(json.character.chain.chainCreationStatus).toBe("PENDING");
     expect(json.character.syncPhase).toBe("CREATING_ON_CHAIN");
@@ -108,7 +134,7 @@ describe("GET /api/character", () => {
     serviceMock.getFirstCharacterDetailForUser.mockResolvedValue(null);
 
     const response = await GET(
-      new Request("http://localhost/api/character?userId=user-1"),
+      new Request("http://localhost/api/character"),
     );
     const json = await response.json();
 
@@ -165,7 +191,7 @@ describe("GET /api/character", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/character?userId=user-1"),
+      new Request("http://localhost/api/character"),
     );
     const json = await response.json();
 

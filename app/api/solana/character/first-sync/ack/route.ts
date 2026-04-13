@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSession,
+} from "../../../../../../lib/auth/requireSession";
 import { acknowledgeSolanaFirstSync } from "../../../../../../lib/solana/firstSyncRelay";
 import type { AcknowledgeFirstSyncRouteRequest } from "../../../../../../types/api/solana";
 
@@ -42,14 +47,27 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = await requireSession(request);
+    const prepared = body.prepared as AcknowledgeFirstSyncRouteRequest["prepared"];
+    if (prepared.authority !== actor.session.walletAddress) {
+      throw new SessionForbiddenError(
+        "ERR_AUTH_WALLET_FORBIDDEN: prepared authority does not match the active session wallet",
+      );
+    }
     const result = await acknowledgeSolanaFirstSync({
-      prepared: body.prepared as AcknowledgeFirstSyncRouteRequest["prepared"],
+      prepared,
       transactionSignature:
         typeof body.transactionSignature === "string" ? body.transactionSignature : "",
     });
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error ? error.message : "Failed to acknowledge Solana first sync.";
     return NextResponse.json({ error: message }, { status: statusForError(message) });

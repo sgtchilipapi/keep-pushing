@@ -29,7 +29,7 @@ jest.mock("../lib/solana/runanaProgram", () => ({
 }));
 
 import { fetchSeasonPolicyAccount } from "../lib/solana/runanaAccounts";
-import { useZoneRunConsumableItem } from "../lib/combat/zoneRunService";
+import { executeZoneRunConsumableItem } from "../lib/combat/zoneRunService";
 
 function buildActiveRunRecord(): any {
   return {
@@ -82,7 +82,7 @@ describe("zoneRunService consumable item rejection", () => {
 
   it("rejects consumable item use while a run is active", async () => {
     await expect(
-      useZoneRunConsumableItem(
+      executeZoneRunConsumableItem(
         { characterId: "character-1", itemId: "potion" },
         {
           now: () => new Date("2023-11-14T22:13:20.000Z"),

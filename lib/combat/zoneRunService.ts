@@ -1291,7 +1291,7 @@ export async function advanceZoneRunSubnode(
   });
 }
 
-async function useZoneRunPauseSkillInternal(
+async function executeZoneRunPauseSkillInternal(
   input: ZoneRunPauseSkillInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1334,7 +1334,7 @@ async function useZoneRunPauseSkillInternal(
   return buildActionResponse({ snapshot: nextSnapshot });
 }
 
-export async function useZoneRunPauseSkill(
+export async function executeZoneRunPauseSkill(
   input: ZoneRunPauseSkillInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {
@@ -1342,7 +1342,7 @@ export async function useZoneRunPauseSkill(
     characterId: input.characterId,
     requestKey: input.requestKey,
     actionType: "USE_PAUSE_SKILL",
-    execute: () => useZoneRunPauseSkillInternal(input, deps),
+    execute: () => executeZoneRunPauseSkillInternal(input, deps),
   });
 }
 
@@ -1471,7 +1471,7 @@ export async function abandonZoneRun(
   });
 }
 
-export async function useZoneRunConsumableItem(
+export async function executeZoneRunConsumableItem(
   input: ZoneRunUseItemInput,
   deps: ZoneRunServiceDependencies = {},
 ): Promise<ZoneRunActionResponse> {

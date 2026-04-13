@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSession,
+} from "../../../../../lib/auth/requireSession";
 import { acknowledgeSolanaSettlement } from "../../../../../lib/solana/settlementRelay";
 import type { AcknowledgeSettlementRouteRequest } from "../../../../../types/api/solana";
 
@@ -44,15 +49,28 @@ export async function POST(request: Request) {
   }
 
   try {
+    const actor = await requireSession(request);
+    const prepared = body.prepared as AcknowledgeSettlementRouteRequest["prepared"];
+    if (prepared.authority !== actor.session.walletAddress) {
+      throw new SessionForbiddenError(
+        "ERR_AUTH_WALLET_FORBIDDEN: prepared authority does not match the active session wallet",
+      );
+    }
     const result = await acknowledgeSolanaSettlement({
       settlementBatchId: typeof body.settlementBatchId === "string" ? body.settlementBatchId : "",
-      prepared: body.prepared as AcknowledgeSettlementRouteRequest["prepared"],
+      prepared,
       transactionSignature:
         typeof body.transactionSignature === "string" ? body.transactionSignature : "",
     });
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error ? error.message : "Failed to acknowledge Solana settlement.";
     return NextResponse.json({ error: message }, { status: statusForError(message) });

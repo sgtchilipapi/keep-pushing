@@ -1,16 +1,39 @@
 const serviceMock = {
   createPlayableCharacter: jest.fn(),
 };
+const authMock = {
+  requireSession: jest.fn(),
+};
 
 jest.mock("../lib/characterAppService", () => ({
   createPlayableCharacter: serviceMock.createPlayableCharacter,
 }));
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSession: authMock.requireSession,
+  };
+});
 
 import { POST } from "../app/api/character/create/route";
 
 describe("POST /api/character/create", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSession.mockResolvedValue({
+      session: {
+        id: "session-1",
+        userId: "user-1",
+        walletAddress: "wallet-1",
+        expiresAt: new Date("2026-05-01T00:00:00.000Z"),
+        revokedAt: null,
+      },
+      user: {
+        id: "user-1",
+        primaryWalletAddress: "wallet-1",
+      },
+    });
     serviceMock.createPlayableCharacter.mockResolvedValue({
       characterId: "character-1",
       userId: "user-1",
@@ -33,7 +56,6 @@ describe("POST /api/character/create", () => {
       new Request("http://localhost/api/character/create", {
         method: "POST",
         body: JSON.stringify({
-          userId: "user-1",
           name: "  Alpha   One ",
           classId: "Soldier",
           slotIndex: 0,
@@ -60,7 +82,6 @@ describe("POST /api/character/create", () => {
       new Request("http://localhost/api/character/create", {
         method: "POST",
         body: JSON.stringify({
-          userId: "user-1",
         }),
       }),
     );
@@ -80,7 +101,6 @@ describe("POST /api/character/create", () => {
       new Request("http://localhost/api/character/create", {
         method: "POST",
         body: JSON.stringify({
-          userId: "user-1",
           name: "Alpha One",
         }),
       }),

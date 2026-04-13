@@ -1,5 +1,6 @@
 import {
   AddressLookupTableAccount,
+  Keypair,
   Transaction,
   TransactionMessage,
   VersionedTransaction,
@@ -28,6 +29,7 @@ export async function buildPreparedVersionedTransaction(args: {
   instructions: TransactionInstruction[];
   addressLookupTableAccounts?: AddressLookupTableAccount[];
   commitment?: Commitment;
+  partialSigners?: Keypair[];
 }): Promise<PreparedVersionedTransaction> {
   const latestBlockhash = await args.connection.getLatestBlockhash(args.commitment);
   const message = new TransactionMessage({
@@ -36,6 +38,9 @@ export async function buildPreparedVersionedTransaction(args: {
     instructions: args.instructions,
   }).compileToV0Message(args.addressLookupTableAccounts);
   const transaction = new VersionedTransaction(message);
+  if (args.partialSigners && args.partialSigners.length > 0) {
+    transaction.sign(args.partialSigners);
+  }
 
   return {
     serializedMessageBase64: toBase64(message.serialize()),
@@ -50,6 +55,7 @@ export async function buildPreparedLegacyTransaction(args: {
   feePayer: PublicKey;
   instructions: TransactionInstruction[];
   commitment?: Commitment;
+  partialSigners?: Keypair[];
 }): Promise<PreparedLegacyOrVersionedTransaction> {
   const latestBlockhash = await args.connection.getLatestBlockhash(args.commitment);
   const transaction = new Transaction({
@@ -60,6 +66,9 @@ export async function buildPreparedLegacyTransaction(args: {
 
   for (const instruction of args.instructions) {
     transaction.add(instruction);
+  }
+  if (args.partialSigners && args.partialSigners.length > 0) {
+    transaction.partialSign(...args.partialSigners);
   }
 
   return {

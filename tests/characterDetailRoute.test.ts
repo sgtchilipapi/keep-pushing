@@ -1,16 +1,30 @@
 const serviceMock = {
   getCharacterDetail: jest.fn(),
 };
+const authMock = {
+  requireSessionCharacterAccess: jest.fn(),
+};
 
 jest.mock("../lib/characterAppService", () => ({
   getCharacterDetail: serviceMock.getCharacterDetail,
 }));
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
+  };
+});
 
 import { GET } from "../app/api/characters/[characterId]/route";
+import { SessionForbiddenError } from "../lib/auth/requireSession";
 
 describe("GET /api/characters/:characterId", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSessionCharacterAccess.mockResolvedValue({
+      user: { id: "user-1", primaryWalletAddress: "wallet-1" },
+    });
   });
 
   it("returns the character detail with season context", async () => {
@@ -58,13 +72,37 @@ describe("GET /api/characters/:characterId", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/characters/character-1?userId=user-1"),
+      new Request("http://localhost/api/characters/character-1"),
       { params: { characterId: "character-1" } },
     );
     const json = await response.json();
 
     expect(response.status).toBe(200);
+    expect(authMock.requireSessionCharacterAccess).toHaveBeenCalledWith(
+      expect.any(Request),
+      "character-1",
+    );
+    expect(serviceMock.getCharacterDetail).toHaveBeenCalledWith(
+      "character-1",
+      "user-1",
+    );
     expect(json.character.characterId).toBe("character-1");
     expect(json.season.seasonName).toBe("Season 1");
+  });
+
+  it("returns 403 when the session does not own the character", async () => {
+    authMock.requireSessionCharacterAccess.mockRejectedValueOnce(
+      new SessionForbiddenError(),
+    );
+
+    const response = await GET(
+      new Request("http://localhost/api/characters/character-1"),
+      { params: { characterId: "character-1" } },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(json.error).toMatch(/ERR_AUTH_FORBIDDEN|ERR_AUTH_CHARACTER_FORBIDDEN/);
+    expect(serviceMock.getCharacterDetail).not.toHaveBeenCalled();
   });
 });

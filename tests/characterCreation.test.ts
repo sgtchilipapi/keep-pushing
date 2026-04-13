@@ -40,6 +40,13 @@ jest.mock("../lib/solana/playerOwnedV0Transactions", () => ({
     lastValidBlockHeight: 42,
   })),
 }));
+jest.mock("../lib/solana/runanaClient", () => ({
+  ...jest.requireActual("../lib/solana/runanaClient"),
+  loadRunanaSponsorPayer: jest.fn(() => ({
+    signer: jest.requireActual("@solana/web3.js").Keypair.generate(),
+    sourcePath: "/workspaces/keep-pushing/tests/fixtures/sponsor.json",
+  })),
+}));
 
 import {
   ComputeBudgetProgram,

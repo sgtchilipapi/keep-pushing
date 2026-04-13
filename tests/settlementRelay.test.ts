@@ -1,5 +1,13 @@
 import { Keypair } from '@solana/web3.js';
 
+jest.mock('../lib/solana/runanaClient', () => ({
+  ...jest.requireActual('../lib/solana/runanaClient'),
+  loadRunanaSponsorPayer: jest.fn(() => ({
+    signer: jest.requireActual('@solana/web3.js').Keypair.generate(),
+    sourcePath: '/workspaces/keep-pushing/tests/fixtures/sponsor.json',
+  })),
+}));
+
 import {
   prepareSolanaSettlement,
 } from '../lib/solana/settlementRelay';

@@ -18,18 +18,6 @@ function assertNonEmptyString(value: string, field: string): void {
   }
 }
 
-function assertPlayerPaysOwnTransaction(
-  authority: string,
-  feePayer: string,
-  kind: string,
-): void {
-  if (authority !== feePayer) {
-    throw new Error(
-      `ERR_PLAYER_MUST_PAY: ${kind} requires feePayer to match authority`,
-    );
-  }
-}
-
 function sha256Hex(base64Value: string): string {
   return createHash("sha256")
     .update(Buffer.from(base64Value, "base64"))
@@ -285,7 +273,6 @@ function buildPreparedTransaction(
     serializedTransactionBase64,
     "serializedTransactionBase64",
   );
-  assertPlayerPaysOwnTransaction(authority, feePayer, kind);
 
   return {
     kind,

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 
-import { prisma } from '../../../../lib/prisma';
-
 export async function POST() {
-  const user = await prisma.user.create();
-  return NextResponse.json({ userId: user.id }, { status: 201 });
+  return NextResponse.json(
+    {
+      error:
+        'ERR_ANON_REMOVED: anonymous accounts have been removed. Sign in with a wallet-backed session instead.',
+    },
+    { status: 410 },
+  );
 }

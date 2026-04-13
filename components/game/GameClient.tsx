@@ -10,7 +10,6 @@ import type {
 } from "../../types/api/solana";
 import type {
   AccountMode,
-  AnonymousUserResponse,
   CharacterClassCatalogItem,
   CharacterClassesResponse,
   CharacterDetailResponse,
@@ -38,7 +37,9 @@ import {
   getPhantomProvider,
   getWalletAvailability,
   normalizeWalletError,
+  signAuthorizationMessageUtf8,
   signAndSendPreparedPlayerOwnedTransaction,
+  type PhantomSolanaProvider,
   type WalletActionStatus,
   type WalletAvailability,
   type WalletConnectionStatus,
@@ -46,12 +47,11 @@ import {
 import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillMetadata";
 import { getSkillDef } from "../../engine/battle/skillRegistry";
 
-const USER_STORAGE_KEY = "keep-pushing:user-id";
 const PENDING_SYNC_STORAGE_KEY = "keep-pushing:pending-sync-acks";
 const PHANTOM_INSTALL_URL = "https://phantom.app/download";
 
 type AppPhase =
-  | "bootstrapping_user"
+  | "bootstrapping_session"
   | "loading_character"
   | "ready"
   | "fatal_error";
@@ -60,6 +60,34 @@ type ShellView = "landing" | "roster" | "create" | "character" | "run" | "sync";
 
 type ApiErrorShape = {
   error?: string;
+};
+
+type AuthNonceResponse = {
+  ok: true;
+  data: {
+    nonceId: string;
+    nonce: string;
+    expiresAt: string;
+    messageToSign: string;
+  };
+};
+
+type AuthVerifyResponse = {
+  ok: true;
+  data: {
+    user: {
+      id: string;
+      walletAddress: string;
+    };
+    session: {
+      id: string;
+      expiresAt: string;
+    };
+  };
+};
+
+type ApiError = Error & {
+  status?: number;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -88,10 +116,25 @@ async function apiRequest<T>(
       isObject(data) && typeof data.error === "string"
         ? data.error
         : `Request failed with status ${response.status}`;
-    throw new Error(message);
+    const error = new Error(message) as ApiError;
+    error.status = response.status;
+    throw error;
   }
 
   return data as T;
+}
+
+function getApiErrorStatus(error: unknown): number | null {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof (error as { status?: unknown }).status === "number"
+  ) {
+    return (error as { status: number }).status;
+  }
+
+  return null;
 }
 
 function formatDateTime(value: string | null): string {
@@ -1012,35 +1055,47 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
 }
 
 type LandingPanelProps = {
-  onTryGame: () => void;
+  availability: WalletAvailability;
+  connectionStatus: WalletConnectionStatus;
+  pending: boolean;
+  onConnect: () => Promise<void>;
 };
 
 function LandingPanel(props: LandingPanelProps) {
   return (
     <section className={`${styles.panel} ${styles.heroPanel}`}>
       <div className={styles.stack}>
-        <span className={styles.eyebrow}>Instant Play</span>
+        <span className={styles.eyebrow}>Phantom Connect</span>
         <h2 className={styles.heroTitle}>
-          Start anon, build a character, run the season now.
+          Connect Phantom to enter the season.
         </h2>
         <p className={styles.panelText}>
-          Wallet ownership stays secondary in the MVP. The fastest path is to
-          create an anonymous character, learn the zone flow, and sync later.
+          Wallet-backed sessions are now the only login path. Sign in with
+          Phantom to load your roster, create a character, and submit
+          sponsored on-chain sync flows.
         </p>
         <div className={styles.buttonRow}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={props.onTryGame}
-          >
-            Try the Game
-          </button>
-          <button type="button" className={styles.button} disabled>
-            Username / Password
-          </button>
-          <button type="button" className={styles.button} disabled>
-            SSO
-          </button>
+          {props.availability === "not_installed" ? (
+            <a
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              href={PHANTOM_INSTALL_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Install Phantom
+            </a>
+          ) : (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.buttonPrimary}`}
+              onClick={() => void props.onConnect()}
+              disabled={props.pending}
+            >
+              {props.connectionStatus === "connecting"
+                ? "Connecting..."
+                : "Sign In With Phantom"}
+            </button>
+          )}
         </div>
       </div>
     </section>
@@ -1125,7 +1180,8 @@ type WalletToolbarProps = {
   availability: WalletAvailability;
   connectionStatus: WalletConnectionStatus;
   actionStatus: WalletActionStatus;
-  userId: string | null;
+  signedIn: boolean;
+  sessionWalletAddress: string | null;
   publicKey: string | null;
   error: string | null;
   pending: boolean;
@@ -1173,9 +1229,15 @@ function WalletToolbar(props: WalletToolbarProps) {
         <div className={styles.menuContent}>
           <div className={styles.keyValueGrid}>
             <div className={styles.keyValueItem}>
-              <span className={styles.keyLabel}>User</span>
+              <span className={styles.keyLabel}>Session</span>
               <span className={styles.keyValue}>
-                {truncateMiddle(props.userId)}
+                {props.signedIn
+                  ? props.sessionWalletAddress ?? props.publicKey
+                    ? `Active ${truncateMiddle(
+                        props.sessionWalletAddress ?? props.publicKey,
+                      )}`
+                    : "Active"
+                  : "Signed out"}
               </span>
             </div>
             <div className={styles.keyValueItem}>
@@ -1196,14 +1258,14 @@ function WalletToolbar(props: WalletToolbarProps) {
               >
                 Install Phantom
               </a>
-            ) : props.connectionStatus === "connected" ? (
+            ) : props.signedIn ? (
               <button
                 type="button"
                 className={styles.button}
                 onClick={() => void props.onDisconnect()}
                 disabled={props.pending}
               >
-                Disconnect
+                Sign Out
               </button>
             ) : (
               <button
@@ -1214,7 +1276,9 @@ function WalletToolbar(props: WalletToolbarProps) {
               >
                 {props.connectionStatus === "connecting"
                   ? "Connecting..."
-                  : "Connect Phantom"}
+                  : props.connectionStatus === "connected"
+                    ? "Sign In"
+                    : "Connect Phantom"}
               </button>
             )}
 
@@ -1222,7 +1286,7 @@ function WalletToolbar(props: WalletToolbarProps) {
               type="button"
               className={styles.button}
               onClick={props.onRefresh}
-              disabled={props.refreshPending || !props.userId}
+              disabled={props.refreshPending || !props.signedIn}
             >
               Refresh
             </button>
@@ -1937,7 +2001,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             body: JSON.stringify({
               characterId: character.characterId,
               authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
             }),
           },
         );
@@ -1999,7 +2062,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             body: JSON.stringify({
               characterId: character.characterId,
               authority: props.walletPublicKey,
-              feePayer: props.walletPublicKey,
             }),
           },
         );
@@ -2280,11 +2342,10 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
 export default function GameClient() {
   const router = useRouter();
-  const [appPhase, setAppPhase] = useState<AppPhase>("bootstrapping_user");
+  const [appPhase, setAppPhase] = useState<AppPhase>("bootstrapping_session");
   const [shellView, setShellView] = useState<ShellView>("landing");
-  const [userId, setUserId] = useState<string | null>(null);
-  const [accountMode, setAccountMode] = useState<AccountMode>("anon");
-  const [slotsTotal, setSlotsTotal] = useState(1);
+  const [accountMode, setAccountMode] = useState<AccountMode>("wallet-linked");
+  const [slotsTotal, setSlotsTotal] = useState(3);
   const [roster, setRoster] = useState<CharacterRosterItem[]>([]);
   const [character, setCharacter] = useState<CharacterReadModel | null>(null);
   const [season, setSeason] = useState<CurrentSeasonResponse | null>(null);
@@ -2320,20 +2381,61 @@ export default function GameClient() {
   const [walletActionStatus, setWalletActionStatus] =
     useState<WalletActionStatus>("idle");
   const [walletPublicKey, setWalletPublicKey] = useState<string | null>(null);
+  const [sessionActive, setSessionActive] = useState(false);
+  const [sessionWalletAddress, setSessionWalletAddress] = useState<
+    string | null
+  >(null);
   const [walletError, setWalletError] = useState<string | null>(null);
 
   const walletPending =
     walletConnectionStatus === "connecting" || walletActionStatus !== "idle";
-  async function issueAnonymousUser(): Promise<string> {
-    const created = await apiRequest<AnonymousUserResponse>("/api/auth/anon", {
+
+  function resetAuthenticatedState() {
+    setSessionActive(false);
+    setSessionWalletAddress(null);
+    setAccountMode("wallet-linked");
+    setSlotsTotal(3);
+    setRoster([]);
+    setCharacter(null);
+    setSyncDetail(null);
+    setActiveZoneRunDetail(null);
+    setZoneRunNotice(null);
+    setZoneRunError(null);
+    setZoneTopology(null);
+    setZoneTopologyError(null);
+  }
+
+  async function authenticateWalletSession(args: {
+    provider: PhantomSolanaProvider;
+    walletAddress: string;
+  }): Promise<AuthVerifyResponse> {
+    const nonce = await apiRequest<AuthNonceResponse>("/api/v1/auth/nonce", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        chain: "solana",
+        walletAddress: args.walletAddress,
+      }),
     });
 
-    window.localStorage.setItem(USER_STORAGE_KEY, created.userId);
-    setUserId(created.userId);
-    setAccountMode(created.accountMode ?? "anon");
-    return created.userId;
+    setWalletActionStatus("signing_message");
+    const signatureBase64 = await signAuthorizationMessageUtf8(
+      args.provider,
+      nonce.data.messageToSign,
+    );
+
+    const verified = await apiRequest<AuthVerifyResponse>("/api/v1/auth/verify", {
+      method: "POST",
+      body: JSON.stringify({
+        nonceId: nonce.data.nonceId,
+        walletAddress: args.walletAddress,
+        signatureBase64,
+        signedMessage: nonce.data.messageToSign,
+      }),
+    });
+
+    setSessionActive(true);
+    setSessionWalletAddress(verified.data.user.walletAddress);
+    return verified;
   }
 
   async function refreshSeason(): Promise<CurrentSeasonResponse> {
@@ -2357,40 +2459,27 @@ export default function GameClient() {
     return response.classes;
   }
 
-  async function refreshRoster(
-    nextUserId?: string,
-  ): Promise<CharacterRosterResponse> {
-    const resolvedUserId = nextUserId ?? userId;
-    if (!resolvedUserId) {
-      throw new Error("No user id is available yet.");
-    }
-
+  async function refreshRoster(): Promise<CharacterRosterResponse> {
     const response = await apiRequest<CharacterRosterResponse>(
-      `/api/characters?userId=${encodeURIComponent(resolvedUserId)}`,
+      "/api/characters",
       { method: "GET", headers: undefined },
     );
     setAccountMode(response.accountMode);
     setSlotsTotal(response.slotsTotal);
     setRoster(response.characters);
+    setSessionActive(true);
     return response;
   }
 
   async function loadCharacterDetail(
     characterId: string,
-    nextUserId?: string,
     preferredView?: ShellView,
   ): Promise<CharacterReadModel | null> {
-    const resolvedUserId = nextUserId ?? userId;
-
-    if (!resolvedUserId) {
-      throw new Error("No user id is available yet.");
-    }
-
     setRefreshPending(true);
 
     try {
       const response = await apiRequest<CharacterDetailResponse>(
-        `/api/characters/${encodeURIComponent(characterId)}?userId=${encodeURIComponent(resolvedUserId)}`,
+        `/api/characters/${encodeURIComponent(characterId)}`,
         { method: "GET", headers: undefined },
       );
       setCharacter(response.character);
@@ -2412,16 +2501,8 @@ export default function GameClient() {
     }
   }
 
-  async function refreshCharacter(
-    nextUserId?: string,
-  ): Promise<CharacterReadModel | null> {
-    const resolvedUserId = nextUserId ?? userId;
-
-    if (!resolvedUserId) {
-      throw new Error("No user id is available yet.");
-    }
-
-    const rosterResponse = await refreshRoster(resolvedUserId);
+  async function refreshCharacter(): Promise<CharacterReadModel | null> {
+    const rosterResponse = await refreshRoster();
     const nextCharacterId =
       character?.characterId ??
       rosterResponse.characters[0]?.characterId ??
@@ -2430,32 +2511,49 @@ export default function GameClient() {
     if (nextCharacterId === null) {
       setCharacter(null);
       setActiveZoneRunDetail(null);
-      setShellView("landing");
+      setShellView("roster");
       return null;
     }
 
-    return loadCharacterDetail(nextCharacterId, resolvedUserId);
+    return loadCharacterDetail(nextCharacterId);
   }
 
   async function refreshSyncDetail(
     nextCharacterId?: string,
-    nextUserId?: string,
   ): Promise<CharacterSyncDetailResponse | null> {
-    const resolvedUserId = nextUserId ?? userId;
     const resolvedCharacterId =
       nextCharacterId ?? character?.characterId ?? null;
 
-    if (!resolvedUserId || !resolvedCharacterId) {
+    if (!resolvedCharacterId) {
       setSyncDetail(null);
       return null;
     }
 
     const response = await apiRequest<CharacterSyncDetailResponse>(
-      `/api/characters/${encodeURIComponent(resolvedCharacterId)}/sync?userId=${encodeURIComponent(resolvedUserId)}`,
+      `/api/characters/${encodeURIComponent(resolvedCharacterId)}/sync`,
       { method: "GET", headers: undefined },
     );
     setSyncDetail(response);
     return response;
+  }
+
+  async function bootstrapAuthenticatedApp(): Promise<void> {
+    setAppPhase("loading_character");
+    const [rosterResponse] = await Promise.all([
+      refreshRoster(),
+      refreshClasses(),
+      refreshSeason(),
+    ]);
+
+    if (rosterResponse.characters.length === 0) {
+      setCharacter(null);
+      setShellView("roster");
+      setAppPhase("ready");
+      return;
+    }
+
+    await loadCharacterDetail(rosterResponse.characters[0]!.characterId);
+    setAppPhase("ready");
   }
 
   async function refreshZoneTopology(
@@ -2506,38 +2604,36 @@ export default function GameClient() {
 
     async function initialize() {
       try {
-        const storedUserId = window.localStorage.getItem(USER_STORAGE_KEY);
-        let resolvedUserId = storedUserId;
-
-        if (!resolvedUserId) {
-          resolvedUserId = await issueAnonymousUser();
-        }
+        setAppPhase("bootstrapping_session");
+        await Promise.all([refreshClasses(), refreshSeason()]);
 
         if (cancelled) {
           return;
         }
 
-        setUserId(resolvedUserId);
-        setAppPhase("loading_character");
-        const [rosterResponse] = await Promise.all([
-          refreshRoster(resolvedUserId),
-          refreshClasses(),
-          refreshSeason(),
-        ]);
+        try {
+          const rosterResponse = await refreshRoster();
+          if (cancelled) {
+            return;
+          }
 
-        if (cancelled) {
-          return;
+          if (rosterResponse.characters.length === 0) {
+            setCharacter(null);
+            setShellView("roster");
+          } else {
+            await loadCharacterDetail(rosterResponse.characters[0]!.characterId);
+          }
+        } catch (error) {
+          const status = getApiErrorStatus(error);
+          if (status === 401 || status === 403) {
+            resetAuthenticatedState();
+            setShellView("landing");
+            setAppPhase("ready");
+            return;
+          }
+          throw error;
         }
 
-        if (rosterResponse.characters.length === 0) {
-          setCharacter(null);
-          setShellView("landing");
-        } else {
-          await loadCharacterDetail(
-            rosterResponse.characters[0]!.characterId,
-            resolvedUserId,
-          );
-        }
         setAppPhase("ready");
       } catch (error) {
         if (cancelled) {
@@ -2673,15 +2769,25 @@ export default function GameClient() {
   async function handleConnectWallet() {
     setWalletConnectionStatus("connecting");
     setWalletError(null);
+    setAppPhase("loading_character");
 
     try {
-      const { publicKey } = await connectPhantom();
+      const { provider, publicKey } = await connectPhantom();
       setWalletPublicKey(publicKey);
       setWalletConnectionStatus("connected");
+      await authenticateWalletSession({
+        provider,
+        walletAddress: publicKey,
+      });
+      await bootstrapAuthenticatedApp();
+      setShellView("roster");
     } catch (error) {
       setWalletPublicKey(null);
       setWalletConnectionStatus("disconnected");
       setWalletError(normalizeWalletError(error));
+      setAppPhase("ready");
+    } finally {
+      setWalletActionStatus("idle");
     }
   }
 
@@ -2689,18 +2795,25 @@ export default function GameClient() {
     setWalletError(null);
 
     try {
+      await apiRequest<{ ok: true }>("/api/v1/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      setWalletError(normalizeWalletError(error));
+    }
+
+    try {
       await disconnectPhantom();
     } catch (error) {
       setWalletError(normalizeWalletError(error));
     } finally {
+      resetAuthenticatedState();
       setWalletPublicKey(null);
+      setShellView("landing");
       setWalletConnectionStatus("disconnected");
       setWalletActionStatus("idle");
     }
-  }
-
-  function handleTryGame() {
-    setShellView("roster");
   }
 
   function handleOpenCreate(slotIndex: number) {
@@ -2712,12 +2825,8 @@ export default function GameClient() {
   }
 
   async function handleOpenCharacter(characterId: string) {
-    if (!userId) {
-      return;
-    }
-
     try {
-      await loadCharacterDetail(characterId, userId, "character");
+      await loadCharacterDetail(characterId, "character");
     } catch (error) {
       setFatalError(
         error instanceof Error ? error.message : "Failed to load character.",
@@ -2727,12 +2836,12 @@ export default function GameClient() {
   }
 
   async function handleOpenSync() {
-    if (!character || !userId) {
+    if (!character) {
       return;
     }
 
     try {
-      await refreshSyncDetail(character.characterId, userId);
+      await refreshSyncDetail(character.characterId);
       setShellView("sync");
     } catch (error) {
       setFatalError(
@@ -2743,69 +2852,27 @@ export default function GameClient() {
   }
 
   async function handleCreateCharacter() {
-    if (!userId) {
-      setCreateError(
-        "Cannot create a character before user bootstrap finishes.",
-      );
-      return;
-    }
-
     setCreatePending(true);
     setCreateError(null);
 
     try {
-      let activeUserId = userId;
-      let createdCharacterId: string | null = null;
+      const created = await apiRequest<CreateCharacterResponse>(
+        "/api/characters",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: createName,
+            classId: selectedClassId,
+            slotIndex: createSlotIndex,
+          }),
+        },
+      );
 
-      try {
-        const created = await apiRequest<CreateCharacterResponse>(
-          "/api/characters",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              userId: activeUserId,
-              name: createName,
-              classId: selectedClassId,
-              slotIndex: createSlotIndex,
-            }),
-          },
-        );
-        createdCharacterId = created.characterId;
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !error.message.startsWith("ERR_USER_NOT_FOUND")
-        ) {
-          throw error;
-        }
-
-        window.localStorage.removeItem(USER_STORAGE_KEY);
-        activeUserId = await issueAnonymousUser();
-
-        const created = await apiRequest<CreateCharacterResponse>(
-          "/api/characters",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              userId: activeUserId,
-              name: createName,
-              classId: selectedClassId,
-              slotIndex: createSlotIndex,
-            }),
-          },
-        );
-        createdCharacterId = created.characterId;
-      }
-
-      await refreshRoster(activeUserId);
-      if (createdCharacterId !== null) {
-        await loadCharacterDetail(
-          createdCharacterId,
-          activeUserId,
-          "character",
-        );
+      await refreshRoster();
+      if (created.characterId !== null) {
+        await loadCharacterDetail(created.characterId, "character");
       } else {
-        await refreshCharacter(activeUserId);
+        await refreshCharacter();
       }
     } catch (error) {
       setCreateError(
@@ -2845,7 +2912,7 @@ export default function GameClient() {
         closedRun: response.closedRunSummary?.zoneRunId ?? null,
       });
       if (response.closedRunSummary) {
-        await refreshCharacter(activeCharacter.userId);
+        await refreshCharacter();
         router.push(
           `/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`,
         );
@@ -2874,14 +2941,13 @@ export default function GameClient() {
   ]);
 
   useEffect(() => {
-    if (shellView !== "sync" || !character || !userId) {
+    if (shellView !== "sync" || !character) {
       return;
     }
 
-    void refreshSyncDetail(character.characterId, userId);
+    void refreshSyncDetail(character.characterId);
   }, [
     shellView,
-    userId,
     character?.characterId,
     character?.syncPhase,
     character?.nextSettlementBatch?.settlementBatchId,
@@ -2928,7 +2994,7 @@ export default function GameClient() {
             }
           : null,
       });
-      await refreshCharacter(character.userId);
+      await refreshCharacter();
       if (response.closedRunSummary) {
         router.push(
           `/runs/${encodeURIComponent(response.closedRunSummary.zoneRunId)}`,
@@ -3034,7 +3100,10 @@ export default function GameClient() {
     }
   }
 
-  if (appPhase === "bootstrapping_user" || appPhase === "loading_character") {
+  if (
+    appPhase === "bootstrapping_session" ||
+    appPhase === "loading_character"
+  ) {
     return (
       <main className={styles.page}>
         <div className={styles.shell}>
@@ -3127,7 +3196,8 @@ export default function GameClient() {
               availability={walletAvailability}
               connectionStatus={walletConnectionStatus}
               actionStatus={walletActionStatus}
-              userId={userId}
+              signedIn={sessionActive}
+              sessionWalletAddress={sessionWalletAddress}
               publicKey={walletPublicKey}
               error={walletError}
               pending={walletPending}
@@ -3135,8 +3205,8 @@ export default function GameClient() {
               onConnect={handleConnectWallet}
               onDisconnect={handleDisconnectWallet}
               onRefresh={() => {
-                if (userId) {
-                  void refreshCharacter(userId);
+                if (sessionActive) {
+                  void refreshCharacter();
                 }
               }}
             />
@@ -3147,7 +3217,12 @@ export default function GameClient() {
         </header>
 
         {shellView === "landing" ? (
-          <LandingPanel onTryGame={handleTryGame} />
+          <LandingPanel
+            availability={walletAvailability}
+            connectionStatus={walletConnectionStatus}
+            pending={walletPending}
+            onConnect={handleConnectWallet}
+          />
         ) : shellView === "roster" ? (
           <RosterPanel
             accountMode={accountMode}
@@ -3196,7 +3271,7 @@ export default function GameClient() {
                   return;
                 }
 
-                await refreshCharacter(character.userId);
+                await refreshCharacter();
               }}
               onAdvance={handleAdvanceZoneRun}
               onChooseBranch={handleChooseZoneRunBranch}
@@ -3222,10 +3297,8 @@ export default function GameClient() {
             walletPublicKey={walletPublicKey}
             setWalletActionStatus={setWalletActionStatus}
             onConnectWallet={handleConnectWallet}
-            onRefreshCharacter={() => refreshCharacter(character.userId)}
-            onRefreshSyncDetail={() =>
-              refreshSyncDetail(character.characterId, character.userId)
-            }
+            onRefreshCharacter={() => refreshCharacter()}
+            onRefreshSyncDetail={() => refreshSyncDetail(character.characterId)}
             onBack={() => setShellView("character")}
           />
         ) : shellView === "sync" && character !== null ? (

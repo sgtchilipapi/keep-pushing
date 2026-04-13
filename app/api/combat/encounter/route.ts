@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSessionCharacterAccess,
+} from '../../../../lib/auth/requireSession';
 import { executeRealEncounter, type ExecuteRealEncounterInput } from '../../../../lib/combat/realEncounter';
 
 function statusForError(message: string): number {
@@ -50,6 +55,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    await requireSessionCharacterAccess(request, body.characterId);
     const result = await executeRealEncounter({
       characterId: body.characterId,
       zoneId: body.zoneId,
@@ -57,6 +63,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : 'Failed to execute real encounter.';
     return NextResponse.json({ error: message }, { status: statusForError(message) });
   }

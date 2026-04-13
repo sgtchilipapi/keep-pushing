@@ -1,6 +1,16 @@
 jest.mock("../lib/combat/realEncounter", () => ({
   executeRealEncounter: jest.fn(),
 }));
+const authMock = {
+  requireSessionCharacterAccess: jest.fn(),
+};
+jest.mock("../lib/auth/requireSession", () => {
+  const actual = jest.requireActual("../lib/auth/requireSession");
+  return {
+    ...actual,
+    requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
+  };
+});
 
 import { POST } from "../app/api/combat/encounter/route";
 import { executeRealEncounter } from "../lib/combat/realEncounter";
@@ -18,6 +28,9 @@ async function postEncounter(body: unknown): Promise<Response> {
 describe("POST /api/combat/encounter", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authMock.requireSessionCharacterAccess.mockResolvedValue({
+      user: { id: "user-1", primaryWalletAddress: "wallet-1" },
+    });
   });
 
   it("returns the persisted real encounter payload", async () => {
@@ -49,6 +62,10 @@ describe("POST /api/combat/encounter", () => {
     const json = await response.json();
 
     expect(response.status).toBe(201);
+    expect(authMock.requireSessionCharacterAccess).toHaveBeenCalledWith(
+      expect.any(Request),
+      "character-1",
+    );
     expect(executeRealEncounter).toHaveBeenCalledWith({
       characterId: "character-1",
       zoneId: 2,

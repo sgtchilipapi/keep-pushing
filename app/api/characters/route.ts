@@ -4,26 +4,30 @@ import {
   createPlayableCharacter,
   getCharacterRoster,
 } from "../../../lib/characterAppService";
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSession,
+} from "../../../lib/auth/requireSession";
 
 type CreateCharacterPayload = {
-  userId?: string;
   name?: string;
   classId?: string;
   slotIndex?: number;
 };
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get("userId");
-
-  if (userId === null || userId.length === 0) {
-    return NextResponse.json({ error: "userId query parameter is required." }, { status: 400 });
-  }
-
   try {
-    const roster = await getCharacterRoster(userId);
+    const actor = await requireSession(request);
+    const roster = await getCharacterRoster(actor.user.id);
     return NextResponse.json(roster);
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error ? error.message : "Failed to load roster.";
     const status = message.startsWith("ERR_USER_NOT_FOUND") ? 404 : 500;
@@ -40,22 +44,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  if (typeof body.userId !== "string" || body.userId.length === 0) {
-    return NextResponse.json({ error: "userId is required." }, { status: 400 });
-  }
   if (typeof body.name !== "string") {
     return NextResponse.json({ error: "name is required." }, { status: 400 });
   }
 
   try {
+    const actor = await requireSession(request);
     const created = await createPlayableCharacter({
-      userId: body.userId,
+      userId: actor.user.id,
       name: body.name,
       classId: body.classId,
       slotIndex: body.slotIndex,
     });
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
+    if (error instanceof SessionRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof SessionForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const message =
       error instanceof Error ? error.message : "Failed to create character.";
     const status =

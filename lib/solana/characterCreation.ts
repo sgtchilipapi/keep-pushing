@@ -33,6 +33,7 @@ import {
 import { buildCreateCharacterInstruction } from "./runanaCharacterInstructions";
 import {
   createRunanaConnection,
+  loadRunanaSponsorPayer,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from "./runanaClient";
@@ -267,6 +268,7 @@ function assertAccountMeta(args: {
 
 function assertSemanticallyValidSignedCreateTransaction(args: {
   authority: string;
+  feePayer: string;
   relay: NonNullable<
     ReturnType<
       typeof acceptSignedPlayerOwnedTransaction
@@ -301,9 +303,10 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
   }
 
   const authority = new PublicKey(args.authority);
-  if (!message.payerKey.equals(authority)) {
+  const feePayer = new PublicKey(args.feePayer);
+  if (!message.payerKey.equals(feePayer)) {
     throw new Error(
-      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed fee payer does not match authority: ${JSON.stringify(args.diagnostics)}`,
+      `ERR_CHARACTER_CREATE_TX_DOMAIN_MISMATCH: signed fee payer does not match the prepared sponsor payer: ${JSON.stringify(args.diagnostics)}`,
     );
   }
 
@@ -366,7 +369,7 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
 
   const expectedAccounts = [
     {
-      pubkey: authority,
+      pubkey: feePayer,
       isSigner: true,
       isWritable: true,
       label: "payer",
@@ -659,12 +662,11 @@ export async function prepareSolanaCharacterCreation(
   assertInteger(input.initialUnlockedZoneId, "initialUnlockedZoneId", 0);
 
   const authority = toPublicKey(input.authority, "authority");
-  const feePayer = toPublicKey(input.feePayer ?? input.authority, "feePayer");
-  if (!authority.equals(feePayer)) {
-    throw new Error(
-      "ERR_PLAYER_MUST_PAY: character_create requires feePayer to match authority",
-    );
-  }
+  const sponsorSigner = loadRunanaSponsorPayer().signer;
+  const feePayer = toPublicKey(
+    input.feePayer ?? sponsorSigner.publicKey.toBase58(),
+    "feePayer",
+  );
   const character = await prisma.character.findById(input.characterId);
   if (character === null) {
     throw new Error(
@@ -754,6 +756,7 @@ export async function prepareSolanaCharacterCreation(
       feePayer,
       instructions: [createInstruction.instruction],
       commitment,
+      partialSigners: [sponsorSigner],
     });
 
     if (createPreparation.mode === "reuse_reserved") {
@@ -896,6 +899,7 @@ export async function submitSolanaCharacterCreation(
   });
   assertSemanticallyValidSignedCreateTransaction({
     authority: accepted.authority,
+    feePayer: accepted.feePayer,
     relay,
     programId,
     transaction: deserializedTransaction,

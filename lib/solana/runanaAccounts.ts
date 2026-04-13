@@ -24,6 +24,7 @@ export interface ProgramConfigAccountState extends DecodedRunanaAccountBase {
   bump: number;
   adminAuthority: PublicKey;
   trustedServerSigner: PublicKey;
+  settlementAuthorizationMode: number;
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
   maxRunsPerBatch: number;
@@ -227,6 +228,10 @@ class AccountDataReader {
     return rules;
   }
 
+  remainingBytes(): number {
+    return this.data.length - this.offset;
+  }
+
   assertFullyRead(accountName: string): void {
     if (this.offset !== this.data.length) {
       throw new Error(`ERR_ACCOUNT_DATA_REMAINDER: ${accountName} decoder left unread bytes`);
@@ -263,6 +268,7 @@ export function decodeProgramConfigAccount(
     bump: reader.readU8(),
     adminAuthority: reader.readPubkey(),
     trustedServerSigner: reader.readPubkey(),
+    settlementAuthorizationMode: reader.remainingBytes() === 16 ? reader.readU8() : 0,
     settlementPaused: reader.readBool(),
     maxBattlesPerBatch: reader.readU16(),
     maxRunsPerBatch: reader.readU16(),
