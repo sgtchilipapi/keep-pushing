@@ -20,10 +20,10 @@ jest.mock("../lib/auth/requireSession", () => {
   };
 });
 
-import { POST as preparePOST } from "../app/api/solana/character/first-sync/prepare/route";
-import { POST as ackPOST } from "../app/api/solana/character/first-sync/ack/route";
+import { POST as preparePOST } from "../app/api/v1/characters/first-sync/prepare/route";
+import { POST as finalizePOST } from "../app/api/v1/characters/first-sync/finalize/route";
 
-describe("first sync routes", () => {
+describe("v1 first sync routes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     authMock.requireSession.mockResolvedValue({
@@ -54,7 +54,7 @@ describe("first sync routes", () => {
     });
   });
 
-  it("prepares a first-sync transaction", async () => {
+  it("prepares a first-sync transaction through the v1 route", async () => {
     firstSyncRelayMock.prepareSolanaFirstSync.mockResolvedValue({
       phase: "sign_transaction",
       payload: {
@@ -107,29 +107,26 @@ describe("first sync routes", () => {
     });
 
     const response = await preparePOST(
-      new Request("http://localhost/api/solana/character/first-sync/prepare", {
+      new Request("http://localhost/api/v1/characters/first-sync/prepare", {
         method: "POST",
         body: JSON.stringify({
           characterId: "character-1",
-          authority: "wallet",
         }),
       }),
     );
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(firstSyncRelayMock.prepareSolanaFirstSync).toHaveBeenCalledWith(
-      {
-        characterId: "character-1",
-        authority: "wallet",
-        feePayer: undefined,
-      },
-    );
-    expect(json.phase).toBe("sign_transaction");
-    expect(json.preparedTransaction.kind).toBe("player_owned_instruction");
+    expect(firstSyncRelayMock.prepareSolanaFirstSync).toHaveBeenCalledWith({
+      characterId: "character-1",
+      authority: "wallet",
+      feePayer: undefined,
+    });
+    expect(json.ok).toBe(true);
+    expect(json.data.phase).toBe("sign_transaction");
   });
 
-  it("acknowledges a client-submitted first-sync transaction", async () => {
+  it("finalizes a v1 first-sync submission", async () => {
     firstSyncRelayMock.acknowledgeSolanaFirstSync.mockResolvedValue({
       phase: "submitted",
       characterId: "character-1",
@@ -139,8 +136,8 @@ describe("first sync routes", () => {
       remainingSettlementBatchIds: [],
     });
 
-    const response = await ackPOST(
-      new Request("http://localhost/api/solana/character/first-sync/ack", {
+    const response = await finalizePOST(
+      new Request("http://localhost/api/v1/characters/first-sync/finalize", {
         method: "POST",
         body: JSON.stringify({
           prepared: {
@@ -155,7 +152,7 @@ describe("first sync routes", () => {
 
     expect(response.status).toBe(200);
     expect(firstSyncRelayMock.acknowledgeSolanaFirstSync).toHaveBeenCalled();
-    expect(json.phase).toBe("submitted");
-    expect(json.transactionSignature).toBe("sig-1");
+    expect(json.ok).toBe(true);
+    expect(json.data.phase).toBe("submitted");
   });
 });

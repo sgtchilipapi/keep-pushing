@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState, type TouchEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import type {
-  AcknowledgeFirstSyncRouteResponse,
-  PrepareFirstSyncRouteResponse,
-} from "../../types/api/solana";
-import type {
   SettlementV1FinalizeData,
   SettlementV1PrepareData,
   SettlementV1ResponseEnvelope,
   SettlementV1PresignData,
 } from "../../types/api/settlementV1";
+import type {
+  CharacterCreateV1ResponseEnvelope,
+  CharacterFirstSyncV1FinalizeData,
+  CharacterFirstSyncV1PrepareData,
+} from "../../types/api/characters";
 import type {
   AccountMode,
   CharacterClassCatalogItem,
@@ -154,6 +155,7 @@ async function apiEnvelopeRequest<T>(
 
   const data = (await response.json().catch(() => null)) as
     | SettlementV1ResponseEnvelope<T>
+    | CharacterCreateV1ResponseEnvelope<T>
     | ApiEnvelopeErrorShape
     | null;
 
@@ -1960,8 +1962,8 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
   async function acknowledgePending(record: PendingSyncAckRecord) {
     if (record.kind === "first_sync") {
-      const response = await apiRequest<AcknowledgeFirstSyncRouteResponse>(
-        "/api/solana/character/first-sync/ack",
+      const response = await apiEnvelopeRequest<CharacterFirstSyncV1FinalizeData>(
+        "/api/v1/characters/first-sync/finalize",
         {
           method: "POST",
           body: JSON.stringify({
@@ -2049,19 +2051,23 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
     try {
       if (syncState.syncMode === "create_then_settle") {
         setStepMessage("Preparing first sync transaction");
-        const prepared = await apiRequest<PrepareFirstSyncRouteResponse>(
-          "/api/solana/character/first-sync/prepare",
+        const prepared = await apiEnvelopeRequest<CharacterFirstSyncV1PrepareData>(
+          "/api/v1/characters/first-sync/prepare",
           {
             method: "POST",
             body: JSON.stringify({
               characterId: character.characterId,
-              authority: props.walletPublicKey,
             }),
           },
         );
         if (prepared.phase !== "sign_transaction") {
           throw new Error(
             "Unexpected first sync response: expected sign_transaction phase.",
+          );
+        }
+        if (!prepared.preparedTransaction) {
+          throw new Error(
+            "Unexpected first sync response: prepared transaction was missing.",
           );
         }
 
@@ -2074,8 +2080,8 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
         try {
           setStepMessage("Acknowledging first sync");
-          const response = await apiRequest<AcknowledgeFirstSyncRouteResponse>(
-            "/api/solana/character/first-sync/ack",
+          const response = await apiEnvelopeRequest<CharacterFirstSyncV1FinalizeData>(
+            "/api/v1/characters/first-sync/finalize",
             {
               method: "POST",
               body: JSON.stringify({
