@@ -61,10 +61,18 @@ enum CharacterNameReservationStatus {
 
 model User {
   id               String                     @id @default(cuid())
+  primaryWalletAddress String?                @unique
+  walletProvider   String?
+  walletMode       String?
+  authProvider     String?
+  walletVerifiedAt DateTime?
+  lastLoginAt      DateTime?
   createdAt        DateTime                   @default(now())
   updatedAt        DateTime                   @updatedAt
   characters       Character[]
   nameReservations CharacterNameReservation[]
+  sessions         Session[]
+  txAuditLogs      TxAuditLog[]
 }
 
 model Character {
@@ -108,6 +116,7 @@ model Character {
   battleRecords    BattleRecord[]
   battleOutcomes   BattleOutcomeLedger[]
   settlementBatches SettlementBatch[]
+  settlementRequests SettlementRequest[]
   provisionalProgress CharacterProvisionalProgress?
   activeZoneRun    ActiveZoneRun?
   closedZoneRuns   ClosedZoneRunSummary[]
@@ -393,4 +402,87 @@ model SettlementSubmissionAttempt {
 
   @@unique([settlementBatchId, attemptNumber])
   @@index([settlementBatchId, status, attemptNumber])
+}
+
+model AuthNonce {
+  id               String    @id @default(cuid())
+  walletAddress    String
+  nonce            String
+  message          String
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  consumedBySessionId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([walletAddress, nonce])
+  @@index([expiresAt])
+  @@index([walletAddress, createdAt])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  walletAddress    String
+  tokenHash        String    @unique
+  issuedAt         DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastSeenAt       DateTime?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([walletAddress, revokedAt, expiresAt])
+}
+
+model SettlementRequest {
+  id               String    @id @default(cuid())
+  characterId      String
+  sessionId        String?
+  walletAddress    String
+  batchId          BigInt
+  batchHash        String
+  prepareMessageHash String
+  presignedMessageHash String?
+  status           String
+  invalidReasonCode String?
+  idempotencyKey   String
+  preparedAt       DateTime?
+  presignedAt      DateTime?
+  finalizedAt      DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  character        Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, idempotencyKey])
+  @@index([characterId, status, createdAt])
+  @@index([walletAddress, status, createdAt])
+}
+
+model TxAuditLog {
+  id               String    @id @default(cuid())
+  requestId        String?
+  sessionId        String?
+  userId           String?
+  walletAddress    String?
+  actionType       String
+  phase            String
+  status           String
+  errorCode        String?
+  httpStatus       Int?
+  chainSignature   String?
+  entityType       String?
+  entityId         String?
+  metadataJson     Json?
+  createdAt        DateTime  @default(now())
+  user             User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([actionType, createdAt])
+  @@index([walletAddress, createdAt])
+  @@index([requestId])
 }
