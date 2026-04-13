@@ -416,6 +416,8 @@ Reject unless all pass:
 
 ## Slice E — Transfers check/finalize
 
+Status: future work after the wallet-auth/session/create/settlement migration is complete. This slice is intentionally deferred and is not on the current critical path.
+
 ### Scope
 Add policy-gated transfer flow with backend-sponsored fee payer for all transfer modes; client signs and submits.
 
@@ -694,8 +696,8 @@ Fallback designs:
 - integrate Phantom `presignTransaction` callback path in UI.
 - add negative-path integration suite.
 
-## Phase 4 (2-3 days): transfers slice
-- implement `/v1/transfers/check|finalize` with policy matrix and audit.
+## Phase 4 (future work): transfers slice
+- defer `/v1/transfers/check|finalize` until the preceding create/settlement rollout is complete and stable in production-like validation.
 
 ## Phase 5 (2 days): hardening and rollout
 - rate limits, alerts, dashboards, docs, staged flag rollout.
