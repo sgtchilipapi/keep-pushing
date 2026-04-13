@@ -16,17 +16,20 @@ Baseline reviewed:
 ## 1.1 Character creation signer/funding model (hard constraint)
 - `CreateCharacter` requires `payer == authority` (`PlayerMustSelfFund`).
 - Current implication: character creation is client-paid/client-signed today.
-- Target-policy implication: keep client-only creation by default, but if product final requirements require sponsored creation for embedded wallets, add a program change to relax `payer == authority` and enforce equivalent anti-abuse checks at program + backend layers.
+- **Target requirement (updated): backend sponsor pays fees for character creation** while player still signs authority actions.
+- Required delta: relax `payer == authority` in program and replace with explicit `authority` signer + policy/rate controls.
 
 ## 1.2 Settlement signer model
 - `ApplyBattleSettlementBatchV1` requires `player_authority: Signer`, but does **not** include payer account in instruction context.
 - The program validates server attestation via ed25519 verification instruction(s) found in prior instructions sysvar scan.
-- Implication: settlement can be **sponsored on tx fee payer** (backend fee payer possible), while still requiring player signature on the transaction and canonical server attestation preinstruction.
+- **Target requirement (updated): settlement is backend-sponsored for fees; player signs authority, and server should not be required to provide extra business-authorization signatures beyond fee-payer duties.**
+- Required delta: remove/replace trusted-server ed25519 attestation requirement if it conflicts with “server does not need to sign” policy.
 
 ## 1.3 Canonical-message/signature scheme constraints
-- `ProgramConfigAccount` stores `trusted_server_signer`; settlement verifies attestation against this key.
+- Current program stores `trusted_server_signer` and verifies server attestation.
 - Canonical player authorization message supports both raw and wallet-text schemes; wallet-text is compatible with Phantom message UX.
-- Implication: presign flow must strictly bind payload/domain/signer scheme to prevent cross-request replay.
+- **Target requirement (updated): player-signed authorization should be sufficient for business authorization; backend sponsor participates for fee payment only.**
+- Implication: presign flow must strictly bind payload/domain/signer scheme to prevent replay, even if server-attestation signing is removed.
 
 ## 1.4 Embedded-wallet compatibility callout
 - Current app logic enforces `authority == feePayer` for settlement in backend route/service.
@@ -51,15 +54,15 @@ Baseline reviewed:
 - App auth: backend session (httpOnly cookie + sessions table + revocation + expiry).
 - Wallet UX: Phantom Connect login flow (embedded or injected) with one visible login path.
 - Character creation: client-only signing/sending allowed; backend prepare/finalize under session.
-- Settlement: prepare -> client calls Phantom `signAndSendTransaction` with `presignTransaction` callback -> backend presign verifies canonical tx and co-signs/sponsors -> finalize.
-- Transfers: check/finalize with policy gate; client-only where allowed, sponsored/escalated path where required.
+- Settlement: prepare -> client calls Phantom `signAndSendTransaction` with `presignTransaction` callback -> backend presign verifies canonical tx and applies sponsor fee-payer signature -> finalize.
+- Transfers: check/finalize with policy gate; all allowed transfer modes are backend sponsor-paid while client remains the authority signer.
 
 ## 2.3 Auth/session boundaries
 - Frontend trusted for UX orchestration only.
 - Backend trusted for:
   - wallet proof verification
   - session issuance/revocation
-  - settlement policy decision and presign co-signing
+  - settlement policy decision and sponsor presign approval
   - transfer policy checks
   - audit logging and idempotency
 - On-chain trusted for settlement application invariants and signer checks.
@@ -74,10 +77,10 @@ Baseline reviewed:
 
 | Action | Client signs | Backend signs | Fee payer | Allowed with embedded wallet | Notes |
 |---|---|---|---|---|---|
-| Character create | Yes (required) | No | Player wallet | Yes | Enforced by program `payer==authority` |
-| Settlement | Yes (`player_authority`) | Yes (attestation + tx co-sign when sponsoring) | Backend sponsor (target) | Yes (via `presignTransaction`) | Must pass canonical tx verification |
-| Transfer (unrestricted) | Yes | No | Player wallet | Yes | direct client path |
-| Transfer (restricted/policy-required) | Yes | Optional/Yes | Backend sponsor or policy-defined | Yes | routed through check->finalize policy |
+| Character create | Yes (required) | No (except sponsor fee-payer signature) | Backend sponsor | Yes | Requires program change to remove `payer==authority` |
+| Settlement | Yes (`player_authority`) | No business-signature (sponsor fee-payer only) | Backend sponsor | Yes (via `presignTransaction`) | Remove/replace server-attestation requirement if retained today |
+| Transfer (unrestricted) | Yes | No | Backend sponsor | Yes | client submits, backend pays |
+| Transfer (restricted/policy-required) | Yes | No business-signature (sponsor fee-payer only) | Backend sponsor | Yes | policy-gated but not server-authorized by signature |
 
 ---
 
@@ -94,9 +97,10 @@ Add explicit on-chain changes if needed to satisfy target Phantom Connect behavi
 - Backend verifiers in new `lib/solana/settlementPresign.ts`.
 
 ### Candidate program deltas (gated by incompatibility findings)
-- `create_character`: optional relaxation of `payer == authority` if sponsored embedded flow becomes mandatory.
-- settlement instruction envelope: explicit allowed signer/funder model versioning if current layout causes Phantom Connect callback incompatibility.
-- signature-domain versioning: add explicit domain version byte for forward-safe presign rules.
+- `create_character`: remove `payer == authority` and allow sponsor `payer` with player `authority` signer preserved.
+- `apply_battle_settlement_batch_v1`: remove mandatory trusted-server ed25519 attestation (or gate as optional version) so settlement does not require server business-signature.
+- transfer path (if program-mediated): enforce player authority signatures with sponsor payer and no server business-signature requirement.
+- signature-domain versioning: add explicit domain version byte for forward-safe replay protection under new signer model.
 
 ### Security controls
 - every program delta must preserve: character authority binding, anti-replay, and canonical payload integrity.
@@ -206,7 +210,7 @@ Move core routes from `userId` query/body to session-resolved identity and intro
 ## Slice C — Character create prepare/finalize (client-only submit path)
 
 ### Scope
-Refactor to `/v1/characters/create/prepare|finalize` using session identity and wallet binding; keep player-funded model.
+Refactor to `/v1/characters/create/prepare|finalize` using session identity and wallet binding with backend-sponsored fee payer (player signs authority only).
 
 ### Touchpoints
 - New routes: `app/api/v1/characters/create/prepare/route.ts`, `.../finalize/route.ts`
@@ -238,7 +242,7 @@ Refactor to `/v1/characters/create/prepare|finalize` using session identity and 
 - `FF_V1_CHARACTER_CREATE`.
 
 ### Acceptance criteria
-- Character creation remains fully compatible with on-chain `payer==authority`.
+- Character creation succeeds with backend sponsor fee payer and player authority signature only.
 - finalize is idempotent and returns prior result on retry.
 
 ---
@@ -246,7 +250,7 @@ Refactor to `/v1/characters/create/prepare|finalize` using session identity and 
 ## Slice D — Settlement prepare/presign/finalize with Phantom presign callback
 
 ### Scope
-Implement sponsored settlement pipeline aligned with Phantom embedded wallet flow.
+Implement sponsored settlement pipeline aligned with Phantom embedded wallet flow where backend pays fees and does not add business-authorization signatures.
 
 ### Touchpoints
 - New routes:
@@ -255,7 +259,7 @@ Implement sponsored settlement pipeline aligned with Phantom embedded wallet flo
   - `app/api/v1/settlement/finalize/route.ts`
 - Services:
   - evolve `lib/solana/settlementRelay.ts` (remove `authority==feePayer` coupling)
-  - add `lib/solana/settlementPresign.ts` (canonical decode/verify/co-sign)
+  - add `lib/solana/settlementPresign.ts` (canonical decode/verify/sponsor-fee-payer signing only)
   - add `lib/solana/settlementPolicy.ts`
 - Frontend:
   - `components/game/GameClient.tsx` settlement execution updated to `signAndSendTransaction(..., { presignTransaction })`
@@ -265,7 +269,7 @@ Implement sponsored settlement pipeline aligned with Phantom embedded wallet flo
 ### API contracts
 1. `POST /v1/settlement/prepare` -> returns canonical unsigned tx payload + `prepareRequestId` + expected invariants + presign challenge token.
 2. Phantom invokes presign callback with tx bytes -> client sends to `POST /v1/settlement/presign`.
-3. `/presign` verifies canonical tx checklist (below), co-signs/sponsors if valid, returns updated tx bytes.
+3. `/presign` verifies canonical tx checklist (below), applies sponsor fee-payer signature only if valid, returns updated tx bytes.
 4. Client sends tx; then `POST /v1/settlement/finalize` with `{ prepareRequestId, txSignature }`.
 
 ### Canonical transaction verification checklist (/presign)
@@ -274,7 +278,7 @@ Reject unless all pass:
 - one active settlement request in `PREPARED` state for `prepareRequestId`.
 - transaction message hash exactly matches prepared canonical hash.
 - instruction set:
-  - includes expected Runana settlement instruction only (plus allowed compute budget + ed25519 preinstruction pattern)
+  - includes expected Runana settlement instruction only (plus allowed compute budget pattern)
   - program id equals configured Runana program id
 - account metas/order match expected envelope derived server-side.
 - payload invariants match sealed batch: `batch_id/hash/nonce range/state hashes/season`.
@@ -323,7 +327,7 @@ Reject unless all pass:
 ## Slice E — Transfers check/finalize
 
 ### Scope
-Add policy-gated transfer flow with client-only fast path and restricted/sponsored escalation.
+Add policy-gated transfer flow with backend-sponsored fee payer for all transfer modes; client signs and submits.
 
 ### Touchpoints
 - Routes: `app/api/v1/transfers/check/route.ts`, `.../finalize/route.ts`
@@ -332,7 +336,7 @@ Add policy-gated transfer flow with client-only fast path and restricted/sponsor
 - Types: `types/api/transfers.ts`
 
 ### API contracts
-- `/v1/transfers/check`: evaluates transfer intent and returns `mode: client_only | sponsored_required | blocked` plus constraints.
+- `/v1/transfers/check`: evaluates transfer intent and returns sponsor policy + constraints (all allowed modes are sponsor-paid).
 - `/v1/transfers/finalize`: records/validates confirmed transfer tx and updates audit trail.
 
 ### Data migrations
@@ -527,7 +531,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 2. Backend seals/loads batch, builds canonical unsigned transaction template, stores `SettlementRequest(PREPARED)` with hash-bound invariants.
 3. Client invokes Phantom Connect send flow and supplies `presignTransaction` callback.
 4. Callback posts tx bytes + `prepareRequestId` to `/v1/settlement/presign`.
-5. Backend verifies checklist, adds sponsor/server signatures if valid, stores presign hash + status `PRESIGNED`, returns updated tx bytes.
+5. Backend verifies checklist, adds sponsor fee-payer signature if valid, stores presign hash + status `PRESIGNED`, returns updated tx bytes.
 6. Phantom submits transaction.
 7. Client posts `/v1/settlement/finalize` with `prepareRequestId` + `txSignature`.
 8. Backend confirms chain result, commits settlement cursor/batch status, writes audit records, returns terminal response.
@@ -555,7 +559,7 @@ Cross-cutting production-readiness controls for all v1 flows.
    - Mitigation: ship audit + metrics before enabling broad flags.
 
 Fallback designs:
-- If a blocker appears, implement the missing requirement by modifying runana-program + backend/client in the same milestone, rather than shipping a degraded non-target behavior.
+- If a blocker appears, modify runana-program + backend/client to preserve the target sponsor-paid + player-signed model across create/settlement/transfers.
 
 ---
 
@@ -575,7 +579,7 @@ Fallback designs:
 
 ## Phase 2 (2-3 days): character create v1 slice
 - implement `/v1/characters/create/prepare|finalize` and UI switch.
-- keep player-funded invariant explicit.
+- enforce sponsor-paid fee model with player authority signature only.
 
 ## Phase 3 (4-6 days): settlement presign slice (critical path)
 - implement `/v1/settlement/prepare|presign|finalize` + canonical tx verifier + sponsor signing.
@@ -604,9 +608,9 @@ Fallback designs:
 - [ ] Phantom Connect is the only visible login path.
 - [ ] Nonce replay blocked and covered by tests.
 - [ ] Session required on all v1 game-affecting routes.
-- [ ] Character create uses v1 prepare/finalize and remains player-funded.
-- [ ] Settlement uses prepare/presign/finalize with sponsored fee payer support.
-- [ ] Transfer check/finalize policy path live.
+- [ ] Character create uses v1 prepare/finalize with backend sponsor fee payer.
+- [ ] Settlement uses prepare/presign/finalize with backend sponsor fee payer and no server business-signature requirement.
+- [ ] Transfer check/finalize policy path live with backend sponsor fee payer.
 - [ ] Structured error codes documented and returned consistently.
 - [ ] Rate limiting active on auth + settlement + transfer routes.
 - [ ] Audit log populated for all tx/auth critical events.
