@@ -2,7 +2,7 @@
 
 ## 0) Purpose and baseline
 
-This document is the execution plan to move `keep-pushing` from the current extension-style wallet + anonymous user model to a Phantom Connect + backend-authenticated + session-gated architecture, while preserving required gameplay behavior and aligning with `runana-program-validation` signer constraints.
+This document is the execution plan to move `keep-pushing` from the current extension-style wallet + anonymous user model to a Phantom Connect + backend-authenticated + session-gated architecture, while preserving required gameplay behavior and aligning with `runana-program-validation` signer constraints. **If the target product behavior conflicts with current program constraints, this plan prioritizes target behavior and includes explicit runana-program changes.**
 
 Baseline reviewed:
 - `docs/phantom-connect-gap-analysis-2026-04-13.md`
@@ -11,11 +11,12 @@ Baseline reviewed:
 
 ---
 
-## 1) Program-constraint findings from `runana-program-validation` (must drive design)
+## 1) Program findings from `runana-program-validation` + required deltas to satisfy target behavior
 
 ## 1.1 Character creation signer/funding model (hard constraint)
 - `CreateCharacter` requires `payer == authority` (`PlayerMustSelfFund`).
-- Implication: character creation **must remain client-paid/client-signed**; do not design sponsored fee payer for this instruction.
+- Current implication: character creation is client-paid/client-signed today.
+- Target-policy implication: keep client-only creation by default, but if product final requirements require sponsored creation for embedded wallets, add a program change to relax `payer == authority` and enforce equivalent anti-abuse checks at program + backend layers.
 
 ## 1.2 Settlement signer model
 - `ApplyBattleSettlementBatchV1` requires `player_authority: Signer`, but does **not** include payer account in instruction context.
@@ -30,6 +31,10 @@ Baseline reviewed:
 ## 1.4 Embedded-wallet compatibility callout
 - Current app logic enforces `authority == feePayer` for settlement in backend route/service.
 - This is incompatible with sponsored settlement objective and unnecessary per on-chain settlement instruction requirements.
+
+## 1.5 Program change policy for this plan
+- **Desired implementation prevails.** If any runtime/program constraint blocks target Phantom Connect behavior, the plan adds a runana-program change slice rather than degrading product behavior.
+- Program changes are first-class deliverables (IDL/version bump, migration/backfill, compatibility window, and chain fixture updates).
 
 ---
 
@@ -77,6 +82,39 @@ Baseline reviewed:
 ---
 
 ## 3) Vertical slices (execution order)
+
+## Slice 0 — Runana program alignment (only where target behavior is blocked)
+
+### Scope
+Add explicit on-chain changes if needed to satisfy target Phantom Connect behavior without compromising trust guarantees.
+
+### Touchpoints
+- Program source from artifact baseline (`programs/runana-program/src/lib.rs` in runana repo).
+- Client builders in `lib/solana/runana*`, `lib/solana/*Instructions.ts`, `lib/solana/settlementTransactionAssembly.ts`.
+- Backend verifiers in new `lib/solana/settlementPresign.ts`.
+
+### Candidate program deltas (gated by incompatibility findings)
+- `create_character`: optional relaxation of `payer == authority` if sponsored embedded flow becomes mandatory.
+- settlement instruction envelope: explicit allowed signer/funder model versioning if current layout causes Phantom Connect callback incompatibility.
+- signature-domain versioning: add explicit domain version byte for forward-safe presign rules.
+
+### Security controls
+- every program delta must preserve: character authority binding, anti-replay, and canonical payload integrity.
+- any payer relaxation must include anti-spam constraints (rent funding limits + backend policy + per-wallet cooldown).
+
+### Test strategy
+- runana program unit/integration tests for new signer model and replay guarantees.
+- app integration tests against upgraded IDL + fixtures before enabling feature flags.
+
+### Rollout
+- introduce `RUNANA_PROGRAM_VERSION` compatibility gate in backend and client.
+- support dual-version decoding during transition window; remove old path post-migration.
+
+### Acceptance criteria
+- Target Phantom Connect flow works end-to-end in embedded mode with no behavior downgrade.
+- Program invariants remain provably enforced by tests.
+
+---
 
 ## Slice A — Auth foundation: nonce + verify + sessions
 
@@ -517,11 +555,15 @@ Cross-cutting production-readiness controls for all v1 flows.
    - Mitigation: ship audit + metrics before enabling broad flags.
 
 Fallback designs:
-- If sponsored fee payer path faces blocker, temporary fallback is client-paid settlement for injected wallets only, but keep presign verification scaffolding and do not expose as final embedded-wallet solution.
+- If a blocker appears, implement the missing requirement by modifying runana-program + backend/client in the same milestone, rather than shipping a degraded non-target behavior.
 
 ---
 
 ## 8) Implementation timeline and critical path
+
+## Phase -1 (1-3 days, conditional): program delta design
+- if incompatibility exists, land runana-program spec/IDL change proposal first.
+- define migration and compatibility matrix before app route work begins.
 
 ## Phase 0 (1-2 days): foundations
 - add DB models/migrations for auth/session/request/audit.
@@ -548,11 +590,12 @@ Fallback designs:
 - disable legacy anon/userId frontend path after stable canary.
 
 ### Critical path dependencies
-1. DB schema (sessions/nonces/settlement_requests)
-2. session middleware
-3. settlement canonical presign verifier
-4. frontend Phantom Connect callback orchestration
-5. integration tests + observability
+1. (Conditional) runana-program delta + IDL/version readiness
+2. DB schema (sessions/nonces/settlement_requests)
+3. session middleware
+4. settlement canonical presign verifier
+5. frontend Phantom Connect callback orchestration
+6. integration tests + observability
 
 ---
 
