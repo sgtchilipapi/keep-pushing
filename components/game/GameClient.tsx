@@ -42,6 +42,8 @@ import {
   getPhantomProvider,
   getWalletAvailability,
   normalizeWalletError,
+  autoConnectPhantom,
+  subscribeWalletEvents,
   signAuthorizationMessageUtf8,
   signAndSendPreparedPlayerOwnedTransaction,
   type PhantomSolanaProvider,
@@ -2738,14 +2740,19 @@ export default function GameClient() {
     let cancelled = false;
     setWalletConnectionStatus("checking_trusted");
 
-    void connectPhantom({ onlyIfTrusted: true })
-      .then(({ publicKey }) => {
+    void autoConnectPhantom()
+      .then((result) => {
         if (cancelled) {
           return;
         }
-        setWalletPublicKey(publicKey);
-        setWalletConnectionStatus("connected");
-        setWalletError(null);
+        if (result) {
+          setWalletPublicKey(result.publicKey);
+          setWalletConnectionStatus("connected");
+          setWalletError(null);
+        } else {
+          setWalletPublicKey(null);
+          setWalletConnectionStatus("disconnected");
+        }
       })
       .catch(() => {
         if (cancelled) {
@@ -2761,53 +2768,42 @@ export default function GameClient() {
   }, []);
 
   useEffect(() => {
-    const provider = getPhantomProvider();
-    if (
-      provider === null ||
-      typeof provider.on !== "function" ||
-      typeof provider.removeListener !== "function"
-    ) {
-      return;
-    }
+    let cancelled = false;
+    let unsubscribe: () => void = () => {};
 
-    const handleConnect = () => {
-      const publicKey = provider.publicKey?.toBase58() ?? null;
-      setWalletPublicKey(publicKey);
-      setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
-    };
-
-    const handleDisconnect = () => {
-      setWalletPublicKey(null);
-      setWalletConnectionStatus("disconnected");
-    };
-
-    const handleAccountChanged = (...args: unknown[]) => {
-      const [nextPublicKey] = args;
-      if (
-        nextPublicKey !== null &&
-        typeof nextPublicKey === "object" &&
-        nextPublicKey !== undefined &&
-        "toBase58" in nextPublicKey &&
-        typeof (nextPublicKey as { toBase58?: unknown }).toBase58 === "function"
-      ) {
-        setWalletPublicKey(
-          (nextPublicKey as { toBase58(): string }).toBase58(),
-        );
-        setWalletConnectionStatus("connected");
+    void subscribeWalletEvents({
+      onConnect: (publicKey) => {
+        if (cancelled) {
+          return;
+        }
+        setWalletPublicKey(publicKey);
+        setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
+      },
+      onDisconnect: () => {
+        if (cancelled) {
+          return;
+        }
+        setWalletPublicKey(null);
+        setWalletConnectionStatus("disconnected");
+      },
+      onAccountChanged: (publicKey) => {
+        if (cancelled) {
+          return;
+        }
+        setWalletPublicKey(publicKey);
+        setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
+      },
+    }).then((cleanup) => {
+      if (cancelled) {
+        cleanup();
         return;
       }
-
-      handleDisconnect();
-    };
-
-    provider.on("connect", handleConnect);
-    provider.on("disconnect", handleDisconnect);
-    provider.on("accountChanged", handleAccountChanged);
+      unsubscribe = cleanup;
+    });
 
     return () => {
-      provider.removeListener?.("connect", handleConnect);
-      provider.removeListener?.("disconnect", handleDisconnect);
-      provider.removeListener?.("accountChanged", handleAccountChanged);
+      cancelled = true;
+      unsubscribe();
     };
   }, []);
 

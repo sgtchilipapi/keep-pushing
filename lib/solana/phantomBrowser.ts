@@ -1,3 +1,5 @@
+'use client';
+
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import type { PreparedPlayerOwnedTransaction } from '../../types/api/solana';
@@ -9,6 +11,8 @@ import {
 export type WalletAvailability = 'unknown' | 'installed' | 'not_installed';
 export type WalletConnectionStatus = 'checking_trusted' | 'disconnected' | 'connecting' | 'connected';
 export type WalletActionStatus = 'idle' | 'signing_message' | 'signing_transaction';
+
+type PhantomConnectProvider = 'google' | 'apple' | 'phantom' | 'injected' | 'deeplink';
 
 export interface PhantomPublicKeyLike {
   toBase58(): string;
@@ -51,6 +55,221 @@ export type PhantomWindowLike = {
   solana?: unknown;
 };
 
+type BrowserSdkAddressType = {
+  solana: string;
+};
+
+type BrowserSdkModule = {
+  AddressType: BrowserSdkAddressType;
+  BrowserSDK: new (config: {
+    providers: PhantomConnectProvider[];
+    addressTypes: string[];
+    appId?: string;
+    autoConnect?: boolean;
+  }) => BrowserSDKLike;
+  base64urlDecode(value: string): Uint8Array;
+  base64urlEncode(value: Uint8Array): string;
+};
+
+type BrowserSDKLike = {
+  solana: {
+    publicKey: string | null;
+    isConnected: boolean;
+    signMessage(message: string | Uint8Array): Promise<{
+      signature: Uint8Array;
+      publicKey: string;
+    }>;
+    signTransaction(
+      transaction: Transaction | VersionedTransaction,
+    ): Promise<Transaction | VersionedTransaction>;
+    signAndSendTransaction(
+      transaction: Transaction | VersionedTransaction,
+      options?: {
+        presignTransaction?: (transaction: string) => Promise<string>;
+      },
+    ): Promise<{ signature: string }>;
+  };
+  connect(options: { provider: PhantomConnectProvider }): Promise<unknown>;
+  disconnect(): Promise<void>;
+  autoConnect(): Promise<void>;
+  on(event: string, callback: (...args: unknown[]) => void): void;
+  off(event: string, callback: (...args: unknown[]) => void): void;
+};
+
+type BrowserSdkProvider = PhantomSolanaProvider & {
+  __phantomSdk: BrowserSDKLike;
+};
+
+const PHANTOM_CONNECT_APP_ID = process.env.NEXT_PUBLIC_PHANTOM_APP_ID ?? '';
+const PHANTOM_CONNECT_DEFAULT_PROVIDER = (process.env.NEXT_PUBLIC_PHANTOM_CONNECT_PROVIDER ??
+  'google') as PhantomConnectProvider;
+
+let browserSdkPromise: Promise<BrowserSDKLike | null> | null = null;
+let browserSdkModulePromise: Promise<BrowserSdkModule | null> | null = null;
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function getRuntimeModuleLoader(): (<T>(specifier: string) => Promise<T>) | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return new Function('specifier', 'return import(specifier)') as <T>(specifier: string) => Promise<T>;
+}
+
+async function loadBrowserSdkModule(): Promise<BrowserSdkModule | null> {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  if (!browserSdkModulePromise) {
+    const importModule = getRuntimeModuleLoader();
+    browserSdkModulePromise = importModule
+      ? importModule<BrowserSdkModule>('https://esm.sh/@phantom/browser-sdk@2.0.1').catch(() => null)
+      : Promise.resolve(null);
+  }
+
+  return browserSdkModulePromise;
+}
+
+async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  if (!browserSdkPromise) {
+    browserSdkPromise = loadBrowserSdkModule()
+      .then((sdkModule) => {
+        if (!sdkModule) {
+          return null;
+        }
+
+        const { BrowserSDK, AddressType } = sdkModule;
+        const providers: PhantomConnectProvider[] = PHANTOM_CONNECT_APP_ID
+          ? ['google', 'apple', 'phantom', 'injected', 'deeplink']
+          : ['injected'];
+        return new BrowserSDK({
+          providers,
+          addressTypes: [AddressType.solana],
+          appId: PHANTOM_CONNECT_APP_ID || undefined,
+        });
+      })
+      .catch(() => null);
+  }
+
+  return browserSdkPromise;
+}
+
+function createSdkPublicKey(publicKey: string): PhantomPublicKeyLike {
+  return { toBase58: () => publicKey };
+}
+
+async function resolveSdkPublicKey(sdk: BrowserSDKLike): Promise<string> {
+  const publicKey = sdk.solana.publicKey;
+  if (!publicKey) {
+    throw new Error('Phantom Connect did not return a public key.');
+  }
+  return publicKey;
+}
+
+function createSdkProvider(sdk: BrowserSDKLike, publicKey: string): BrowserSdkProvider {
+  return {
+    __phantomSdk: sdk,
+    isPhantom: true,
+    publicKey: createSdkPublicKey(publicKey),
+    async connect() {
+      return { publicKey: createSdkPublicKey(publicKey) };
+    },
+    async disconnect() {
+      await sdk.disconnect();
+    },
+    async signMessage(message: Uint8Array, display: 'utf8' | 'hex' = 'utf8') {
+      const text = display === 'hex' ? bytesToHex(message) : new TextDecoder().decode(message);
+      const signed = await sdk.solana.signMessage(text);
+      return { publicKey: createSdkPublicKey(publicKey), signature: signed.signature };
+    },
+    async signTransaction(transaction: Transaction | VersionedTransaction) {
+      return sdk.solana.signTransaction(transaction);
+    },
+    async signAndSendTransaction(
+      transaction: Transaction | VersionedTransaction,
+      options?: {
+        presignTransaction?: (
+          transaction: Transaction | VersionedTransaction,
+        ) => Promise<Transaction | VersionedTransaction>;
+      },
+    ) {
+      const presignTransaction = options?.presignTransaction;
+      const result = await sdk.solana.signAndSendTransaction(transaction, {
+        presignTransaction: presignTransaction
+          ? async (encodedTransaction: string) => {
+              const sdkModule = await browserSdkModulePromise;
+              if (!sdkModule) {
+                throw new Error('Phantom Connect SDK is not available.');
+              }
+
+              const transactionBytes = sdkModule.base64urlDecode(encodedTransaction);
+              const deserialized = VersionedTransaction.deserialize(transactionBytes);
+              const presigned = await presignTransaction(deserialized);
+              const serialized =
+                presigned instanceof Transaction
+                  ? presigned.serialize({
+                      requireAllSignatures: false,
+                      verifySignatures: false,
+                    })
+                  : presigned.serialize();
+              return sdkModule.base64urlEncode(serialized);
+            }
+          : undefined,
+      });
+
+      if (typeof result.signature !== 'string' || result.signature.length === 0) {
+        throw new Error('Phantom did not return a transaction signature.');
+      }
+      return result;
+    },
+    on(event: 'connect' | 'disconnect' | 'accountChanged', handler: (...args: unknown[]) => void) {
+      if (event === 'accountChanged') {
+        return;
+      }
+      if (typeof (sdk as { on?: unknown }).on === 'function') {
+        (sdk as { on(event: string, handler: (...args: unknown[]) => void): void }).on(event, handler);
+      }
+    },
+    removeListener(
+      event: 'connect' | 'disconnect' | 'accountChanged',
+      handler: (...args: unknown[]) => void,
+    ) {
+      if (event === 'accountChanged') {
+        return;
+      }
+      if (typeof (sdk as { off?: unknown }).off === 'function') {
+        (sdk as { off(event: string, handler: (...args: unknown[]) => void): void }).off(event, handler);
+      }
+    },
+  };
+}
+
+async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvider; publicKey: string }> {
+  const sdk = await loadBrowserSdk();
+  if (!sdk) {
+    throw new Error('Phantom Connect SDK is not available.');
+  }
+
+  let provider: PhantomConnectProvider = PHANTOM_CONNECT_DEFAULT_PROVIDER;
+  if (!PHANTOM_CONNECT_APP_ID) {
+    provider = 'injected';
+  } else if (provider === 'injected' && getPhantomProvider() === null) {
+    provider = 'google';
+  }
+
+  await sdk.connect({ provider });
+  const publicKey = await resolveSdkPublicKey(sdk);
+  return { provider: createSdkProvider(sdk, publicKey), publicKey };
+}
+
 export function resolvePhantomProvider(source: PhantomWindowLike | undefined): PhantomSolanaProvider | null {
   if (source === undefined) {
     return null;
@@ -87,6 +306,9 @@ export function getPhantomProvider(): PhantomSolanaProvider | null {
 }
 
 export function getWalletAvailability(): WalletAvailability {
+  if (PHANTOM_CONNECT_APP_ID) {
+    return 'installed';
+  }
   return getPhantomProvider() === null ? 'not_installed' : 'installed';
 }
 
@@ -111,6 +333,10 @@ export async function connectPhantom(args: { onlyIfTrusted?: boolean } = {}): Pr
   provider: PhantomSolanaProvider;
   publicKey: string;
 }> {
+  if (PHANTOM_CONNECT_APP_ID) {
+    return connectWithBrowserSdk();
+  }
+
   const provider = getPhantomProvider();
   if (provider === null) {
     throw new Error('Phantom wallet is not installed.');
@@ -126,12 +352,112 @@ export async function connectPhantom(args: { onlyIfTrusted?: boolean } = {}): Pr
 }
 
 export async function disconnectPhantom(): Promise<void> {
+  if (PHANTOM_CONNECT_APP_ID) {
+    const sdk = await loadBrowserSdk();
+    if (sdk && typeof (sdk as { disconnect?: unknown }).disconnect === 'function') {
+      await (sdk as { disconnect(): Promise<void> }).disconnect();
+    }
+    return;
+  }
+
   const provider = getPhantomProvider();
   if (provider === null) {
     return;
   }
 
   await provider.disconnect();
+}
+
+export async function autoConnectPhantom(): Promise<{
+  provider: PhantomSolanaProvider;
+  publicKey: string;
+} | null> {
+  if (PHANTOM_CONNECT_APP_ID) {
+    const sdk = await loadBrowserSdk();
+    if (!sdk) {
+      return null;
+    }
+    if (typeof (sdk as { autoConnect?: unknown }).autoConnect === 'function') {
+      await (sdk as { autoConnect(): Promise<void> }).autoConnect();
+    }
+    if (!sdk.solana.isConnected) {
+      return null;
+    }
+    const publicKey = await resolveSdkPublicKey(sdk);
+    return { provider: createSdkProvider(sdk, publicKey), publicKey };
+  }
+
+  try {
+    return await connectPhantom({ onlyIfTrusted: true });
+  } catch {
+    return null;
+  }
+}
+
+export async function subscribeWalletEvents(handlers: {
+  onConnect?: (publicKey: string | null) => void;
+  onDisconnect?: () => void;
+  onAccountChanged?: (publicKey: string | null) => void;
+}): Promise<() => void> {
+  if (PHANTOM_CONNECT_APP_ID) {
+    const sdk = await loadBrowserSdk();
+    if (!sdk || typeof (sdk as { on?: unknown }).on !== 'function') {
+      return () => undefined;
+    }
+
+    const handleConnect = async () => {
+      const publicKey = sdk.solana.isConnected ? await resolveSdkPublicKey(sdk) : null;
+      handlers.onConnect?.(publicKey);
+    };
+    const handleDisconnect = () => handlers.onDisconnect?.();
+
+    (sdk as { on(event: string, handler: (...args: unknown[]) => void): void }).on('connect', handleConnect);
+    (sdk as { on(event: string, handler: (...args: unknown[]) => void): void }).on('disconnect', handleDisconnect);
+
+    return () => {
+      sdk.off('connect', handleConnect);
+      sdk.off('disconnect', handleDisconnect);
+    };
+  }
+
+  const provider = getPhantomProvider();
+  if (
+    provider === null ||
+    typeof provider.on !== 'function' ||
+    typeof provider.removeListener !== 'function'
+  ) {
+    return () => undefined;
+  }
+
+  const handleConnect = () => {
+    const publicKey = provider.publicKey?.toBase58() ?? null;
+    handlers.onConnect?.(publicKey);
+  };
+  const handleDisconnect = () => handlers.onDisconnect?.();
+  const handleAccountChanged = (...args: unknown[]) => {
+    const [nextPublicKey] = args;
+    if (
+      nextPublicKey !== null &&
+      typeof nextPublicKey === 'object' &&
+      nextPublicKey !== undefined &&
+      'toBase58' in nextPublicKey &&
+      typeof (nextPublicKey as { toBase58?: unknown }).toBase58 === 'function'
+    ) {
+      handlers.onAccountChanged?.((nextPublicKey as { toBase58(): string }).toBase58());
+      return;
+    }
+    handlers.onAccountChanged?.(null);
+  };
+
+  provider.on('connect', handleConnect);
+  provider.on('disconnect', handleDisconnect);
+  provider.on('accountChanged', handleAccountChanged);
+
+  return () => {
+    provider.removeListener?.('connect', handleConnect);
+    provider.removeListener?.('disconnect', handleDisconnect);
+    provider.removeListener?.('accountChanged', handleAccountChanged);
+  };
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
