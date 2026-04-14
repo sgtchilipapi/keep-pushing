@@ -103,6 +103,7 @@ type BrowserSdkProvider = PhantomSolanaProvider & {
 const PHANTOM_CONNECT_APP_ID = process.env.NEXT_PUBLIC_PHANTOM_APP_ID ?? '';
 const PHANTOM_CONNECT_DEFAULT_PROVIDER = (process.env.NEXT_PUBLIC_PHANTOM_CONNECT_PROVIDER ??
   'google') as PhantomConnectProvider;
+const PHANTOM_CONNECT_REDIRECT_URL = process.env.NEXT_PUBLIC_PHANTOM_CONNECT_REDIRECT_URL ?? '';
 
 let browserSdkPromise: Promise<BrowserSDKLike | null> | null = null;
 let browserSdkModulePromise: Promise<BrowserSdkModule | null> | null = null;
@@ -111,12 +112,16 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function getRuntimeModuleLoader(): (<T>(specifier: string) => Promise<T>) | null {
-  if (typeof window === 'undefined') {
-    return null;
+function resolveBrowserRedirectUrl(): string | undefined {
+  if (PHANTOM_CONNECT_REDIRECT_URL.trim().length > 0) {
+    return PHANTOM_CONNECT_REDIRECT_URL.trim();
   }
 
-  return new Function('specifier', 'return import(specifier)') as <T>(specifier: string) => Promise<T>;
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  return `${window.location.origin}/`;
 }
 
 async function loadBrowserSdkModule(): Promise<BrowserSdkModule | null> {
@@ -125,10 +130,9 @@ async function loadBrowserSdkModule(): Promise<BrowserSdkModule | null> {
   }
 
   if (!browserSdkModulePromise) {
-    const importModule = getRuntimeModuleLoader();
-    browserSdkModulePromise = importModule
-      ? importModule<BrowserSdkModule>('https://esm.sh/@phantom/browser-sdk@2.0.1').catch(() => null)
-      : Promise.resolve(null);
+    browserSdkModulePromise = import('@phantom/browser-sdk')
+      .then((module) => module as unknown as BrowserSdkModule)
+      .catch(() => null);
   }
 
   return browserSdkModulePromise;
@@ -154,6 +158,9 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
           providers,
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
+          authOptions: {
+            redirectUrl: resolveBrowserRedirectUrl(),
+          },
         });
       })
       .catch(() => null);
