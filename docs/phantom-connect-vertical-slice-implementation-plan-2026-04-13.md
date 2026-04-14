@@ -8,6 +8,9 @@ Decision clarified for this plan:
 - Anonymous accounts are removed from scope.
 - This migration is a deliberate breaking change.
 - There is no legacy anon compatibility window and no anon progression migration/backfill requirement.
+- Normal gameplay settlement is now planned as **per-run**, not multi-run batching.
+- The current on-chain settlement instruction remains batch-shaped for now, but the app/backend contract becomes run-centric and deployment config clamps `max_runs_per_batch = 1`.
+- First sync is no longer a special atomic create-plus-settle transaction in the target design.
 
 Baseline reviewed:
 - `docs/phantom-connect-gap-analysis-2026-04-13.md`
@@ -46,7 +49,7 @@ Baseline reviewed:
 
 ## 1.3 Canonical-message/signature scheme constraints
 - `ProgramConfigAccount` and `InitializeProgramConfigArgs` currently store `trusted_server_signer`.
-- `canonical_player_authorization_message(...)` and wallet-text support already exist in `lib.rs`, which is useful for Phantom-compatible message prompts.
+- `canonical_player_authorization_message(...)` and wallet-text support already exist in `lib.rs`, which is useful for Phantom-compatible message approval text.
 - The current codepath does not yet make that player permit the sole settlement authorization primitive.
 - **Target requirement (updated): player-signed authorization should be sufficient for business authorization; backend sponsor participates for fee payment only.**
 - Required delta:
@@ -63,6 +66,7 @@ Baseline reviewed:
 - `programs/runana-program/src/lib.rs`
   - update `CreateCharacter<'info>` and `InitializeCharacterZoneProgressPage<'info>` to allow distinct `payer` and `authority`
   - extend `ProgramConfigAccount` / `InitializeProgramConfigArgs` with `settlement_authorization_mode`
+  - preserve the existing settlement instruction shape, but drive normal gameplay through one-run settlements by configuring `max_runs_per_batch = 1`
   - add a `verify_player_authorization_preinstruction(...)` path that validates the player's ed25519 permit against `canonical_player_authorization_message(...)`
   - replace direct calls to `verify_server_attestation_preinstruction(...)` inside `apply_battle_settlement_batch_v1(...)` with a mode-aware `verify_settlement_authorization(...)`
   - keep `player_authority: Signer<'info>` as the gameplay authority check; do not add a settlement payer account
@@ -80,6 +84,7 @@ Baseline reviewed:
   - move server-attestation mismatch coverage under explicit dual-mode compatibility tests only
 - `migrations/deploy.ts`
   - initialize the new program-config authorization mode when bootstrapping local deployments
+  - set `max_runs_per_batch = 1` for the per-run settlement rollout
 
 ## 1.6 Program change policy for this plan
 - **Desired implementation prevails.** If any runtime/program constraint blocks target Phantom Connect behavior, the plan adds a runana-program change slice rather than degrading product behavior.
@@ -100,7 +105,8 @@ Baseline reviewed:
 - App auth: backend session (httpOnly cookie + sessions table + revocation + expiry).
 - Wallet UX: Phantom Connect login flow (embedded or injected) with one visible login path.
 - Character creation: client-only signing/sending allowed; backend prepare/finalize under session.
-- Settlement: prepare -> client calls Phantom `signAndSendTransaction` with `presignTransaction` callback -> backend presign verifies canonical tx and applies sponsor fee-payer signature -> finalize.
+- Settlement: each completed run becomes one pending settlement item; the client automatically starts settlement for the oldest pending run via prepare -> embedded Phantom `signAndSendTransaction` with `presignTransaction` callback -> backend presign -> finalize.
+- First sync: character creation and first settlement are two separate transactions; there is no dedicated atomic create-plus-settle special case in the target state.
 - Transfers: check/finalize with policy gate; all allowed transfer modes are backend sponsor-paid while client remains the authority signer.
 - No anonymous login or legacy anonymous-gameplay path remains in the target state.
 
@@ -125,9 +131,16 @@ Baseline reviewed:
 | Action | Client signs | Backend signs | Fee payer | Allowed with embedded wallet | Notes |
 |---|---|---|---|---|---|
 | Character create | Yes (required) | No (except sponsor fee-payer signature) | Backend sponsor | Yes | Requires program change to remove `payer==authority` |
-| Settlement | Yes (`player_authority`) | No business-signature (sponsor fee-payer only) | Backend sponsor | Yes (via `presignTransaction`) | Remove/replace server-attestation requirement if retained today |
+| Settlement | Yes (`player_authority`) | No business-signature (sponsor fee-payer only) | Backend sponsor | Yes (via `presignTransaction`) | One completed run per settlement; keep current batch instruction only as a single-run transport with `max_runs_per_batch = 1` |
 | Transfer (unrestricted) | Yes | No | Backend sponsor | Yes | client submits, backend pays |
 | Transfer (restricted/policy-required) | Yes | No business-signature (sponsor fee-payer only) | Backend sponsor | Yes | policy-gated but not server-authorized by signature |
+
+## 2.6 Per-run settlement policy
+- The app/backend public contract becomes run-centric even though the on-chain instruction remains batch-shaped for compatibility.
+- Settlement ordering remains FIFO by committed sequence: the oldest pending run must settle first.
+- The client automatically attempts settlement after each completed run, but if older unsettled runs exist the automatic flow targets the oldest pending run, not necessarily the run that just ended.
+- Each character may accumulate at most 10 pending unsettled runs; starting another run is blocked once the cap is reached.
+- If the embedded signing/send step does not complete, or send succeeds but finalize does not complete, the run stays pending and recovery continues through the normal retry/reconcile path.
 
 ---
 
@@ -334,13 +347,14 @@ Refactor to `/v1/characters/create/prepare|finalize` using session identity and 
 ### Acceptance criteria
 - Character creation succeeds with backend sponsor fee payer and player authority signature only.
 - finalize is idempotent and returns prior result on retry.
+- Character creation no longer depends on a dedicated first-sync atomic create-plus-settle flow; any initial run settlement proceeds through Slice D as a separate transaction.
 
 ---
 
-## Slice D — Settlement prepare/presign/finalize with Phantom presign callback
+## Slice D — Per-run settlement prepare/presign/finalize with Phantom presign callback
 
 ### Scope
-Implement sponsored settlement pipeline aligned with Phantom embedded wallet flow where backend pays fees and does not add business-authorization signatures.
+Implement sponsored per-run settlement aligned with Phantom embedded wallet flow where backend pays fees, the player remains the only business authorizer, and the app settles exactly one closed run at a time.
 
 ### Touchpoints
 - New routes:
@@ -348,19 +362,21 @@ Implement sponsored settlement pipeline aligned with Phantom embedded wallet flo
   - `app/api/v1/settlement/presign/route.ts`
   - `app/api/v1/settlement/finalize/route.ts`
 - Services:
-  - evolve `lib/solana/settlementRelay.ts` (remove `authority==feePayer` coupling)
-  - add `lib/solana/settlementPresign.ts` (canonical decode/verify/sponsor-fee-payer signing only)
+  - replace batch sealing/load logic in `lib/solana/settlementRelay.ts` and `lib/solana/settlementSealingService.ts` with oldest-pending single-run selection
+  - evolve `lib/solana/settlementPresign.ts` into the canonical decode/verify/sponsor-fee-payer signer for one-run settlements
   - add `lib/solana/settlementPolicy.ts`
+  - remove `lib/solana/firstSyncRelay.ts` from the target path; first sync becomes normal create + normal settlement orchestration
 - Frontend:
-  - `components/game/GameClient.tsx` settlement execution updated to `signAndSendTransaction(..., { presignTransaction })`
+  - `components/game/GameClient.tsx` settlement execution updated to `signAndSendTransaction(..., { presignTransaction })` for the oldest pending run
 - Types:
-  - add `types/api/settlementV1.ts` with explicit `prepareRequestId`, `presignToken`, `error.code`
+  - replace batch-centric response fields in `types/api/settlementV1.ts` and frontend read models with run-centric identifiers and queue metadata
 
 ### API contracts
-1. `POST /v1/settlement/prepare` -> returns canonical unsigned tx payload + `prepareRequestId` + expected invariants + presign challenge token.
-2. Phantom invokes presign callback with tx bytes -> client sends to `POST /v1/settlement/presign`.
-3. `/presign` verifies canonical tx checklist (below), applies sponsor fee-payer signature only if valid, returns updated tx bytes.
-4. Client sends tx; then `POST /v1/settlement/finalize` with `{ prepareRequestId, txSignature }`.
+1. `POST /v1/settlement/prepare` request becomes `{ characterId, zoneRunId, idempotencyKey }`.
+2. `/prepare` verifies `zoneRunId` is the oldest unsettled run for that character, seals exactly one run into a canonical on-chain payload, and returns the unsigned tx + `prepareRequestId` + `runSettlementId` + presign token.
+3. Embedded Phantom invokes the `presignTransaction` callback with tx bytes -> client sends to `POST /v1/settlement/presign`.
+4. `/presign` verifies the canonical tx checklist below, applies the sponsor fee-payer signature only if valid, and returns updated tx bytes.
+5. Client sends the transaction through the embedded signing/send flow; then `POST /v1/settlement/finalize` with `{ prepareRequestId, txSignature }`.
 
 ### Canonical transaction verification checklist (/presign)
 Reject unless all pass:
@@ -371,7 +387,7 @@ Reject unless all pass:
   - includes expected Runana settlement instruction only (plus allowed compute budget pattern)
   - program id equals configured Runana program id
 - account metas/order match expected envelope derived server-side.
-- payload invariants match sealed batch: `batch_id/hash/nonce range/state hashes/season`.
+- payload invariants match the sealed single run: `zone_run_id`, committed sequence, on-chain `batch_id/hash`, nonce range, state hashes, season, and exactly one run summary.
 - signature scheme and permit domain unchanged.
 - blockhash freshness within configured window.
 - replay guards: not already presigned/finalized/expired.
@@ -382,28 +398,35 @@ Reject unless all pass:
 - repeated suspicious mismatches threshold => temporary wallet/session cooldown.
 
 ### Idempotency behavior
-- `prepare`: idempotent on `(character_id, continuity_key)` returns existing open request.
+- `prepare`: idempotent on `(character_id, zone_run_id, continuity_key)` returns the existing open request for that run.
 - `presign`: idempotent on `(prepare_request_id, tx_message_hash)` returns same signed bytes if already presigned.
 - `finalize`: idempotent on `(prepare_request_id, tx_signature)`; replay returns stored terminal result.
 
 ### Data migrations
-- new `SettlementRequest` table (status machine + hashes + presign timestamps + invalidation reason).
-- optional add columns on `SettlementBatch` to link latest `settlementRequestId`.
+- add `RunSettlement` as the new source of truth for one-run settlement lifecycle and queue state.
+- add `RunSettlementRequest` as the presign/finalize request table bound to a single `RunSettlement`.
+- regenerate pending settlements from unsettled `ClosedZoneRunSummary` rows in FIFO `closedRunSequence` order instead of preserving existing multi-run batch identity.
+- treat old batch tables as transitional/read-only during cutover, then remove them after the run-centric path is stable.
 
 ### Security controls
 - backend-held sponsor key only.
 - strict canonical verification before signing.
 - route-specific aggressive rate limits (`prepare`, `presign`, `finalize`).
+- enforce FIFO ordering and the per-character cap of 10 pending unsettled runs.
 
 ### Observability
 - counters by rejection reason code.
 - presign latency histogram.
 - alert on presign mismatch spike and finalize timeout rate.
+- queue depth metrics per character and a counter for settlement attempts that leave the run pending because the embedded signing/send/finalize sequence did not complete.
 
 ### Tests
-- integration happy path with mocked Phantom presign callback.
+- integration happy path with mocked embedded Phantom presign callback.
 - negative matrix for each checklist mismatch.
 - regression: no double settlement on retries/concurrent finalize.
+- FIFO enforcement: a newer run cannot settle while an older unsettled run exists.
+- queue cap: the 11th unsettled run is blocked from starting until the oldest pending run is settled or cleared.
+- first-sync replacement: create character, then settle the first run in a second transaction; no atomic create-plus-settle path remains in the target design.
 
 ### Rollout / flags
 - `FF_V1_SETTLEMENT_PRESIGN` per cohort.
@@ -411,6 +434,8 @@ Reject unless all pass:
 ### Acceptance criteria
 - Embedded-wallet flow completes settlement without requiring extension-only capabilities.
 - Backend never signs non-canonical settlement transaction.
+- Normal gameplay settles one run at a time, oldest-pending-first, with no batch terminology left in the product-facing contract.
+- If the embedded signing/send step or finalize path does not complete, the oldest pending run remains queued and retryable without breaking sequence integrity.
 
 ---
 
@@ -508,20 +533,27 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `app/api/auth/anon/route.ts` (remove or convert to explicit breaking-change error)
 - `app/api/solana/character/create/prepare/route.ts` (remove or convert to explicit breaking-change error)
 - `app/api/solana/character/create/submit/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/character/first-sync/prepare/route.ts` (remove or convert to explicit breaking-change error)
+- `app/api/solana/character/first-sync/ack/route.ts` (remove or convert to explicit breaking-change error)
 - `app/api/solana/settlement/prepare/route.ts` (remove or convert to explicit breaking-change error)
 - `app/api/solana/settlement/submit/route.ts` (remove or convert to explicit breaking-change error)
 - `app/api/solana/settlement/ack/route.ts` (remove or convert to explicit breaking-change error)
 
 ### `components`
-- `components/game/GameClient.tsx` (remove anon bootstrap + userId transport; integrate Phantom Connect auth and presign callback orchestration)
+- `components/game/GameClient.tsx` (remove anon bootstrap + userId transport; integrate Phantom Connect auth, oldest-pending run settlement orchestration, and queue-cap retry UX)
+- `components/game/uiModel.ts` (replace batch-facing sync labels and state derivation with run-centric queue/status labels)
 
 ### `lib`
 - `lib/solana/phantomBrowser.ts` (replace/augment with Phantom Connect-compatible adapter abstraction)
-- `lib/solana/settlementRelay.ts` (remove `authority==feePayer` requirement for sponsored path; shift to v1 services)
+- `lib/solana/settlementRelay.ts` (replace batch-centric sealing/load flow with single-run oldest-pending flow)
+- `lib/solana/settlementSealingService.ts` (remove multi-run batching behavior from the target path)
+- `lib/solana/firstSyncRelay.ts` (remove from the target path; first sync becomes normal create + normal settlement orchestration)
 - `lib/solana/characterCreation.ts` (session-aware create prepare/finalize helper split)
+- `lib/characterAppService.ts` and `lib/characterSync.ts` (replace `nextSettlementBatch`-style read models with pending-run settlement metadata)
 
 ### `types`
 - `types/api/solana.ts` (shrink to only the still-supported surfaces or remove once v1 types fully replace it)
+- `types/api/frontend.ts` and `types/settlement.ts` (replace batch-centric product-facing terminology with run-centric settlement naming while preserving the on-chain adapter shape internally)
 
 ### `prisma`
 - `prisma/schema.prisma` (new auth/session/settlement-request/audit models and user wallet fields)
@@ -531,8 +563,9 @@ Cross-cutting production-readiness controls for all v1 flows.
 - existing tests touching settlement/character/auth routes adjusted for v1 contracts:
   - `tests/characterCreateRoute.test.ts`
   - `tests/settlementAckRoute.test.ts`
-  - `tests/firstSyncRoutes.test.ts`
+  - replace legacy first-sync-specific tests with create-then-settle integration coverage
   - `tests/phantomBrowser.test.ts`
+  - add queue-ordering and queue-cap regression coverage for run settlement orchestration
 
 ## 4.2 Expected new files/modules
 
@@ -547,6 +580,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `app/api/v1/settlement/finalize/route.ts`
 - `app/api/v1/transfers/check/route.ts`
 - `app/api/v1/transfers/finalize/route.ts`
+- no dedicated `app/api/v1/characters/first-sync/*` endpoints remain in the target design
 
 ### Library/auth/security/observability
 - `lib/auth/nonce.ts`
@@ -555,6 +589,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `lib/auth/walletVerify.ts`
 - `lib/security/rateLimit.ts`
 - `lib/solana/settlementPresign.ts`
+- `lib/solana/runSettlementAdapter.ts`
 - `lib/solana/transferPolicy.ts`
 - `lib/solana/transferFinalize.ts`
 - `lib/observability/metrics.ts`
@@ -567,6 +602,7 @@ Cross-cutting production-readiness controls for all v1 flows.
 - `docs/api/error-codes-v1.md`
 - `tests/integration/authNonceSession.test.ts`
 - `tests/integration/settlementPresignFlow.test.ts`
+- `tests/integration/runSettlementQueue.test.ts`
 - `tests/integration/transfersFlow.test.ts`
 - `tests/integration/rateLimitAndAudit.test.ts`
 
@@ -615,14 +651,24 @@ Cross-cutting production-readiness controls for all v1 flows.
   - index `(userId, revokedAt, expiresAt)`
   - index `(walletAddress, revokedAt, expiresAt)`
 
-## 5.4 `SettlementRequest`
-- columns: `id`, `characterId`, `sessionId`, `walletAddress`, `batchId`, `batchHash`, `prepareMessageHash`, `presignedMessageHash`, `status`, `invalidReasonCode`, `idempotencyKey`, `preparedAt`, `presignedAt`, `finalizedAt`, `expiresAt`
+## 5.4 `RunSettlement`
+- columns: `id`, `characterId`, `zoneRunId`, `closedRunSequence`, `settlementSequence`, `payloadHash`, `prepareMessageHash`, `status`, `failureCode`, `latestTransactionSignature`, `preparedAt`, `submittedAt`, `confirmedAt`, `failedAt`
+- uniqueness/order:
+  - unique `(zoneRunId)`
+  - unique `(characterId, settlementSequence)`
+  - index `(characterId, status, closedRunSequence)`
+- migration rule:
+  - build pending `RunSettlement` rows from unsettled `ClosedZoneRunSummary` records in FIFO `closedRunSequence` order
+  - do not preserve legacy multi-run batch identity as a user-facing concept
+
+## 5.5 `RunSettlementRequest`
+- columns: `id`, `runSettlementId`, `characterId`, `sessionId`, `walletAddress`, `zoneRunId`, `settlementSequence`, `payloadHash`, `prepareMessageHash`, `presignedMessageHash`, `status`, `invalidReasonCode`, `idempotencyKey`, `preparedAt`, `presignedAt`, `finalizedAt`, `expiresAt`
 - uniqueness/idempotency:
-  - unique `(characterId, idempotencyKey)`
-  - unique `(characterId, batchHash, status in active states)` via partial unique index
+  - unique `(characterId, zoneRunId, idempotencyKey)`
+  - unique `(runSettlementId, status in active states)` via partial unique index
   - unique `(id, presignedMessageHash)` for presign idempotency
 
-## 5.5 `TxAuditLog`
+## 5.6 `TxAuditLog`
 - columns: `id`, `requestId`, `sessionId`, `userId`, `walletAddress`, `actionType`, `phase`, `status`, `errorCode`, `httpStatus`, `chainSignature`, `entityType`, `entityId`, `metadataJson`, `createdAt`
 - indexes:
   - index `(actionType, createdAt)`
@@ -633,18 +679,20 @@ Cross-cutting production-readiness controls for all v1 flows.
 
 ## 6) Settlement presign design (authoritative sequence)
 
-1. Client calls `/v1/settlement/prepare` with `characterId` + `idempotencyKey`.
-2. Backend seals/loads batch, builds canonical unsigned transaction template, stores `SettlementRequest(PREPARED)` with hash-bound invariants.
-3. Client invokes Phantom Connect send flow and supplies `presignTransaction` callback.
+1. Client calls `/v1/settlement/prepare` with `characterId + zoneRunId + idempotencyKey`.
+2. Backend verifies `zoneRunId` is the oldest unsettled run, seals exactly one run into the canonical on-chain payload, and stores `RunSettlementRequest(PREPARED)` with hash-bound invariants.
+3. Client invokes the embedded Phantom send flow and supplies the `presignTransaction` callback.
 4. Callback posts tx bytes + `prepareRequestId` to `/v1/settlement/presign`.
 5. Backend verifies checklist, adds sponsor fee-payer signature if valid, stores presign hash + status `PRESIGNED`, returns updated tx bytes.
-6. Phantom submits transaction.
-7. Client posts `/v1/settlement/finalize` with `prepareRequestId` + `txSignature`.
-8. Backend confirms chain result, commits settlement cursor/batch status, writes audit records, returns terminal response.
+6. Embedded Phantom completes signing and submission.
+7. Client posts `/v1/settlement/finalize` with `prepareRequestId + txSignature`.
+8. Backend confirms chain result, commits run-settlement state, advances the settlement cursor, writes audit records, and returns terminal response.
 
 ### Invalidation and retry
 - Any canonical mismatch => invalidate request, require new prepare.
 - Rpc/confirmation transient errors => retain request state for retry if not invalidated.
+- if the embedded signing/send step does not complete, the run stays pending and remains the head of the queue.
+- if send completes but finalize does not complete, the run stays submitted/pending-reconcile and recovery continues through finalize/reconcile.
 - finalize retries always safe/idempotent.
 
 ---
@@ -657,11 +705,13 @@ Cross-cutting production-readiness controls for all v1 flows.
    - Mitigation: adapter interface and e2e smoke tests for both wallet modes.
 3. **Legacy `userId` contract surface area** broad across routes.
    - Mitigation: phased v1 namespace + direct route replacement/removal + telemetry-driven cutover.
-4. **Replay/idempotency bugs in presign/finalize**.
+4. **Per-run queue ordering drift** caused by allowing multiple pending unsettled runs while the on-chain cursor still requires ordered settlement.
+   - Mitigation: enforce oldest-pending-only selection server-side, expose queue depth in read models, and block new runs at the cap of 10.
+5. **Replay/idempotency bugs in presign/finalize**.
    - Mitigation: DB unique constraints and deterministic idempotency keys.
-5. **Program authorization-mode migration risk**.
+6. **Program authorization-mode migration risk**.
    - Mitigation: keep dual-mode support briefly, share canonical message builders between app presign and on-chain verification, and pin fixtures in both repos to the same batch-hash vectors.
-6. **Operational blind spots** during migration.
+7. **Operational blind spots** during migration.
    - Mitigation: ship audit + metrics before enabling broad flags.
 
 Fallback designs:
@@ -679,6 +729,13 @@ Fallback designs:
   - switch settlement business authorization to player permit verification
 - generate the updated IDL/types and define the compatibility matrix before app route work begins.
 
+## Phase -0 (1 day): baseline checkpoint before the pivot
+- capture one stable pre-refactor checkpoint:
+  - `keep-pushing` build green
+  - targeted settlement route tests green
+  - one isolated fresh-validator settlement happy path green in `runana-program`
+- begin the per-run refactor from that checkpoint; do not wait for a fully green global suite before starting the pivot.
+
 ## Phase 0 (1-2 days): foundations
 - add DB models/migrations for auth/session/request/audit.
 - add auth utils + error envelope + basic metrics scaffolding.
@@ -690,11 +747,13 @@ Fallback designs:
 ## Phase 2 (2-3 days): character create v1 slice
 - implement `/v1/characters/create/prepare|finalize` and UI switch.
 - enforce sponsor-paid fee model with player authority signature only.
+- remove the dedicated first-sync atomic transaction from the target path.
 
 ## Phase 3 (4-6 days): settlement presign slice (critical path)
-- implement `/v1/settlement/prepare|presign|finalize` + canonical tx verifier + sponsor signing.
-- integrate Phantom `presignTransaction` callback path in UI.
-- add negative-path integration suite.
+- implement `/v1/settlement/prepare|presign|finalize` as a per-run FIFO queue with canonical tx verification and sponsor signing.
+- integrate the embedded Phantom `presignTransaction` callback path in UI for the oldest pending run after each completed run.
+- replace first-sync special-case settlement with the same normal per-run flow.
+- add negative-path integration suite for ordering, queue cap, and retry/reconcile behavior.
 
 ## Phase 4 (future work): transfers slice
 - defer `/v1/transfers/check|finalize` until the preceding create/settlement rollout is complete and stable in production-like validation.
@@ -708,8 +767,9 @@ Fallback designs:
 2. DB schema (sessions/nonces/settlement_requests)
 3. session middleware
 4. settlement canonical presign verifier
-5. frontend Phantom Connect callback orchestration
-6. integration tests + observability
+5. run-centric queue/read-model migration
+6. frontend Phantom Connect callback orchestration
+7. integration tests + observability
 
 ---
 
@@ -719,7 +779,9 @@ Fallback designs:
 - [ ] Nonce replay blocked and covered by tests.
 - [ ] Session required on all v1 game-affecting routes.
 - [ ] Character create uses v1 prepare/finalize with backend sponsor fee payer.
-- [ ] Settlement uses prepare/presign/finalize with backend sponsor fee payer and no server business-signature requirement.
+- [ ] Settlement uses prepare/presign/finalize with backend sponsor fee payer, no server business-signature requirement, and exactly one completed run per settlement.
+- [ ] First sync no longer relies on an atomic create-plus-settle special case.
+- [ ] Oldest pending unsettled run always settles first, and the per-character pending-run cap of 10 is enforced.
 - [ ] Transfer check/finalize policy path live with backend sponsor fee payer.
 - [ ] Structured error codes documented and returned consistently.
 - [ ] Rate limiting active on auth + settlement + transfer routes.

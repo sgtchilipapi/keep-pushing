@@ -22,6 +22,18 @@ const auditMock = {
   createAuditRequestId: jest.fn(() => "request-1"),
   writeAuditLogSafe: jest.fn(),
 };
+const rateLimitMock = {
+  assertRateLimit: jest.fn(),
+  getClientIpAddress: jest.fn(() => "127.0.0.1"),
+  RateLimitExceededError: class extends Error {
+    retryAfterSeconds: number;
+
+    constructor(message: string, retryAfterSeconds: number) {
+      super(message);
+      this.retryAfterSeconds = retryAfterSeconds;
+    }
+  },
+};
 
 jest.mock("../lib/auth/nonce", () => ({
   issueAuthNonce: nonceMock.issueAuthNonce,
@@ -46,6 +58,11 @@ jest.mock("../lib/auth/db", () => ({
 jest.mock("../lib/observability/audit", () => ({
   createAuditRequestId: auditMock.createAuditRequestId,
   writeAuditLogSafe: auditMock.writeAuditLogSafe,
+}));
+jest.mock("../lib/security/rateLimit", () => ({
+  assertRateLimit: rateLimitMock.assertRateLimit,
+  getClientIpAddress: rateLimitMock.getClientIpAddress,
+  RateLimitExceededError: rateLimitMock.RateLimitExceededError,
 }));
 
 import { POST as noncePOST } from "../app/api/v1/auth/nonce/route";
@@ -146,6 +163,66 @@ describe("v1 auth routes", () => {
     expect(response.headers.get("Set-Cookie")).toContain("kp_session=token-1");
     expect(json.ok).toBe(true);
     expect(json.data.user.id).toBe("user-1");
+  });
+
+  it("returns 429 when nonce issuance hits the configured rate limit", async () => {
+    rateLimitMock.assertRateLimit.mockImplementationOnce(() => {
+      throw new rateLimitMock.RateLimitExceededError(
+        "AUTH_NONCE_RATE_LIMIT_IP: rate limit exceeded",
+        60,
+      );
+    });
+
+    const response = await noncePOST(
+      new Request("http://localhost/api/v1/auth/nonce", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          "content-type": "application/json",
+          "x-forwarded-for": "127.0.0.1",
+        },
+        body: JSON.stringify({
+          chain: "solana",
+          walletAddress,
+        }),
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toContain("AUTH_NONCE_RATE_LIMIT_IP");
+  });
+
+  it("returns 429 when auth verify hits the configured rate limit", async () => {
+    rateLimitMock.assertRateLimit.mockImplementationOnce(() => {
+      throw new rateLimitMock.RateLimitExceededError(
+        "AUTH_VERIFY_RATE_LIMIT_IP: rate limit exceeded",
+        60,
+      );
+    });
+
+    const response = await verifyPOST(
+      new Request("http://localhost/api/v1/auth/verify", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "jest",
+          "x-forwarded-for": "127.0.0.1",
+        },
+        body: JSON.stringify({
+          nonceId: "nonce-1",
+          walletAddress,
+          signatureBase64: "c2ln",
+          signedMessage: "signed-message",
+        }),
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toContain("AUTH_VERIFY_RATE_LIMIT_IP");
   });
 
   it("revokes the session token on logout and clears the cookie", async () => {
