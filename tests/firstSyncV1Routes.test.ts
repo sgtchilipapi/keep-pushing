@@ -6,6 +6,10 @@ const authMock = {
   requireSession: jest.fn(),
   requireSessionCharacterAccess: jest.fn(),
 };
+const auditMock = {
+  createAuditRequestId: jest.fn(() => "request-1"),
+  writeAuditLogSafe: jest.fn(),
+};
 
 jest.mock("../lib/solana/firstSyncRelay", () => ({
   prepareSolanaFirstSync: firstSyncRelayMock.prepareSolanaFirstSync,
@@ -19,6 +23,10 @@ jest.mock("../lib/auth/requireSession", () => {
     requireSessionCharacterAccess: authMock.requireSessionCharacterAccess,
   };
 });
+jest.mock("../lib/observability/audit", () => ({
+  createAuditRequestId: auditMock.createAuditRequestId,
+  writeAuditLogSafe: auditMock.writeAuditLogSafe,
+}));
 
 import { POST as preparePOST } from "../app/api/v1/characters/first-sync/prepare/route";
 import { POST as finalizePOST } from "../app/api/v1/characters/first-sync/finalize/route";

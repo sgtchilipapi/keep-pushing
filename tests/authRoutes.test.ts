@@ -18,6 +18,10 @@ const walletVerifyMock = {
 const authPoolMock = {
   query: jest.fn(),
 };
+const auditMock = {
+  createAuditRequestId: jest.fn(() => "request-1"),
+  writeAuditLogSafe: jest.fn(),
+};
 
 jest.mock("../lib/auth/nonce", () => ({
   issueAuthNonce: nonceMock.issueAuthNonce,
@@ -38,6 +42,10 @@ jest.mock("../lib/auth/walletVerify", () => ({
 
 jest.mock("../lib/auth/db", () => ({
   authPool: authPoolMock,
+}));
+jest.mock("../lib/observability/audit", () => ({
+  createAuditRequestId: auditMock.createAuditRequestId,
+  writeAuditLogSafe: auditMock.writeAuditLogSafe,
 }));
 
 import { POST as noncePOST } from "../app/api/v1/auth/nonce/route";

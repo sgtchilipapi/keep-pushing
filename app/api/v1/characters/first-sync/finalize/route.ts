@@ -5,6 +5,7 @@ import {
   SessionRequiredError,
   requireSession,
 } from '../../../../../../lib/auth/requireSession';
+import { createAuditRequestId, writeAuditLogSafe } from '../../../../../../lib/observability/audit';
 import { acknowledgeSolanaFirstSync } from '../../../../../../lib/solana/firstSyncRelay';
 import type {
   CharacterFirstSyncV1FinalizeRequest,
@@ -36,11 +37,20 @@ function statusForError(message: string): number {
 }
 
 export async function POST(request: Request) {
+  const requestId = createAuditRequestId();
   let body: Partial<CharacterFirstSyncV1FinalizeRequest>;
 
   try {
     body = (await request.json()) as Partial<CharacterFirstSyncV1FinalizeRequest>;
   } catch {
+    await writeAuditLogSafe({
+      requestId,
+      actionType: 'FIRST_SYNC_FINALIZE',
+      phase: 'REQUEST',
+      status: 'ERROR',
+      errorCode: 'FIRST_SYNC_FINALIZE_INVALID_JSON',
+      httpStatus: 400,
+    });
     return NextResponse.json(
       { ok: false, error: { code: 'FIRST_SYNC_FINALIZE_INVALID_JSON' } },
       { status: 400 },
@@ -48,6 +58,14 @@ export async function POST(request: Request) {
   }
 
   if (body.prepared === undefined || body.prepared === null) {
+    await writeAuditLogSafe({
+      requestId,
+      actionType: 'FIRST_SYNC_FINALIZE',
+      phase: 'REQUEST',
+      status: 'ERROR',
+      errorCode: 'ERR_INVALID_PREPARED: prepared is required',
+      httpStatus: 400,
+    });
     return NextResponse.json(
       { ok: false, error: { code: 'ERR_INVALID_PREPARED: prepared is required' } },
       { status: 400 },
@@ -67,16 +85,56 @@ export async function POST(request: Request) {
       transactionSignature:
         typeof body.transactionSignature === 'string' ? body.transactionSignature : '',
     });
+    await writeAuditLogSafe({
+      requestId,
+      sessionId: actor.session.id,
+      userId: actor.user.id,
+      walletAddress: actor.session.walletAddress,
+      actionType: 'FIRST_SYNC_FINALIZE',
+      phase: 'REQUEST',
+      status: 'SUCCESS',
+      httpStatus: 200,
+      chainSignature:
+        typeof body.transactionSignature === 'string' ? body.transactionSignature : null,
+      entityType: 'character',
+      entityId: result.characterId,
+    });
 
     return NextResponse.json({ ok: true, data: result }, { status: 200 });
   } catch (error) {
     if (error instanceof SessionRequiredError) {
+      await writeAuditLogSafe({
+        requestId,
+        actionType: 'FIRST_SYNC_FINALIZE',
+        phase: 'REQUEST',
+        status: 'ERROR',
+        errorCode: error.message,
+        httpStatus: 401,
+      });
       return NextResponse.json({ ok: false, error: { code: error.message } }, { status: 401 });
     }
     if (error instanceof SessionForbiddenError) {
+      await writeAuditLogSafe({
+        requestId,
+        actionType: 'FIRST_SYNC_FINALIZE',
+        phase: 'REQUEST',
+        status: 'ERROR',
+        errorCode: error.message,
+        httpStatus: 403,
+      });
       return NextResponse.json({ ok: false, error: { code: error.message } }, { status: 403 });
     }
     const message = error instanceof Error ? error.message : 'Failed to finalize first sync.';
+    await writeAuditLogSafe({
+      requestId,
+      actionType: 'FIRST_SYNC_FINALIZE',
+      phase: 'REQUEST',
+      status: 'ERROR',
+      errorCode: message,
+      httpStatus: statusForError(message),
+      chainSignature:
+        typeof body.transactionSignature === 'string' ? body.transactionSignature : null,
+    });
     return NextResponse.json(
       { ok: false, error: { code: message } },
       { status: statusForError(message) },

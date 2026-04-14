@@ -586,6 +586,22 @@ export type UpdateSettlementSubmissionAttemptInput = {
   resolvedAt?: Date | null;
 };
 
+export type CreateTxAuditLogInput = {
+  requestId?: string | null;
+  sessionId?: string | null;
+  userId?: string | null;
+  walletAddress?: string | null;
+  actionType: string;
+  phase: string;
+  status: string;
+  errorCode?: string | null;
+  httpStatus?: number | null;
+  chainSignature?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  metadataJson?: unknown;
+};
+
 export type RebasedBattleNonceAssignment = {
   id: string;
   battleNonce: number;
@@ -800,6 +816,24 @@ type SettlementRequestRow = {
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type TxAuditLogRow = {
+  id: string;
+  requestId: string | null;
+  sessionId: string | null;
+  userId: string | null;
+  walletAddress: string | null;
+  actionType: string;
+  phase: string;
+  status: string;
+  errorCode: string | null;
+  httpStatus: number | null;
+  chainSignature: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  metadataJson: unknown;
+  createdAt: Date;
 };
 
 function parseNullableSafeInteger(value: string | number | null | undefined, field: string): number | null {
@@ -1224,6 +1258,67 @@ export const prisma = {
     },
     async findUnique(id: string) {
       const result = await pool.query<{ id: string }>('SELECT id FROM "User" WHERE id = $1 LIMIT 1', [id]);
+      return result.rows[0] ?? null;
+    }
+  },
+  txAuditLog: {
+    async create(input: CreateTxAuditLogInput) {
+      const result = await pool.query<TxAuditLogRow>(
+        `INSERT INTO "TxAuditLog"
+          (
+            id,
+            "requestId",
+            "sessionId",
+            "userId",
+            "walletAddress",
+            "actionType",
+            phase,
+            status,
+            "errorCode",
+            "httpStatus",
+            "chainSignature",
+            "entityType",
+            "entityId",
+            "metadataJson",
+            "createdAt"
+          )
+        VALUES
+          ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING
+          id,
+          "requestId",
+          "sessionId",
+          "userId",
+          "walletAddress",
+          "actionType",
+          phase,
+          status,
+          "errorCode",
+          "httpStatus",
+          "chainSignature",
+          "entityType",
+          "entityId",
+          "metadataJson",
+          "createdAt"`,
+        [
+          createRowId(),
+          input.requestId ?? null,
+          input.sessionId ?? null,
+          input.userId ?? null,
+          input.walletAddress ?? null,
+          input.actionType,
+          input.phase,
+          input.status,
+          input.errorCode ?? null,
+          input.httpStatus ?? null,
+          input.chainSignature ?? null,
+          input.entityType ?? null,
+          input.entityId ?? null,
+          input.metadataJson ?? null,
+          new Date(),
+        ]
+      );
+
       return result.rows[0] ?? null;
     }
   },
