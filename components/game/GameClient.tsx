@@ -8,6 +8,13 @@ import {
   type TouchEvent,
 } from "react";
 import { useRouter } from "next/navigation";
+import {
+  AddressType,
+  useDisconnect as usePhantomDisconnect,
+  useModal,
+  usePhantom,
+  useSolana,
+} from "@phantom/react-sdk";
 
 import type {
   SettlementV1FinalizeData,
@@ -43,13 +50,7 @@ import StatusBadge from "./StatusBadge";
 import styles from "./game-shell.module.css";
 import { resolveSyncPanelState } from "./uiModel";
 import {
-  connectPhantom,
-  disconnectPhantom,
-  getPhantomProvider,
-  getWalletAvailability,
   normalizeWalletError,
-  autoConnectPhantom,
-  subscribeWalletEvents,
   signAuthorizationMessageUtf8,
   signAndSendPreparedPlayerOwnedTransaction,
   type PhantomSolanaProvider,
@@ -58,6 +59,10 @@ import {
   type WalletConnectionStatus,
 } from "../../lib/solana/phantomBrowser";
 import {
+  createReactSdkSolanaProvider,
+  getReactSdkSolanaAddress,
+} from "../../lib/solana/reactPhantomBridge";
+import {
   deserializeLegacyOrVersionedTransactionBase64,
   serializeLegacyOrVersionedTransactionBase64,
 } from "../../lib/solana/playerOwnedV0Transactions";
@@ -65,7 +70,6 @@ import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillM
 import { getSkillDef } from "../../engine/battle/skillRegistry";
 
 const PENDING_SYNC_STORAGE_KEY = "keep-pushing:pending-sync-acks";
-const PHANTOM_INSTALL_URL = "https://phantom.app/download";
 
 type AppPhase =
   | "bootstrapping_session"
@@ -1120,7 +1124,6 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
 }
 
 type LandingPanelProps = {
-  availability: WalletAvailability;
   connectionStatus: WalletConnectionStatus;
   pending: boolean;
   onConnect: () => Promise<void>;
@@ -1140,27 +1143,16 @@ function LandingPanel(props: LandingPanelProps) {
           sponsored on-chain sync flows.
         </p>
         <div className={styles.buttonRow}>
-          {props.availability === "not_installed" ? (
-            <a
-              className={`${styles.button} ${styles.buttonPrimary}`}
-              href={PHANTOM_INSTALL_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Install Phantom
-            </a>
-          ) : (
-            <button
-              type="button"
-              className={`${styles.button} ${styles.buttonPrimary}`}
-              onClick={() => void props.onConnect()}
-              disabled={props.pending}
-            >
-              {props.connectionStatus === "connecting"
-                ? "Connecting..."
-                : "Sign In With Phantom"}
-            </button>
-          )}
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonPrimary}`}
+            onClick={() => void props.onConnect()}
+            disabled={props.pending}
+          >
+            {props.connectionStatus === "connecting"
+              ? "Connecting..."
+              : "Sign In With Phantom"}
+          </button>
         </div>
       </div>
     </section>
@@ -1261,9 +1253,7 @@ function WalletToolbar(props: WalletToolbarProps) {
   const walletStatusLabel =
     props.connectionStatus === "connected"
       ? `Wallet ${truncateMiddle(props.publicKey)}`
-      : props.availability === "installed"
-        ? "Wallet disconnected"
-        : "Phantom not installed";
+      : "Wallet disconnected";
 
   return (
     <div className={styles.menuWrap}>
@@ -1314,16 +1304,7 @@ function WalletToolbar(props: WalletToolbarProps) {
           </div>
 
           <div className={styles.buttonRow}>
-            {props.availability === "not_installed" ? (
-              <a
-                className={styles.button}
-                href={PHANTOM_INSTALL_URL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Install Phantom
-              </a>
-            ) : props.signedIn ? (
+            {props.signedIn ? (
               <button
                 type="button"
                 className={styles.button}
@@ -1337,7 +1318,7 @@ function WalletToolbar(props: WalletToolbarProps) {
                 type="button"
                 className={styles.button}
                 onClick={() => void props.onConnect()}
-                disabled={props.pending || props.availability !== "installed"}
+                disabled={props.pending}
               >
                 {props.connectionStatus === "connecting"
                   ? "Connecting..."
@@ -1927,6 +1908,7 @@ type CharacterSyncPageProps = {
   walletAvailability: WalletAvailability;
   walletConnectionStatus: WalletConnectionStatus;
   walletPublicKey: string | null;
+  walletProvider: PhantomSolanaProvider | null;
   setWalletActionStatus: (status: WalletActionStatus) => void;
   onConnectWallet: () => Promise<void>;
   onRefreshCharacter: () => Promise<CharacterReadModel | null>;
@@ -2045,9 +2027,9 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
       return;
     }
 
-    const provider = getPhantomProvider();
+    const provider = props.walletProvider;
     if (provider === null) {
-      setError("Phantom wallet is not installed.");
+      setError("Phantom wallet is not connected.");
       return;
     }
 
@@ -2324,11 +2306,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           </div>
         </div>
 
-        {props.walletAvailability === "not_installed" ? (
-          <div className={styles.infoBox}>
-            Install Phantom to use one-tap sync.
-          </div>
-        ) : null}
         {props.walletConnectionStatus !== "connected" ? (
           <div className={styles.infoBox}>
             Connect Phantom before syncing this character.
@@ -2344,7 +2321,7 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
               type="button"
               className={`${styles.button} ${styles.buttonPrimary}`}
               onClick={() => void props.onConnectWallet()}
-              disabled={pending || props.walletAvailability !== "installed"}
+              disabled={pending}
             >
               {props.walletConnectionStatus === "connecting"
                 ? "Connecting..."
@@ -2429,6 +2406,16 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
 export default function GameClient() {
   const router = useRouter();
+  const { open: openWalletModal } = useModal();
+  const { disconnect: disconnectEmbeddedWallet } = usePhantomDisconnect();
+  const {
+    addresses: phantomAddresses,
+    isConnected: phantomConnected,
+    isConnecting: phantomConnecting,
+    isLoading: phantomLoading,
+    errors: phantomErrors,
+  } = usePhantom();
+  const { solana } = useSolana();
   const [appPhase, setAppPhase] = useState<AppPhase>("bootstrapping_session");
   const [shellView, setShellView] = useState<ShellView>("landing");
   const [accountMode, setAccountMode] = useState<AccountMode>("wallet-linked");
@@ -2461,18 +2448,31 @@ export default function GameClient() {
   const [syncDetail, setSyncDetail] =
     useState<CharacterSyncDetailResponse | null>(null);
   const [refreshPending, setRefreshPending] = useState(false);
-  const [walletAvailability, setWalletAvailability] =
-    useState<WalletAvailability>("unknown");
-  const [walletConnectionStatus, setWalletConnectionStatus] =
-    useState<WalletConnectionStatus>("checking_trusted");
   const [walletActionStatus, setWalletActionStatus] =
     useState<WalletActionStatus>("idle");
-  const [walletPublicKey, setWalletPublicKey] = useState<string | null>(null);
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionWalletAddress, setSessionWalletAddress] = useState<
     string | null
   >(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const authWalletInFlightRef = useRef<string | null>(null);
+
+  const walletAvailability: WalletAvailability = "installed";
+  const walletPublicKey = useMemo(
+    () =>
+      getReactSdkSolanaAddress(phantomAddresses, AddressType.solana) ??
+      solana.publicKey ??
+      null,
+    [phantomAddresses, solana.publicKey],
+  );
+  const walletProvider = useMemo(() => createReactSdkSolanaProvider(solana), [solana]);
+  const walletConnectionStatus: WalletConnectionStatus = phantomConnecting
+    ? "connecting"
+    : phantomLoading
+      ? "checking_trusted"
+      : walletPublicKey
+        ? "connected"
+        : "disconnected";
 
   const walletPending =
     walletConnectionStatus === "connecting" || walletActionStatus !== "idle";
@@ -2646,6 +2646,9 @@ export default function GameClient() {
     setAppPhase("ready");
   }
 
+  const bootstrapAuthenticatedAppRef = useRef(bootstrapAuthenticatedApp);
+  bootstrapAuthenticatedAppRef.current = bootstrapAuthenticatedApp;
+
   async function refreshZoneTopology(
     zoneId: number,
     topologyVersion?: number,
@@ -2691,6 +2694,12 @@ export default function GameClient() {
 
   const refreshZoneTopologyRef = useRef(refreshZoneTopology);
   refreshZoneTopologyRef.current = refreshZoneTopology;
+
+  useEffect(() => {
+    if (phantomErrors.connect) {
+      setWalletError(normalizeWalletError(phantomErrors.connect));
+    }
+  }, [phantomErrors.connect]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2751,84 +2760,59 @@ export default function GameClient() {
   }, []);
 
   useEffect(() => {
-    const availability = getWalletAvailability();
-    setWalletAvailability(availability);
-
-    if (availability !== "installed") {
-      setWalletConnectionStatus("disconnected");
-      setWalletPublicKey(null);
+    if (
+      !phantomConnected ||
+      !walletPublicKey ||
+      walletProvider === null ||
+      sessionActive
+    ) {
+      if (!phantomConnected || !walletPublicKey) {
+        authWalletInFlightRef.current = null;
+      }
       return;
     }
 
-    let cancelled = false;
-    setWalletConnectionStatus("checking_trusted");
+    if (authWalletInFlightRef.current === walletPublicKey) {
+      return;
+    }
 
-    void autoConnectPhantom()
-      .then((result) => {
+    authWalletInFlightRef.current = walletPublicKey;
+    let cancelled = false;
+
+    setWalletError(null);
+    setAppPhase("loading_character");
+
+    void authenticateWalletSession({
+      provider: walletProvider,
+      walletAddress: walletPublicKey,
+    })
+      .then(async () => {
         if (cancelled) {
           return;
         }
-        if (result) {
-          setWalletPublicKey(result.publicKey);
-          setWalletConnectionStatus("connected");
-          setWalletError(null);
-        } else {
-          setWalletPublicKey(null);
-          setWalletConnectionStatus("disconnected");
+        await bootstrapAuthenticatedAppRef.current();
+        if (cancelled) {
+          return;
         }
+        setShellView("roster");
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) {
           return;
         }
-        setWalletPublicKey(null);
-        setWalletConnectionStatus("disconnected");
+        authWalletInFlightRef.current = null;
+        setWalletError(normalizeWalletError(error));
+        setAppPhase("ready");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWalletActionStatus("idle");
+        }
       });
-
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unsubscribe: () => void = () => {};
-
-    void subscribeWalletEvents({
-      onConnect: (publicKey) => {
-        if (cancelled) {
-          return;
-        }
-        setWalletPublicKey(publicKey);
-        setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
-      },
-      onDisconnect: () => {
-        if (cancelled) {
-          return;
-        }
-        setWalletPublicKey(null);
-        setWalletConnectionStatus("disconnected");
-      },
-      onAccountChanged: (publicKey) => {
-        if (cancelled) {
-          return;
-        }
-        setWalletPublicKey(publicKey);
-        setWalletConnectionStatus(publicKey ? "connected" : "disconnected");
-      },
-    }).then((cleanup) => {
-      if (cancelled) {
-        cleanup();
-        return;
-      }
-      unsubscribe = cleanup;
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
+  }, [phantomConnected, sessionActive, walletProvider, walletPublicKey]);
 
   useEffect(() => {
     const maxZone = maxUnlockedZone(character);
@@ -2856,28 +2840,9 @@ export default function GameClient() {
   ]);
 
   async function handleConnectWallet() {
-    setWalletConnectionStatus("connecting");
+    authWalletInFlightRef.current = null;
     setWalletError(null);
-    setAppPhase("loading_character");
-
-    try {
-      const { provider, publicKey } = await connectPhantom();
-      setWalletPublicKey(publicKey);
-      setWalletConnectionStatus("connected");
-      await authenticateWalletSession({
-        provider,
-        walletAddress: publicKey,
-      });
-      await bootstrapAuthenticatedApp();
-      setShellView("roster");
-    } catch (error) {
-      setWalletPublicKey(null);
-      setWalletConnectionStatus("disconnected");
-      setWalletError(normalizeWalletError(error));
-      setAppPhase("ready");
-    } finally {
-      setWalletActionStatus("idle");
-    }
+    openWalletModal();
   }
 
   async function handleDisconnectWallet() {
@@ -2893,14 +2858,13 @@ export default function GameClient() {
     }
 
     try {
-      await disconnectPhantom();
+      await disconnectEmbeddedWallet();
     } catch (error) {
       setWalletError(normalizeWalletError(error));
     } finally {
+      authWalletInFlightRef.current = walletPublicKey;
       resetAuthenticatedState();
-      setWalletPublicKey(null);
       setShellView("landing");
-      setWalletConnectionStatus("disconnected");
       setWalletActionStatus("idle");
     }
   }
@@ -3322,7 +3286,6 @@ export default function GameClient() {
 
         {shellView === "landing" ? (
           <LandingPanel
-            availability={walletAvailability}
             connectionStatus={walletConnectionStatus}
             pending={walletPending}
             onConnect={handleConnectWallet}
@@ -3405,6 +3368,7 @@ export default function GameClient() {
             walletAvailability={walletAvailability}
             walletConnectionStatus={walletConnectionStatus}
             walletPublicKey={walletPublicKey}
+            walletProvider={walletProvider}
             setWalletActionStatus={setWalletActionStatus}
             onConnectWallet={handleConnectWallet}
             onRefreshCharacter={() => refreshCharacter()}

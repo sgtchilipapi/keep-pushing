@@ -222,6 +222,40 @@ Implement wallet-proof login and backend session infrastructure as the only supp
 - Middleware/util: `lib/auth/session.ts`, `lib/auth/nonce.ts`, `lib/auth/cookies.ts`, `lib/auth/requireSession.ts`
 - DB: `User` wallet fields + new `AuthNonce`, `Session` models
 - Frontend: replace anonymous bootstrap in `components/game/GameClient.tsx`; add Phantom Connect auth adapter module
+- Frontend SDK migration for this slice: move wallet connect/disconnect/message-sign auth flow to `@phantom/react-sdk` while leaving settlement/create backend APIs unchanged.
+
+### Frontend auth implementation note
+- Wrap the app root with `PhantomProvider` from `@phantom/react-sdk`.
+- Use embedded-only config:
+  - `providerType: "embedded"`
+  - `providers: ["google", "apple"]`
+  - `appId: 5a98fa34-66b8-4652-bf30-89a1f690c92e`
+  - `authOptions.redirectUrl: "https://www.runara.quest"`
+- Use React SDK modal/connect state for login initiation and wallet session state.
+- Continue using the existing backend `nonce -> sign message -> verify -> session cookie` flow as the app-auth source of truth.
+- Keep the existing transaction backend contracts for later slices; Slice A only replaces the frontend auth/session entry path and the wallet message-sign path used by `/api/v1/auth/verify`.
+
+### Frontend auth slice deliverables
+1. Provider root
+- add a client provider wrapper under `components/providers/**`
+- mount `PhantomProvider` in `app/layout.tsx`
+
+2. Auth bridge
+- add a React SDK auth bridge/hook that exposes:
+  - open modal
+  - disconnect
+  - connection/loading state
+  - active Solana address
+  - sign message
+- bridge the SDK Solana methods into the existing `GameClient` auth flow without changing backend API contracts
+
+3. Game shell migration
+- replace `connectPhantom`, `disconnectPhantom`, `autoConnectPhantom`, and `subscribeWalletEvents` usage in `components/game/GameClient.tsx` for auth/session bootstrapping
+- remove extension-install/login language from the landing page
+- keep wallet action status state for message/transaction UX labels
+
+4. Backward-compatibility boundary
+- `lib/solana/phantomBrowser.ts` may remain temporarily for later transaction slices, but Slice A should no longer depend on it for login/logout/session bootstrap
 
 ### API contracts
 - `POST /v1/auth/nonce` request `{ walletAddress, chain:"solana" }` -> `{ nonceId, nonce, expiresAt, messageToSign }`
@@ -251,6 +285,11 @@ Implement wallet-proof login and backend session infrastructure as the only supp
   - session rotation on login issues a fresh token and invalidates the old session where applicable
   - revoked and expired sessions are rejected consistently
   - logout invalidates server-side session state, not only the browser cookie
+- frontend/manual:
+  - connect through React SDK modal
+  - complete backend nonce/verify flow
+  - refresh and confirm backend session-gated roster bootstrap still works
+  - logout clears both backend session and SDK wallet session
 
 ### Rollout / flags
 - `FF_PHANTOM_CONNECT_AUTH` (off by default).
@@ -258,6 +297,9 @@ Implement wallet-proof login and backend session infrastructure as the only supp
 
 ### Acceptance criteria
 - No gameplay route accepts caller-controlled `userId` when flag enabled.
+- Phantom Connect via React SDK is the only visible auth entry path.
+- Successful embedded login establishes both wallet connection and backend app session.
+- Refresh preserves app access through backend session bootstrap without any anonymous fallback.
 - Login succeeds with Phantom Connect signature and creates/links user by wallet.
 - Nonce replay always fails deterministically.
 
