@@ -62,6 +62,7 @@ type BrowserSdkAddressType = {
 type BrowserSdkModule = {
   AddressType: BrowserSdkAddressType;
   BrowserSDK: new (config: {
+    providers?: PhantomConnectProvider[];
     addressTypes: string[];
     appId?: string;
     providerType?: 'embedded';
@@ -197,8 +198,10 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
           appId: PHANTOM_CONNECT_APP_ID,
           redirectUrl,
           providerType: 'embedded',
+          providers: ['google', 'apple'],
         });
         return new BrowserSDK({
+          providers: ['google', 'apple'],
           providerType: 'embedded',
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
