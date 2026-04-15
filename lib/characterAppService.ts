@@ -294,8 +294,8 @@ export async function getCharacterSyncDetail(
     season: detail.season,
     sync: {
       mode,
-      pendingBatchId: detail.character.nextSettlementBatch?.settlementBatchId ?? null,
-      pendingBatchNumber: detail.character.nextSettlementBatch?.batchId ?? null,
+      pendingBatchId: null,
+      pendingBatchNumber: null,
       pendingRunSettlementId: detail.character.nextPendingSettlementRun?.zoneRunId ?? null,
       pendingRunSequence:
         detail.character.nextPendingSettlementRun?.closedRunSequence ?? null,

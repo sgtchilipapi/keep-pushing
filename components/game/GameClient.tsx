@@ -484,7 +484,6 @@ type PendingSyncAckRecord = {
   characterId: string;
   transactionSignature: string;
   prepareRequestId?: string;
-  settlementBatchId?: string;
   prepared: unknown;
 };
 
@@ -2194,7 +2193,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             characterId: character.characterId,
             transactionSignature: submitted.transactionSignature,
             prepareRequestId: prepared.prepareRequestId,
-            settlementBatchId: prepared.settlementBatchId,
             prepared: prepared.preparedTransaction,
           };
           writePendingSyncAck(record);
@@ -2291,12 +2289,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             <StatusBadge
               label={`Run ${character.nextPendingSettlementRun.closedRunSequence}`}
               tone="warning"
-            />
-          ) : null}
-          {!character.nextPendingSettlementRun && character.nextSettlementBatch ? (
-            <StatusBadge
-              label={`Batch ${character.nextSettlementBatch.batchId}`}
-              tone={settlementTone(character.nextSettlementBatch.status)}
             />
           ) : null}
         </div>

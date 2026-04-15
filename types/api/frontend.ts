@@ -94,7 +94,7 @@ export interface CharacterReadModel {
     sealedBatchId: string | null;
     committedAt: string | null;
   } | null;
-  nextSettlementBatch: {
+  nextSettlementBatch?: {
     settlementBatchId: string;
     batchId: number;
     startNonce: number;
@@ -192,8 +192,8 @@ export interface CharacterSyncDetailResponse {
   season: CurrentSeasonResponse;
   sync: {
     mode: "first_sync" | "settlement" | null;
-    pendingBatchId: string | null;
-    pendingBatchNumber: number | null;
+    pendingBatchId?: string | null;
+    pendingBatchNumber?: number | null;
     pendingRunSettlementId?: string | null;
     pendingRunSequence?: number | null;
     pendingRunCount?: number;
