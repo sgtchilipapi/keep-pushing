@@ -108,7 +108,9 @@ const PHANTOM_CONNECT_APP_ID =
   '7b1fd2de-302c-4f27-b70b-9591ab44cdf3';
 const PHANTOM_CONNECT_DEFAULT_PROVIDER = (process.env.NEXT_PUBLIC_PHANTOM_CONNECT_PROVIDER ??
   'google') as PhantomConnectProvider;
-const PHANTOM_CONNECT_REDIRECT_URL = process.env.NEXT_PUBLIC_PHANTOM_CONNECT_REDIRECT_URL ?? '';
+const PHANTOM_CONNECT_REDIRECT_URL =
+  process.env.NEXT_PUBLIC_PHANTOM_CONNECT_REDIRECT_URL ??
+  'https://keep-pushing-git-sync-496362-jay-emmanuel-c-garcianos-projects.vercel.app/';
 
 let browserSdkPromise: Promise<BrowserSDKLike | null> | null = null;
 let browserSdkModulePromise: Promise<BrowserSdkModule | null> | null = null;
