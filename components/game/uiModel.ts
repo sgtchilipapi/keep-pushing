@@ -39,6 +39,7 @@ export function resolvePassiveNames(passiveIds: readonly string[]): string[] {
 
 export function resolveEffectiveSeason(character: CharacterReadModel): number | null {
   return (
+    character.nextPendingSettlementRun?.seasonId ??
     character.nextSettlementBatch?.seasonId ??
     character.latestBattle?.seasonId ??
     character.chain?.cursor?.lastReconciledSeasonId ??

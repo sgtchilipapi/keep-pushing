@@ -63,7 +63,7 @@ async function buildCharacterReadModel(
     return null;
   }
 
-  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch, activeZoneRun, latestClosedZoneRun] =
+  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch, activeZoneRun, latestClosedZoneRun, pendingSettlementRuns] =
     await Promise.all([
       prisma.character.findChainState(character.id),
       prisma.characterProvisionalProgress.findByCharacterId(character.id),
@@ -71,7 +71,9 @@ async function buildCharacterReadModel(
       prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
       prisma.activeZoneRun.findByCharacterId(character.id),
       prisma.closedZoneRunSummary.findLatestForCharacter(character.id),
+      prisma.closedZoneRunSummary.listNextSettleableForCharacter(character.id, 11),
     ]);
+  const nextPendingSettlementRun = pendingSettlementRuns[0] ?? null;
 
   const syncState = deriveCharacterSyncState({
     chain:
@@ -183,6 +185,18 @@ async function buildCharacterReadModel(
             failureCategory: nextSettlementBatch.failureCategory,
             failureCode: nextSettlementBatch.failureCode,
           },
+    nextPendingSettlementRun:
+      nextPendingSettlementRun === null
+        ? null
+        : {
+            zoneRunId: nextPendingSettlementRun.zoneRunId,
+            closedRunSequence: nextPendingSettlementRun.closedRunSequence ?? 0,
+            zoneId: nextPendingSettlementRun.zoneId,
+            seasonId: nextPendingSettlementRun.seasonId,
+            rewardedBattleCount: nextPendingSettlementRun.rewardedBattleCount,
+            closedAt: nextPendingSettlementRun.closedAt.toISOString(),
+          },
+    pendingSettlementRunCount: pendingSettlementRuns.length,
     activeZoneRun:
       activeZoneRun === null
         ? null
@@ -270,7 +284,8 @@ export async function getCharacterSyncDetail(
     detail.character.syncPhase === "CREATING_ON_CHAIN" ||
     detail.character.syncPhase === "FAILED"
       ? "first_sync"
-      : detail.character.nextSettlementBatch !== null
+      : detail.character.nextPendingSettlementRun !== null ||
+          detail.character.nextSettlementBatch !== null
         ? "settlement"
         : null;
 
@@ -281,6 +296,10 @@ export async function getCharacterSyncDetail(
       mode,
       pendingBatchId: detail.character.nextSettlementBatch?.settlementBatchId ?? null,
       pendingBatchNumber: detail.character.nextSettlementBatch?.batchId ?? null,
+      pendingRunSettlementId: detail.character.nextPendingSettlementRun?.zoneRunId ?? null,
+      pendingRunSequence:
+        detail.character.nextPendingSettlementRun?.closedRunSequence ?? null,
+      pendingRunCount: detail.character.pendingSettlementRunCount ?? 0,
       attempts: attempts.map((attempt) => ({
         attemptId: attempt.id,
         attemptNumber: attempt.attemptNumber,

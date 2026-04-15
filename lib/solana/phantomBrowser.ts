@@ -66,6 +66,9 @@ type BrowserSdkModule = {
     addressTypes: string[];
     appId?: string;
     autoConnect?: boolean;
+    authOptions?: {
+      redirectUrl?: string;
+    };
   }) => BrowserSDKLike;
   base64urlDecode(value: string): Uint8Array;
   base64urlEncode(value: Uint8Array): string;

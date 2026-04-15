@@ -100,4 +100,18 @@ describe("POST /api/zone-runs/start", () => {
     expect(response.status).toBe(400);
     expect(startZoneRun).not.toHaveBeenCalled();
   });
+
+  it("returns 409 when the pending settlement queue is full", async () => {
+    (startZoneRun as jest.Mock).mockRejectedValueOnce(
+      new Error(
+        "ERR_ZONE_RUN_SETTLEMENT_QUEUE_FULL: character character-1 already has 10 pending settlement runs",
+      ),
+    );
+
+    const response = await postStart({ characterId: "character-1", zoneId: 2 });
+    const json = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(json.error).toContain("ERR_ZONE_RUN_SETTLEMENT_QUEUE_FULL");
+  });
 });

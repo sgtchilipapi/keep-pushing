@@ -108,6 +108,15 @@ export interface CharacterReadModel {
     failureCategory: string | null;
     failureCode: string | null;
   } | null;
+  nextPendingSettlementRun?: {
+    zoneRunId: string;
+    closedRunSequence: number;
+    zoneId: number;
+    seasonId: number;
+    rewardedBattleCount: number;
+    closedAt: string;
+  } | null;
+  pendingSettlementRunCount?: number;
   activeZoneRun?: {
     runId: string;
     zoneId: number;
@@ -185,6 +194,9 @@ export interface CharacterSyncDetailResponse {
     mode: "first_sync" | "settlement" | null;
     pendingBatchId: string | null;
     pendingBatchNumber: number | null;
+    pendingRunSettlementId?: string | null;
+    pendingRunSequence?: number | null;
+    pendingRunCount?: number;
     attempts: SyncAttemptItem[];
   };
 }

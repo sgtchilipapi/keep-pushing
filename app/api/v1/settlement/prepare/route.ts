@@ -20,6 +20,8 @@ function statusForError(message: string): number {
   if (
     message.startsWith('ERR_SETTLEMENT_REQUEST_ALREADY_EXISTS') ||
     message.startsWith('ERR_SETTLEMENT_ALREADY_SUBMITTED') ||
+    message.startsWith('ERR_SETTLEMENT_RUN_NOT_OLDEST_PENDING') ||
+    message.startsWith('ERR_NO_PENDING_RUNS') ||
     message.startsWith('ERR_NO_PENDING_BATTLES') ||
     message.startsWith('ERR_NO_ELIGIBLE_FIRST_SYNC_BATTLES')
   ) {
@@ -89,6 +91,7 @@ export async function POST(request: Request) {
     }
     const data = await prepareSettlementPresignRequest({
       characterId: typeof body.characterId === 'string' ? body.characterId : '',
+      zoneRunId: typeof body.zoneRunId === 'string' ? body.zoneRunId : '',
       walletAddress: actor.session.walletAddress,
       sessionId: actor.session.id,
       idempotencyKey: typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '',

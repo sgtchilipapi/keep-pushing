@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type TouchEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type TouchEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 
 import type {
@@ -1953,7 +1959,7 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
   }, [
     character.characterId,
     character.syncPhase,
-    character.nextSettlementBatch?.settlementBatchId,
+    character.nextPendingSettlementRun?.zoneRunId,
   ]);
 
   async function refreshAll() {
@@ -2117,13 +2123,18 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           setError(normalizeWalletError(ackError));
         }
       } else {
-        setStepMessage("Preparing oldest pending settlement batch");
+        const pendingRun = character.nextPendingSettlementRun;
+        if (!pendingRun) {
+          throw new Error("No pending settlement run is available.");
+        }
+        setStepMessage("Preparing oldest pending settlement run");
         const prepared = await apiEnvelopeRequest<SettlementV1PrepareData>(
           "/api/v1/settlement/prepare",
           {
             method: "POST",
             body: JSON.stringify({
               characterId: character.characterId,
+              zoneRunId: pendingRun.zoneRunId,
               idempotencyKey: crypto.randomUUID(),
             }),
           },
@@ -2270,13 +2281,19 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
               {pendingAck
                 ? "A wallet submission already happened. Retry acknowledgement from here."
                 : sync.mode === "first_sync"
-                  ? "First sync creates the on-chain character and settles the first batch in one transaction."
-                  : sync.mode === "settlement"
-                    ? "Only the oldest unresolved settlement batch can be submitted from here."
+                  ? "First sync creates the on-chain character, then settlement continues through the normal per-run flow."
+                : sync.mode === "settlement"
+                    ? "Only the oldest unresolved settlement run can be submitted from here."
                     : "No sync action is pending."}
             </p>
           </div>
-          {character.nextSettlementBatch ? (
+          {character.nextPendingSettlementRun ? (
+            <StatusBadge
+              label={`Run ${character.nextPendingSettlementRun.closedRunSequence}`}
+              tone="warning"
+            />
+          ) : null}
+          {!character.nextPendingSettlementRun && character.nextSettlementBatch ? (
             <StatusBadge
               label={`Batch ${character.nextSettlementBatch.batchId}`}
               tone={settlementTone(character.nextSettlementBatch.status)}
@@ -2290,9 +2307,15 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             <span className={styles.keyValue}>{sync.mode ?? "none"}</span>
           </div>
           <div className={styles.keyValueItem}>
-            <span className={styles.keyLabel}>Pending batch</span>
+            <span className={styles.keyLabel}>Pending run</span>
             <span className={styles.keyValue}>
-              {sync.pendingBatchNumber ?? "None"}
+              {sync.pendingRunSequence ?? "None"}
+            </span>
+          </div>
+          <div className={styles.keyValueItem}>
+            <span className={styles.keyLabel}>Pending queue</span>
+            <span className={styles.keyValue}>
+              {sync.pendingRunCount ?? character.pendingSettlementRunCount ?? 0}
             </span>
           </div>
           <div className={styles.keyValueItem}>
@@ -2353,7 +2376,7 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
                   : syncState.syncMode === "create_then_settle"
                     ? "First Sync"
                     : syncState.syncMode === "settlement"
-                      ? "Sync Oldest Batch"
+                      ? "Sync Oldest Run"
                       : "Nothing To Sync"}
             </button>
           )}
@@ -2371,7 +2394,7 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
           <div className={styles.stack}>
             <h2 className={styles.panelTitle}>Attempt History</h2>
             <p className={styles.panelText}>
-              Server reconciliation attempts for the currently pending batch.
+              Server reconciliation attempts for the currently pending settlement item.
             </p>
           </div>
         </div>
@@ -2573,6 +2596,9 @@ export default function GameClient() {
     }
   }
 
+  const loadCharacterDetailRef = useRef(loadCharacterDetail);
+  loadCharacterDetailRef.current = loadCharacterDetail;
+
   async function refreshCharacter(): Promise<CharacterReadModel | null> {
     const rosterResponse = await refreshRoster();
     const nextCharacterId =
@@ -2671,6 +2697,9 @@ export default function GameClient() {
     }
   }
 
+  const refreshZoneTopologyRef = useRef(refreshZoneTopology);
+  refreshZoneTopologyRef.current = refreshZoneTopology;
+
   useEffect(() => {
     let cancelled = false;
 
@@ -2693,7 +2722,9 @@ export default function GameClient() {
             setCharacter(null);
             setShellView("roster");
           } else {
-            await loadCharacterDetail(rosterResponse.characters[0]!.characterId);
+            await loadCharacterDetailRef.current(
+              rosterResponse.characters[0]!.characterId,
+            );
           }
         } catch (error) {
           const status = getApiErrorStatus(error);
@@ -2816,7 +2847,7 @@ export default function GameClient() {
   }, [character, selectedZoneId]);
 
   useEffect(() => {
-    if (character === null) {
+    if (!character?.characterId) {
       setZoneTopology(null);
       setZoneTopologyError(null);
       return;
@@ -2824,7 +2855,7 @@ export default function GameClient() {
 
     const zoneId = activeZoneRunDetail?.zoneId ?? selectedZoneId;
     const topologyVersion = activeZoneRunDetail?.topologyVersion;
-    void refreshZoneTopology(zoneId, topologyVersion);
+    void refreshZoneTopologyRef.current(zoneId, topologyVersion);
   }, [
     character?.characterId,
     selectedZoneId,
@@ -2949,24 +2980,24 @@ export default function GameClient() {
     }
   }
 
-  async function refreshActiveZoneRun(
-    nextCharacter?: CharacterReadModel | null,
-  ) {
-    const activeCharacter = nextCharacter ?? character;
-    if (!activeCharacter?.activeZoneRun) {
+  async function refreshActiveZoneRun(input: {
+    characterId: string;
+    runId: string;
+  }) {
+    if (!input.runId) {
       setActiveZoneRunDetail(null);
       return;
     }
 
     setZoneRunRefreshPending(true);
     console.debug("[zone-run] refreshing active run", {
-      characterId: activeCharacter.characterId,
-      runId: activeCharacter.activeZoneRun.runId,
+      characterId: input.characterId,
+      runId: input.runId,
     });
 
     try {
       const response = await apiRequest<ZoneRunActionResponse>(
-        `/api/zone-runs/active?characterId=${encodeURIComponent(activeCharacter.characterId)}`,
+        `/api/zone-runs/active?characterId=${encodeURIComponent(input.characterId)}`,
         { method: "GET", headers: undefined },
       );
       setActiveZoneRunDetail(response.activeRun);
@@ -2991,32 +3022,47 @@ export default function GameClient() {
     }
   }
 
+  const refreshActiveZoneRunRef = useRef(refreshActiveZoneRun);
+  refreshActiveZoneRunRef.current = refreshActiveZoneRun;
+
   useEffect(() => {
-    if (!character?.activeZoneRun) {
+    const activeCharacterId = character?.characterId ?? null;
+    const activeRun = character?.activeZoneRun ?? null;
+
+    if (!activeCharacterId || !activeRun) {
       setActiveZoneRunDetail(null);
       return;
     }
 
-    void refreshActiveZoneRun(character);
+    void refreshActiveZoneRunRef.current({
+      characterId: activeCharacterId,
+      runId: activeRun.runId,
+    });
   }, [
     character?.characterId,
+    character?.activeZoneRun,
     character?.activeZoneRun?.runId,
     character?.activeZoneRun?.state,
     character?.activeZoneRun?.currentNodeId,
     character?.activeZoneRun?.currentSubnodeId,
   ]);
 
+  const refreshSyncDetailRef = useRef(refreshSyncDetail);
+  refreshSyncDetailRef.current = refreshSyncDetail;
+
   useEffect(() => {
-    if (shellView !== "sync" || !character) {
+    const activeCharacterId = character?.characterId ?? null;
+
+    if (shellView !== "sync" || !activeCharacterId) {
       return;
     }
 
-    void refreshSyncDetail(character.characterId);
+    void refreshSyncDetailRef.current(activeCharacterId);
   }, [
     shellView,
     character?.characterId,
     character?.syncPhase,
-    character?.nextSettlementBatch?.settlementBatchId,
+    character?.nextPendingSettlementRun?.zoneRunId,
   ]);
 
   async function executeZoneRunAction(
@@ -3333,7 +3379,13 @@ export default function GameClient() {
               onStartRun={handleStartZoneRun}
               onRefreshRun={async () => {
                 if (activeZoneRunDetail || character.activeZoneRun) {
-                  await refreshActiveZoneRun(character);
+                  await refreshActiveZoneRun({
+                    characterId: character.characterId,
+                    runId:
+                      activeZoneRunDetail?.runId ??
+                      character.activeZoneRun?.runId ??
+                      "",
+                  });
                   return;
                 }
 

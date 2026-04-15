@@ -3,11 +3,13 @@ import type { SettlementBatchPayloadV2 } from '../settlement';
 
 export interface SettlementV1PrepareRequest {
   characterId: string;
+  zoneRunId: string;
   idempotencyKey: string;
 }
 
 export interface SettlementV1PrepareData {
   prepareRequestId: string;
+  zoneRunId: string;
   settlementBatchId: string;
   payload: SettlementBatchPayloadV2;
   preparedTransaction: PreparedPlayerOwnedTransaction;

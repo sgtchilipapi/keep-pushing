@@ -88,6 +88,7 @@ describe('v1 settlement routes', () => {
   it('prepares a settlement presign request from the active session character access', async () => {
     settlementPresignMock.prepareSettlementPresignRequest.mockResolvedValue({
       prepareRequestId: 'request-1',
+      zoneRunId: 'run-1',
       settlementBatchId: 'batch-1',
       payload: { batchId: 1 },
       preparedTransaction: {
@@ -104,6 +105,7 @@ describe('v1 settlement routes', () => {
         method: 'POST',
         body: JSON.stringify({
           characterId: 'character-1',
+          zoneRunId: 'run-1',
           idempotencyKey: 'idem-1',
         }),
       }),
@@ -117,6 +119,7 @@ describe('v1 settlement routes', () => {
     );
     expect(settlementPresignMock.prepareSettlementPresignRequest).toHaveBeenCalledWith({
       characterId: 'character-1',
+      zoneRunId: 'run-1',
       walletAddress: 'wallet-1',
       sessionId: 'session-1',
       idempotencyKey: 'idem-1',
@@ -147,6 +150,29 @@ describe('v1 settlement routes', () => {
     expect(json.error.code).toContain('ERR_SETTLEMENT_TX_MISMATCH_PROGRAM_ID');
   });
 
+  it('maps finalize replay-signature conflicts to conflict responses', async () => {
+    settlementPresignMock.finalizeSettlementPresignRequest.mockRejectedValue(
+      new Error(
+        'ERR_SETTLEMENT_REQUEST_STATE_INVALID: settlement batch was already submitted with a different transaction signature',
+      ),
+    );
+
+    const response = await finalizePOST(
+      new Request('http://localhost/api/v1/settlement/finalize', {
+        method: 'POST',
+        body: JSON.stringify({
+          prepareRequestId: 'request-1',
+          transactionSignature: 'sig-2',
+        }),
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toContain('ERR_SETTLEMENT_REQUEST_STATE_INVALID');
+  });
+
   it('returns 429 when settlement prepare hits the configured rate limit', async () => {
     rateLimitMock.assertRateLimit.mockImplementationOnce(() => {
       throw new rateLimitMock.RateLimitExceededError(
@@ -160,6 +186,7 @@ describe('v1 settlement routes', () => {
         method: 'POST',
         body: JSON.stringify({
           characterId: 'character-1',
+          zoneRunId: 'run-1',
           idempotencyKey: 'idem-1',
         }),
       }),

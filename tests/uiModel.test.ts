@@ -66,6 +66,14 @@ describe("game ui model helpers", () => {
 
   it("uses the documented effective season precedence", () => {
     const character = buildCharacter({
+      nextPendingSettlementRun: {
+        zoneRunId: "run-7",
+        closedRunSequence: 7,
+        zoneId: 1,
+        seasonId: 5,
+        rewardedBattleCount: 1,
+        closedAt: "2026-04-05T00:00:00.000Z",
+      },
       chain: {
         playerAuthorityPubkey: null,
         chainCharacterIdHex: null,
@@ -112,7 +120,7 @@ describe("game ui model helpers", () => {
       },
     });
 
-    expect(resolveEffectiveSeason(character)).toBe(1);
+    expect(resolveEffectiveSeason(character)).toBe(5);
   });
 
   it("reports local-only sync when the character has not been created on chain yet", () => {

@@ -914,6 +914,16 @@ async function startZoneRunInternal(
     }
   }
 
+  const pendingSettlementRuns = await prisma.closedZoneRunSummary.listNextSettleableForCharacter(
+    input.characterId,
+    10,
+  );
+  if (pendingSettlementRuns.length >= 10) {
+    throw new Error(
+      `ERR_ZONE_RUN_SETTLEMENT_QUEUE_FULL: character ${input.characterId} already has ${pendingSettlementRuns.length} pending settlement runs`,
+    );
+  }
+
   const character = await loadCharacterBattleReadyRecord(input.characterId);
   if (character === null) {
     throw new Error("ERR_CHARACTER_NOT_FOUND: character was not found");

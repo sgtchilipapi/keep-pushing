@@ -104,6 +104,15 @@ describe("GET /api/character", () => {
         failureCategory: null,
         failureCode: null,
       },
+      nextPendingSettlementRun: {
+        zoneRunId: "run-1",
+        closedRunSequence: 8,
+        zoneId: 2,
+        seasonId: 1,
+        rewardedBattleCount: 3,
+        closedAt: "2026-04-13T00:00:00.000Z",
+      },
+      pendingSettlementRunCount: 4,
       activeZoneRun: null,
       latestClosedZoneRun: null,
     });
@@ -125,7 +134,8 @@ describe("GET /api/character", () => {
     expect(json.character.latestBattle.settlementStatus).toBe(
       "AWAITING_FIRST_SYNC",
     );
-    expect(json.character.nextSettlementBatch.batchId).toBe(1);
+    expect(json.character.nextPendingSettlementRun.closedRunSequence).toBe(8);
+    expect(json.character.pendingSettlementRunCount).toBe(4);
     expect(json.character.activeZoneRun).toBeNull();
     expect(json.character.latestClosedZoneRun).toBeNull();
   });
@@ -186,6 +196,15 @@ describe("GET /api/character", () => {
         committedAt: null,
       },
       nextSettlementBatch: null,
+      nextPendingSettlementRun: {
+        zoneRunId: "run-1",
+        closedRunSequence: 1,
+        zoneId: 2,
+        seasonId: 1,
+        rewardedBattleCount: 1,
+        closedAt: "2026-04-13T00:00:00.000Z",
+      },
+      pendingSettlementRunCount: 1,
       activeZoneRun: null,
       latestClosedZoneRun: null,
     });
@@ -201,5 +220,7 @@ describe("GET /api/character", () => {
     expect(json.character.latestBattle.settlementStatus).toBe(
       "AWAITING_FIRST_SYNC",
     );
+    expect(json.character.nextPendingSettlementRun.zoneRunId).toBe("run-1");
+    expect(json.character.pendingSettlementRunCount).toBe(1);
   });
 });

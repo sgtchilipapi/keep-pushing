@@ -144,14 +144,26 @@ async function verifyCanonicalSettlementTransaction(args: {
 
 export async function prepareSettlementPresignRequest(input: {
   characterId: string;
+  zoneRunId: string;
   walletAddress: string;
   sessionId: string;
   idempotencyKey: string;
 }) {
   const characterId = requireNonEmptyString(input.characterId, 'ERR_EMPTY_CHARACTER_ID');
+  const zoneRunId = requireNonEmptyString(input.zoneRunId, 'ERR_EMPTY_ZONE_RUN_ID');
   const walletAddress = requireNonEmptyString(input.walletAddress, 'ERR_EMPTY_WALLET_ADDRESS');
   const sessionId = requireNonEmptyString(input.sessionId, 'ERR_EMPTY_SESSION_ID');
   const idempotencyKey = requireNonEmptyString(input.idempotencyKey, 'ERR_EMPTY_IDEMPOTENCY_KEY');
+  const pendingRuns = await prisma.closedZoneRunSummary.listNextSettleableForCharacter(characterId, 11);
+  const oldestPendingRun = pendingRuns[0] ?? null;
+  if (oldestPendingRun === null) {
+    throw new Error('ERR_NO_PENDING_RUNS: no pending closed runs were available to settle');
+  }
+  if (oldestPendingRun.zoneRunId !== zoneRunId) {
+    throw new Error(
+      'ERR_SETTLEMENT_RUN_NOT_OLDEST_PENDING: requested run is not the oldest pending settlement run',
+    );
+  }
   const existing = await prisma.settlementRequest.findByCharacterAndIdempotencyKey(
     characterId,
     idempotencyKey,
@@ -203,6 +215,7 @@ export async function prepareSettlementPresignRequest(input: {
 
   return {
     prepareRequestId: request.id,
+    zoneRunId,
     settlementBatchId: prepared.settlementBatchId,
     payload: prepared.payload,
     preparedTransaction: prepared.preparedTransaction,
@@ -336,6 +349,15 @@ export async function finalizeSettlementPresignRequest(input: {
   );
   if (batch === null || batch.batchHash !== request.batchHash) {
     throw new Error('ERR_SETTLEMENT_BATCH_NOT_FOUND: settlement batch was not found');
+  }
+  if (
+    request.status === 'PRESIGNED' &&
+    batch.latestTransactionSignature !== null &&
+    batch.latestTransactionSignature !== transactionSignature
+  ) {
+    throw new Error(
+      'ERR_SETTLEMENT_REQUEST_STATE_INVALID: settlement batch was already submitted with a different transaction signature',
+    );
   }
   if (request.status === 'SUBMITTED' || request.status === 'CONFIRMED') {
     if (batch.latestTransactionSignature !== transactionSignature) {

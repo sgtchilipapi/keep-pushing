@@ -54,6 +54,15 @@ describe("GET /api/characters/:characterId/sync", () => {
         provisionalProgress: null,
         latestBattle: null,
         nextSettlementBatch: null,
+        nextPendingSettlementRun: {
+          zoneRunId: "run-1",
+          closedRunSequence: 3,
+          zoneId: 2,
+          seasonId: 1,
+          rewardedBattleCount: 2,
+          closedAt: "2026-04-13T00:00:00.000Z",
+        },
+        pendingSettlementRunCount: 2,
         activeZoneRun: null,
         latestClosedZoneRun: null,
       },
@@ -70,6 +79,9 @@ describe("GET /api/characters/:characterId/sync", () => {
         mode: "first_sync",
         pendingBatchId: null,
         pendingBatchNumber: null,
+        pendingRunSettlementId: "run-1",
+        pendingRunSequence: 3,
+        pendingRunCount: 2,
         attempts: [],
       },
     });
@@ -87,5 +99,8 @@ describe("GET /api/characters/:characterId/sync", () => {
     );
     expect(json.character.characterId).toBe("character-1");
     expect(json.sync.mode).toBe("first_sync");
+    expect(json.sync.pendingRunSettlementId).toBe("run-1");
+    expect(json.sync.pendingRunSequence).toBe(3);
+    expect(json.sync.pendingRunCount).toBe(2);
   });
 });
