@@ -76,8 +76,6 @@ describe("GET /api/characters/:characterId/sync", () => {
       },
       sync: {
         mode: "first_sync",
-        pendingBatchId: null,
-        pendingBatchNumber: null,
         pendingRunSettlementId: "run-1",
         pendingRunSequence: 3,
         pendingRunCount: 2,
@@ -98,8 +96,6 @@ describe("GET /api/characters/:characterId/sync", () => {
     );
     expect(json.character.characterId).toBe("character-1");
     expect(json.sync.mode).toBe("first_sync");
-    expect(json.sync.pendingBatchId).toBeNull();
-    expect(json.sync.pendingBatchNumber).toBeNull();
     expect(json.sync.pendingRunSettlementId).toBe("run-1");
     expect(json.sync.pendingRunSequence).toBe(3);
     expect(json.sync.pendingRunCount).toBe(2);

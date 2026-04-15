@@ -3752,6 +3752,38 @@ export const prisma = {
 
       return result.rows.map(mapSettlementSubmissionAttempt);
     },
+    async listByActiveRequestCharacter(characterId: string) {
+      const result = await pool.query<SettlementSubmissionAttemptRow>(
+        `SELECT
+          attempt.id,
+          attempt."settlementBatchId",
+          attempt."attemptNumber",
+          attempt."status",
+          attempt."messageSha256Hex",
+          attempt."signedTransactionSha256Hex",
+          attempt."transactionSignature",
+          attempt."rpcError",
+          attempt."createdAt",
+          attempt."updatedAt",
+          attempt."submittedAt",
+          attempt."resolvedAt"
+        FROM "SettlementSubmissionAttempt" attempt
+        JOIN "SettlementBatch" batch
+          ON batch.id = attempt."settlementBatchId"
+        JOIN "SettlementRequest" request
+          ON request."characterId" = batch."characterId"
+         AND request."batchId" = batch."batchId"
+        WHERE request."characterId" = $1
+          AND request."status" IN ('PREPARED', 'PRESIGNED', 'SUBMITTED')
+        ORDER BY
+          COALESCE(request."finalizedAt", request."presignedAt", request."preparedAt", request."createdAt") DESC,
+          request."createdAt" DESC,
+          attempt."attemptNumber" ASC`,
+        [characterId]
+      );
+
+      return result.rows.map(mapSettlementSubmissionAttempt);
+    },
     async update(id: string, input: UpdateSettlementSubmissionAttemptInput) {
       const result = await pool.query<SettlementSubmissionAttemptRow>(
         `UPDATE "SettlementSubmissionAttempt"
@@ -3908,6 +3940,36 @@ export const prisma = {
           AND "idempotencyKey" = $2
         LIMIT 1`,
         [characterId, idempotencyKey]
+      );
+
+      return result.rows[0] ? mapSettlementRequest(result.rows[0]) : null;
+    },
+    async findLatestActiveByCharacter(characterId: string) {
+      const result = await pool.query<SettlementRequestRow>(
+        `SELECT
+          id,
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "batchId",
+          "batchHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementRequest"
+        WHERE "characterId" = $1
+          AND "status" IN ('PREPARED', 'PRESIGNED', 'SUBMITTED')
+        ORDER BY COALESCE("finalizedAt", "presignedAt", "preparedAt", "createdAt") DESC, "createdAt" DESC
+        LIMIT 1`,
+        [characterId]
       );
 
       return result.rows[0] ? mapSettlementRequest(result.rows[0]) : null;

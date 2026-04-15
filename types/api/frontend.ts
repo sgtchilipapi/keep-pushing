@@ -171,8 +171,6 @@ export interface CharacterSyncDetailResponse {
   season: CurrentSeasonResponse;
   sync: {
     mode: "first_sync" | "settlement" | null;
-    pendingBatchId?: string | null;
-    pendingBatchNumber?: number | null;
     pendingRunSettlementId?: string | null;
     pendingRunSequence?: number | null;
     pendingRunCount?: number;

@@ -103,7 +103,9 @@ type BrowserSdkProvider = PhantomSolanaProvider & {
   __phantomSdk: BrowserSDKLike;
 };
 
-const PHANTOM_CONNECT_APP_ID = process.env.NEXT_PUBLIC_PHANTOM_APP_ID ?? '';
+const PHANTOM_CONNECT_APP_ID =
+  process.env.NEXT_PUBLIC_PHANTOM_APP_ID ??
+  '7b1fd2de-302c-4f27-b70b-9591ab44cdf3';
 const PHANTOM_CONNECT_DEFAULT_PROVIDER = (process.env.NEXT_PUBLIC_PHANTOM_CONNECT_PROVIDER ??
   'google') as PhantomConnectProvider;
 const PHANTOM_CONNECT_REDIRECT_URL = process.env.NEXT_PUBLIC_PHANTOM_CONNECT_REDIRECT_URL ?? '';

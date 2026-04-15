@@ -250,14 +250,14 @@ export async function getCharacterSyncDetail(
   userId?: string,
 ): Promise<CharacterSyncDetailResponse> {
   const detail = await getCharacterDetail(characterId, userId);
-  const nextSettlementBatch = await prisma.settlementBatch.findNextUnconfirmedForCharacter(
+  const activeSettlementRequest = await prisma.settlementRequest.findLatestActiveByCharacter(
     detail.character.characterId,
   );
   const attempts =
-    nextSettlementBatch === null
+    activeSettlementRequest === null
       ? []
-      : await prisma.settlementSubmissionAttempt.listByBatch(
-          nextSettlementBatch.id,
+      : await prisma.settlementSubmissionAttempt.listByActiveRequestCharacter(
+          detail.character.characterId,
         );
   const mode =
     detail.character.syncPhase === "LOCAL_ONLY" ||
@@ -265,7 +265,7 @@ export async function getCharacterSyncDetail(
     detail.character.syncPhase === "FAILED"
       ? "first_sync"
       : detail.character.nextPendingSettlementRun !== null ||
-          nextSettlementBatch !== null
+          activeSettlementRequest !== null
         ? "settlement"
         : null;
 
@@ -274,8 +274,6 @@ export async function getCharacterSyncDetail(
     season: detail.season,
     sync: {
       mode,
-      pendingBatchId: null,
-      pendingBatchNumber: null,
       pendingRunSettlementId: detail.character.nextPendingSettlementRun?.zoneRunId ?? null,
       pendingRunSequence:
         detail.character.nextPendingSettlementRun?.closedRunSequence ?? null,
