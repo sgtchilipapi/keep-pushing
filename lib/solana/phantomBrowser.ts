@@ -62,9 +62,10 @@ type BrowserSdkAddressType = {
 type BrowserSdkModule = {
   AddressType: BrowserSdkAddressType;
   BrowserSDK: new (config: {
-    providers: PhantomConnectProvider[];
+    providers?: PhantomConnectProvider[];
     addressTypes: string[];
     appId?: string;
+    providerType?: 'embedded' | 'injected';
     autoConnect?: boolean;
     authOptions?: {
       authUrl?: string;
@@ -93,7 +94,7 @@ type BrowserSDKLike = {
       },
     ): Promise<{ signature: string }>;
   };
-  connect(options: { provider: PhantomConnectProvider }): Promise<unknown>;
+  connect(options?: { provider?: PhantomConnectProvider }): Promise<unknown>;
   disconnect(): Promise<void>;
   autoConnect(): Promise<void>;
   on(event: string, callback: (...args: unknown[]) => void): void;
@@ -189,9 +190,6 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
         }
 
         const { BrowserSDK, AddressType } = sdkModule;
-        const providers: PhantomConnectProvider[] = PHANTOM_CONNECT_APP_ID
-          ? ['google', 'apple', 'phantom', 'injected', 'deeplink']
-          : ['injected'];
         const redirectUrl = resolveBrowserRedirectUrl();
         logPhantomDebug('initializing browser sdk', {
           origin: window.location.origin,
@@ -199,10 +197,11 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
           appIdPresent: PHANTOM_CONNECT_APP_ID.length > 0,
           appId: PHANTOM_CONNECT_APP_ID,
           redirectUrl,
-          providers,
+          providerType: PHANTOM_CONNECT_APP_ID ? 'embedded' : 'injected',
         });
         return new BrowserSDK({
-          providers,
+          providers: PHANTOM_CONNECT_APP_ID ? undefined : ['injected'],
+          providerType: PHANTOM_CONNECT_APP_ID ? 'embedded' : 'injected',
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
           authOptions: {
@@ -317,7 +316,7 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
   }
 
   logPhantomDebug('starting sdk.connect', {
-    provider: PHANTOM_CONNECT_APP_ID ? 'phantom' : 'injected',
+    providerType: PHANTOM_CONNECT_APP_ID ? 'embedded' : 'injected',
     origin: window.location.origin,
     href: window.location.href,
     redirectUrl: resolveBrowserRedirectUrl(),
@@ -326,13 +325,13 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
 
   try {
     if (PHANTOM_CONNECT_APP_ID) {
-      await sdk.connect({ provider: 'phantom' });
+      await sdk.connect();
     } else {
       await sdk.connect({ provider: 'injected' });
     }
   } catch (error) {
     logPhantomDebug('sdk.connect failed', {
-      provider: PHANTOM_CONNECT_APP_ID ? 'phantom' : 'injected',
+      providerType: PHANTOM_CONNECT_APP_ID ? 'embedded' : 'injected',
       origin: window.location.origin,
       href: window.location.href,
       redirectUrl: resolveBrowserRedirectUrl(),
