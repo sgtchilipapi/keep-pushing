@@ -6,7 +6,7 @@ describe("deriveCharacterSyncState", () => {
       deriveCharacterSyncState({
         chain: null,
         latestBattleSettlementStatus: "AWAITING_FIRST_SYNC",
-        nextSettlementBatch: null,
+        oldestPendingRunSequence: null,
       }),
     ).toEqual({
       syncPhase: "LOCAL_ONLY",
@@ -22,10 +22,7 @@ describe("deriveCharacterSyncState", () => {
           lastReconciledBatchId: 0,
         },
         latestBattleSettlementStatus: "SEALED",
-        nextSettlementBatch: {
-          batchId: 1,
-          status: "SEALED",
-        },
+        oldestPendingRunSequence: 1,
       }),
     ).toEqual({
       syncPhase: "INITIAL_SETTLEMENT_REQUIRED",
@@ -41,10 +38,7 @@ describe("deriveCharacterSyncState", () => {
           lastReconciledBatchId: 1,
         },
         latestBattleSettlementStatus: "PENDING",
-        nextSettlementBatch: {
-          batchId: 2,
-          status: "SEALED",
-        },
+        oldestPendingRunSequence: 2,
       }),
     ).toEqual({
       syncPhase: "SETTLEMENT_PENDING",

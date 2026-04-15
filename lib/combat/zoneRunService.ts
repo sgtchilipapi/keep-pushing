@@ -243,10 +243,11 @@ function resolveZoneRunIdleTimeoutSeconds(env: NodeJS.ProcessEnv): number {
 async function assertBattleEligibleForConfirmedCharacter(
   character: CharacterBattleReadyRecord,
 ): Promise<void> {
-  const [latestBattle, nextSettlementBatch] = await Promise.all([
+  const [latestBattle, pendingSettlementRuns] = await Promise.all([
     prisma.battleOutcomeLedger.findLatestForCharacter(character.id),
-    prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
+    prisma.closedZoneRunSummary.listNextSettleableForCharacter(character.id, 1),
   ]);
+  const oldestPendingRun = pendingSettlementRuns[0] ?? null;
 
   const syncState = deriveCharacterSyncState({
     chain: {
@@ -254,13 +255,7 @@ async function assertBattleEligibleForConfirmedCharacter(
       lastReconciledBatchId: character.lastReconciledBatchId,
     },
     latestBattleSettlementStatus: latestBattle?.settlementStatus ?? null,
-    nextSettlementBatch:
-      nextSettlementBatch === null
-        ? null
-        : {
-            batchId: nextSettlementBatch.batchId,
-            status: nextSettlementBatch.status,
-          },
+    oldestPendingRunSequence: oldestPendingRun?.closedRunSequence ?? null,
   });
 
   if (!syncState.battleEligible) {

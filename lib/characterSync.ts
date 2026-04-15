@@ -1,7 +1,6 @@
 import type {
   BattleOutcomeLedgerStatus,
   CharacterChainCreationStatus,
-  SettlementBatchStatus,
 } from "./prisma";
 import type { CharacterSyncPhase } from "../types/api/frontend";
 
@@ -11,10 +10,7 @@ export interface CharacterSyncDerivationInput {
     lastReconciledBatchId: number | null;
   } | null;
   latestBattleSettlementStatus: BattleOutcomeLedgerStatus | null;
-  nextSettlementBatch: {
-    batchId: number;
-    status: SettlementBatchStatus;
-  } | null;
+  oldestPendingRunSequence: number | null;
 }
 
 export interface CharacterSyncDerivationResult {
@@ -22,16 +18,12 @@ export interface CharacterSyncDerivationResult {
   battleEligible: boolean;
 }
 
-function hasInitialSettlementBatchPending(
+function hasInitialSettlementPendingRun(
   args: CharacterSyncDerivationInput,
 ): boolean {
   const lastReconciledBatchId = args.chain?.lastReconciledBatchId ?? 0;
 
-  return (
-    args.nextSettlementBatch !== null &&
-    args.nextSettlementBatch.batchId === 1 &&
-    lastReconciledBatchId < 1
-  );
+  return args.oldestPendingRunSequence === 1 && lastReconciledBatchId < 1;
 }
 
 export function deriveCharacterSyncState(
@@ -42,7 +34,7 @@ export function deriveCharacterSyncState(
   const initialSettlementRequired =
     chainStatus === "CONFIRMED" &&
     (latestSettlementStatus === "AWAITING_FIRST_SYNC" ||
-      hasInitialSettlementBatchPending(input));
+      hasInitialSettlementPendingRun(input));
 
   if (input.chain === null || chainStatus === "NOT_STARTED") {
     return {
@@ -75,7 +67,7 @@ export function deriveCharacterSyncState(
   if (
     latestSettlementStatus === "PENDING" ||
     latestSettlementStatus === "SEALED" ||
-    input.nextSettlementBatch !== null
+    input.oldestPendingRunSequence !== null
   ) {
     return {
       syncPhase: "SETTLEMENT_PENDING",

@@ -42,7 +42,7 @@ function mapCharacterSummary(
   const syncState = deriveCharacterSyncState({
     chain: null,
     latestBattleSettlementStatus: null,
-    nextSettlementBatch: null,
+    oldestPendingRunSequence: null,
   });
 
   return {
@@ -84,13 +84,7 @@ async function buildCharacterReadModel(
             lastReconciledBatchId: chainState.lastReconciledBatchId,
           },
     latestBattleSettlementStatus: latestBattle?.settlementStatus ?? null,
-    nextSettlementBatch:
-      nextSettlementBatch === null
-        ? null
-        : {
-            batchId: nextSettlementBatch.batchId,
-            status: nextSettlementBatch.status,
-          },
+    oldestPendingRunSequence: nextPendingSettlementRun?.closedRunSequence ?? null,
   });
 
   return {
@@ -167,23 +161,6 @@ async function buildCharacterReadModel(
             settlementStatus: latestBattle.settlementStatus,
             sealedBatchId: latestBattle.sealedBatchId,
             committedAt: latestBattle.committedAt?.toISOString() ?? null,
-          },
-    nextSettlementBatch:
-      nextSettlementBatch === null
-        ? null
-        : {
-            settlementBatchId: nextSettlementBatch.id,
-            batchId: nextSettlementBatch.batchId,
-            startNonce: nextSettlementBatch.startNonce,
-            endNonce: nextSettlementBatch.endNonce,
-            battleCount: nextSettlementBatch.battleCount,
-            firstBattleTs: nextSettlementBatch.firstBattleTs,
-            lastBattleTs: nextSettlementBatch.lastBattleTs,
-            seasonId: nextSettlementBatch.seasonId,
-            status: nextSettlementBatch.status,
-            latestTransactionSignature: nextSettlementBatch.latestTransactionSignature,
-            failureCategory: nextSettlementBatch.failureCategory,
-            failureCode: nextSettlementBatch.failureCode,
           },
     nextPendingSettlementRun:
       nextPendingSettlementRun === null
@@ -273,11 +250,14 @@ export async function getCharacterSyncDetail(
   userId?: string,
 ): Promise<CharacterSyncDetailResponse> {
   const detail = await getCharacterDetail(characterId, userId);
+  const nextSettlementBatch = await prisma.settlementBatch.findNextUnconfirmedForCharacter(
+    detail.character.characterId,
+  );
   const attempts =
-    detail.character.nextSettlementBatch === null
+    nextSettlementBatch === null
       ? []
       : await prisma.settlementSubmissionAttempt.listByBatch(
-          detail.character.nextSettlementBatch.settlementBatchId,
+          nextSettlementBatch.id,
         );
   const mode =
     detail.character.syncPhase === "LOCAL_ONLY" ||
@@ -285,7 +265,7 @@ export async function getCharacterSyncDetail(
     detail.character.syncPhase === "FAILED"
       ? "first_sync"
       : detail.character.nextPendingSettlementRun !== null ||
-          detail.character.nextSettlementBatch !== null
+          nextSettlementBatch !== null
         ? "settlement"
         : null;
 

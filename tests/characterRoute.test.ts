@@ -90,20 +90,6 @@ describe("GET /api/character", () => {
         sealedBatchId: null,
         committedAt: null,
       },
-      nextSettlementBatch: {
-        settlementBatchId: "batch-1",
-        batchId: 1,
-        startNonce: 1,
-        endNonce: 3,
-        battleCount: 3,
-        firstBattleTs: 1700000001,
-        lastBattleTs: 1700000100,
-        seasonId: 1,
-        status: "SEALED",
-        latestTransactionSignature: null,
-        failureCategory: null,
-        failureCode: null,
-      },
       nextPendingSettlementRun: {
         zoneRunId: "run-1",
         closedRunSequence: 8,
@@ -195,7 +181,6 @@ describe("GET /api/character", () => {
         sealedBatchId: null,
         committedAt: null,
       },
-      nextSettlementBatch: null,
       nextPendingSettlementRun: {
         zoneRunId: "run-1",
         closedRunSequence: 1,

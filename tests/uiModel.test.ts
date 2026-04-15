@@ -47,7 +47,6 @@ function buildCharacter(
       zoneStates: { "1": 1 },
     },
     latestBattle: null,
-    nextSettlementBatch: null,
     ...overrides,
   };
 }
@@ -103,20 +102,6 @@ describe("game ui model helpers", () => {
         settlementStatus: "PENDING",
         sealedBatchId: null,
         committedAt: null,
-      },
-      nextSettlementBatch: {
-        settlementBatchId: "batch-1",
-        batchId: 2,
-        startNonce: 2,
-        endNonce: 2,
-        battleCount: 1,
-        firstBattleTs: 11,
-        lastBattleTs: 11,
-        seasonId: 1,
-        status: "SEALED",
-        latestTransactionSignature: null,
-        failureCategory: null,
-        failureCode: null,
       },
     });
 
@@ -198,7 +183,7 @@ describe("game ui model helpers", () => {
     });
   });
 
-  it("reports pending settlement after confirmation when a batch exists", () => {
+  it("reports pending settlement after confirmation when a pending run exists", () => {
     const state = resolveSyncPanelState(
       buildCharacter({
         syncPhase: "INITIAL_SETTLEMENT_REQUIRED",
@@ -221,19 +206,13 @@ describe("game ui model helpers", () => {
             lastReconciledAt: null,
           },
         },
-        nextSettlementBatch: {
-          settlementBatchId: "batch-1",
-          batchId: 2,
-          startNonce: 2,
-          endNonce: 2,
-          battleCount: 1,
-          firstBattleTs: 11,
-          lastBattleTs: 11,
+        nextPendingSettlementRun: {
+          zoneRunId: "run-2",
+          closedRunSequence: 2,
+          zoneId: 1,
           seasonId: 2,
-          status: "SEALED",
-          latestTransactionSignature: null,
-          failureCategory: null,
-          failureCode: null,
+          rewardedBattleCount: 1,
+          closedAt: "2026-04-05T00:00:00.000Z",
         },
       }),
     );

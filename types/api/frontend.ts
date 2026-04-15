@@ -24,13 +24,6 @@ export type BattleSettlementStatus =
   | "SEALED"
   | "COMMITTED";
 
-export type SettlementBatchStatus =
-  | "SEALED"
-  | "PREPARED"
-  | "SUBMITTED"
-  | "CONFIRMED"
-  | "FAILED";
-
 export type AccountMode = "anon" | "wallet-linked";
 export type SeasonPhase = "active" | "grace" | "ended";
 export type RunShareStatus = "PENDING" | "SYNCED" | "EXPIRED";
@@ -93,20 +86,6 @@ export interface CharacterReadModel {
     settlementStatus: BattleSettlementStatus;
     sealedBatchId: string | null;
     committedAt: string | null;
-  } | null;
-  nextSettlementBatch?: {
-    settlementBatchId: string;
-    batchId: number;
-    startNonce: number;
-    endNonce: number;
-    battleCount: number;
-    firstBattleTs: number;
-    lastBattleTs: number;
-    seasonId: number;
-    status: SettlementBatchStatus;
-    latestTransactionSignature: string | null;
-    failureCategory: string | null;
-    failureCode: string | null;
   } | null;
   nextPendingSettlementRun?: {
     zoneRunId: string;

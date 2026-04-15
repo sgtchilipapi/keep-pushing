@@ -53,7 +53,6 @@ describe("GET /api/characters/:characterId/sync", () => {
         chain: null,
         provisionalProgress: null,
         latestBattle: null,
-        nextSettlementBatch: null,
         nextPendingSettlementRun: {
           zoneRunId: "run-1",
           closedRunSequence: 3,
