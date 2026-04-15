@@ -68,7 +68,6 @@ type BrowserSdkModule = {
     providerType?: 'embedded';
     autoConnect?: boolean;
     authOptions?: {
-      authUrl?: string;
       redirectUrl?: string;
     };
   }) => BrowserSDKLike;
@@ -206,7 +205,6 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
           authOptions: {
-            authUrl: 'https://connect.phantom.app/login',
             redirectUrl,
           },
         });
