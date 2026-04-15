@@ -67,6 +67,7 @@ type BrowserSdkModule = {
     appId?: string;
     autoConnect?: boolean;
     authOptions?: {
+      authUrl?: string;
       redirectUrl?: string;
     };
   }) => BrowserSDKLike;
@@ -92,7 +93,7 @@ type BrowserSDKLike = {
       },
     ): Promise<{ signature: string }>;
   };
-  connect(options?: { provider?: PhantomConnectProvider }): Promise<unknown>;
+  connect(options: { provider: PhantomConnectProvider }): Promise<unknown>;
   disconnect(): Promise<void>;
   autoConnect(): Promise<void>;
   on(event: string, callback: (...args: unknown[]) => void): void;
@@ -104,7 +105,7 @@ type BrowserSdkProvider = PhantomSolanaProvider & {
 };
 
 const PHANTOM_CONNECT_APP_ID = '5a98fa34-66b8-4652-bf30-89a1f690c92e';
-const PHANTOM_CONNECT_REDIRECT_URL = 'https://www.runara.quest/';
+const PHANTOM_CONNECT_REDIRECT_URL = 'https://www.runara.quest';
 
 let browserSdkPromise: Promise<BrowserSDKLike | null> | null = null;
 let browserSdkModulePromise: Promise<BrowserSdkModule | null> | null = null;
@@ -205,6 +206,7 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
           authOptions: {
+            authUrl: 'https://connect.phantom.app/login',
             redirectUrl,
           },
         });
@@ -315,26 +317,26 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
   }
 
   logPhantomDebug('starting sdk.connect', {
+    provider: PHANTOM_CONNECT_APP_ID ? 'phantom' : 'injected',
     origin: window.location.origin,
     href: window.location.href,
     redirectUrl: resolveBrowserRedirectUrl(),
     appId: PHANTOM_CONNECT_APP_ID,
-    mode: PHANTOM_CONNECT_APP_ID ? 'phantom-connect-default' : 'injected-only',
   });
 
   try {
     if (PHANTOM_CONNECT_APP_ID) {
-      await sdk.connect({});
+      await sdk.connect({ provider: 'phantom' });
     } else {
       await sdk.connect({ provider: 'injected' });
     }
   } catch (error) {
     logPhantomDebug('sdk.connect failed', {
+      provider: PHANTOM_CONNECT_APP_ID ? 'phantom' : 'injected',
       origin: window.location.origin,
       href: window.location.href,
       redirectUrl: resolveBrowserRedirectUrl(),
       appId: PHANTOM_CONNECT_APP_ID,
-      mode: PHANTOM_CONNECT_APP_ID ? 'phantom-connect-default' : 'injected-only',
       ...normalizeUnknownError(error),
     });
     throw error;
