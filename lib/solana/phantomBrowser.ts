@@ -325,10 +325,11 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
   });
 
   try {
-    await sdk.connect();
+    await sdk.connect({ provider: 'google' });
   } catch (error) {
     logPhantomDebug('sdk.connect failed', {
       providerType: 'embedded',
+      provider: 'google',
       origin: window.location.origin,
       href: window.location.href,
       redirectUrl: resolveBrowserRedirectUrl(),
@@ -339,6 +340,7 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
   }
 
   logPhantomDebug('sdk.connect succeeded', {
+    provider: 'google',
     publicKey: sdk.solana.publicKey,
     isConnected: sdk.solana.isConnected,
   });
