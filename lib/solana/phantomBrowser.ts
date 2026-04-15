@@ -115,6 +115,35 @@ const PHANTOM_CONNECT_REDIRECT_URL =
 let browserSdkPromise: Promise<BrowserSDKLike | null> | null = null;
 let browserSdkModulePromise: Promise<BrowserSdkModule | null> | null = null;
 
+function logPhantomDebug(message: string, details?: Record<string, unknown>) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (details) {
+    console.info(`[phantom-connect] ${message}`, details);
+    return;
+  }
+
+  console.info(`[phantom-connect] ${message}`);
+}
+
+function normalizeUnknownError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    return { ...error };
+  }
+
+  return { value: error };
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -137,9 +166,16 @@ async function loadBrowserSdkModule(): Promise<BrowserSdkModule | null> {
   }
 
   if (!browserSdkModulePromise) {
+    logPhantomDebug('loading browser sdk module', {
+      origin: window.location.origin,
+      href: window.location.href,
+    });
     browserSdkModulePromise = import('@phantom/browser-sdk')
       .then((module) => module as unknown as BrowserSdkModule)
-      .catch(() => null);
+      .catch((error) => {
+        logPhantomDebug('failed to load browser sdk module', normalizeUnknownError(error));
+        return null;
+      });
   }
 
   return browserSdkModulePromise;
@@ -161,16 +197,29 @@ async function loadBrowserSdk(): Promise<BrowserSDKLike | null> {
         const providers: PhantomConnectProvider[] = PHANTOM_CONNECT_APP_ID
           ? ['google', 'apple', 'phantom', 'injected', 'deeplink']
           : ['injected'];
+        const redirectUrl = resolveBrowserRedirectUrl();
+        logPhantomDebug('initializing browser sdk', {
+          origin: window.location.origin,
+          href: window.location.href,
+          appIdPresent: PHANTOM_CONNECT_APP_ID.length > 0,
+          appId: PHANTOM_CONNECT_APP_ID,
+          redirectUrl,
+          providerFallback: PHANTOM_CONNECT_DEFAULT_PROVIDER,
+          providers,
+        });
         return new BrowserSDK({
           providers,
           addressTypes: [AddressType.solana],
           appId: PHANTOM_CONNECT_APP_ID || undefined,
           authOptions: {
-            redirectUrl: resolveBrowserRedirectUrl(),
+            redirectUrl,
           },
         });
       })
-      .catch(() => null);
+      .catch((error) => {
+        logPhantomDebug('failed to initialize browser sdk', normalizeUnknownError(error));
+        return null;
+      });
   }
 
   return browserSdkPromise;
@@ -279,7 +328,33 @@ async function connectWithBrowserSdk(): Promise<{ provider: PhantomSolanaProvide
     provider = 'google';
   }
 
-  await sdk.connect({ provider });
+  logPhantomDebug('starting sdk.connect', {
+    provider,
+    origin: window.location.origin,
+    href: window.location.href,
+    redirectUrl: resolveBrowserRedirectUrl(),
+    appId: PHANTOM_CONNECT_APP_ID,
+  });
+
+  try {
+    await sdk.connect({ provider });
+  } catch (error) {
+    logPhantomDebug('sdk.connect failed', {
+      provider,
+      origin: window.location.origin,
+      href: window.location.href,
+      redirectUrl: resolveBrowserRedirectUrl(),
+      appId: PHANTOM_CONNECT_APP_ID,
+      ...normalizeUnknownError(error),
+    });
+    throw error;
+  }
+
+  logPhantomDebug('sdk.connect succeeded', {
+    provider,
+    publicKey: sdk.solana.publicKey,
+    isConnected: sdk.solana.isConnected,
+  });
   const publicKey = await resolveSdkPublicKey(sdk);
   return { provider: createSdkProvider(sdk, publicKey), publicKey };
 }
