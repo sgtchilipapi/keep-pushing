@@ -4,14 +4,15 @@ import RunResultPageView from "../../../components/game/RunResultPageView";
 import { getRunResult } from "../../../lib/runResultService";
 
 type PageProps = {
-  params: {
+  params: Promise<{
     runId: string;
-  };
+  }>;
 };
 
 export default async function RunResultPage(props: PageProps) {
   try {
-    const run = await getRunResult(props.params.runId);
+    const { runId } = await props.params;
+    const run = await getRunResult(runId);
     const origin = process.env.NEXT_PUBLIC_APP_ORIGIN ?? "http://localhost:3000";
 
     return <RunResultPageView run={run} origin={origin} />;

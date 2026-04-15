@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { getRunResult } from "../../../../lib/runResultService";
 
 type Context = {
-  params: {
+  params: Promise<{
     runId: string;
-  };
+  }>;
 };
 
 export async function GET(_: Request, context: Context) {
-  const runId = context.params.runId;
+  const { runId } = await context.params;
   if (!runId) {
     return NextResponse.json({ error: "runId is required." }, { status: 400 });
   }

@@ -8,13 +8,13 @@ import {
 import { getCharacterDetail } from "../../../../lib/characterAppService";
 
 type Context = {
-  params: {
+  params: Promise<{
     characterId: string;
-  };
+  }>;
 };
 
 export async function GET(request: Request, context: Context) {
-  const characterId = context.params.characterId;
+  const { characterId } = await context.params;
 
   if (!characterId) {
     return NextResponse.json({ error: "characterId is required." }, { status: 400 });

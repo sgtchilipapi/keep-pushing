@@ -212,6 +212,55 @@ Apply the confirmed on-chain changes required to satisfy target Phantom Connect 
 
 ---
 
+## Slice A0 — Framework prerequisite: Next 15 + React 19 upgrade
+
+### Why this is a prerequisite
+- `@phantom/react-sdk` requires React 19.
+- The current app stack (`next@14.2.x` + React 18) is incompatible with the React SDK peer requirements and breaks on Vercel even when local installs are forced.
+- Therefore the frontend auth migration in Slice A depends on first moving the app to a framework line that officially supports React 19.
+
+### Scope
+Upgrade the frontend framework/tooling stack just far enough to support React 19 cleanly before Phantom Connect React SDK auth is rolled out.
+
+### Target versions
+- `next@15.x`
+- `react@19.x`
+- `react-dom@19.x`
+- `eslint-config-next@15.x`
+- `@types/react@19.x`
+- `@types/react-dom@19.x`
+
+### Touchpoints
+- `package.json`
+- `package-lock.json`
+- `next.config.mjs`
+- any app/client components that surface React 19 or Next 15 compatibility issues during build
+
+### Deliverables
+1. Dependency alignment
+- upgrade Next/React and matching type/lint packages together; do not force React 19 under Next 14
+
+2. Build compatibility
+- restore a clean `next build` locally
+- restore a clean Vercel dependency install and build
+
+3. App-level validation
+- verify the landing page, auth shell, and core game shell render correctly after upgrade
+- verify no new hydration/runtime errors are introduced by the framework move
+
+### Verification
+- `npm install`
+- `npm test -- --runInBand tests/authRoutes.test.ts tests/phantomBrowser.test.ts`
+- `npm run build`
+- Vercel preview install/build succeeds on the upgraded dependency graph
+
+### Exit criteria
+- the repo is on a React 19-compatible Next line
+- local production build is green
+- Vercel install/build no longer fails because of the Phantom React SDK peer requirements
+
+---
+
 ## Slice A — Auth foundation: nonce + verify + sessions
 
 ### Scope
@@ -227,7 +276,6 @@ Implement wallet-proof login and backend session infrastructure as the only supp
 ### Frontend auth implementation note
 - Wrap the app root with `PhantomProvider` from `@phantom/react-sdk`.
 - Use embedded-only config:
-  - `providerType: "embedded"`
   - `providers: ["google", "apple"]`
   - `appId: 5a98fa34-66b8-4652-bf30-89a1f690c92e`
   - `authOptions.redirectUrl: "https://www.runara.quest"`
