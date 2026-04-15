@@ -773,6 +773,218 @@ Fallback designs:
 
 ---
 
+## 8.1) End-to-end walkthrough: first visit -> settlement
+
+### 1. First app visit
+- User lands on `/`.
+- `components/game/GameClient.tsx` boots the shell.
+- On boot, the client loads:
+  - season data from `/api/seasons/current`
+  - class catalog from `/api/classes`
+  - existing session-backed roster from `/api/characters`
+- If no valid app session cookie exists yet, roster load is unauthorized and the shell remains on the login/landing path.
+- There is no anonymous fallback path.
+
+### 2. Phantom login
+- User connects through Phantom using the client wallet adapter flow in `lib/solana/phantomBrowser.ts`.
+- Once a wallet address is available, the app creates a backend session:
+  1. `POST /api/v1/auth/nonce`
+  2. client signs the nonce message with Phantom
+  3. `POST /api/v1/auth/verify`
+- Server auth routes:
+  - `app/api/v1/auth/nonce/route.ts`
+  - `app/api/v1/auth/verify/route.ts`
+- Backend verifies:
+  - nonce challenge
+  - wallet signature proof
+  - server-managed session row
+  - secure cookie
+- After verify succeeds, the app reloads authenticated state:
+  - roster
+  - season
+  - classes
+  - first character detail if one exists
+
+### 3. Character state after login
+- Character-facing reads come from:
+  - `/api/character`
+  - `/api/characters/[characterId]`
+  - `/api/characters/[characterId]/sync`
+- These routes ultimately use `lib/characterAppService.ts`.
+- Public app state is run-centric:
+  - `nextPendingSettlementRun`
+  - `pendingSettlementRunCount`
+  - sync detail uses run/request semantics
+- Public character state does not expose `nextSettlementBatch`.
+
+### 4. Character creation
+- User-facing app flow creates a playable character through `/api/characters`.
+- The wallet/session-backed on-chain create path is:
+  - `POST /api/v1/characters/create/prepare`
+  - Phantom signs/sends
+  - `POST /api/v1/characters/create/finalize`
+- The target shape is:
+  - app character exists
+  - chain character creation is an explicit wallet-backed prepare/finalize flow
+  - initial settlement is not modeled as an atomic create-plus-settle special transaction
+
+### 5. First sync / initial on-chain bootstrap
+- First sync routes still exist as the current bridge:
+  - `/api/v1/characters/first-sync/prepare`
+  - `/api/v1/characters/first-sync/finalize`
+- Client uses them when the character is local-only / creating-on-chain.
+- The direction of travel remains:
+  - create character
+  - then settle runs through the same normal per-run machinery
+
+### 6. Starting gameplay
+- Starting a run goes through `POST /api/zone-runs/start`.
+- Route: `app/api/zone-runs/start/route.ts`
+- Service: `lib/combat/zoneRunService.ts`
+- Guardrails before run creation:
+  - session must own the character
+  - no existing active run unless auto-close resolves it
+  - character must be battle-eligible
+  - zone must be unlocked
+  - pending settlement queue must be under cap
+- If there are already 10 pending unsettled runs, start is rejected.
+
+### 7. During gameplay
+- Active run state flows through zone-run routes/services:
+  - start
+  - advance
+  - choose branch
+  - continue
+  - use skill
+  - abandon
+  - active snapshot reads
+- These update active run state and eventually close a run into a closed-run summary.
+- Closed runs are the source for settlement queueing.
+
+### 8. When a run finishes
+- A finished run becomes a closed run summary.
+- Pending settlement queue order is derived from closed, settleable runs in FIFO `closedRunSequence` order.
+- The app surfaces:
+  - the oldest pending run as `nextPendingSettlementRun`
+  - queue depth as `pendingSettlementRunCount`
+
+### 9. Settlement trigger
+- On the sync page, or when sync is needed, the app picks the oldest pending run only.
+- Client path in `components/game/GameClient.tsx`:
+  1. read `character.nextPendingSettlementRun`
+  2. call `POST /api/v1/settlement/prepare` with:
+     - `characterId`
+     - `zoneRunId`
+     - `idempotencyKey`
+- Backend route: `app/api/v1/settlement/prepare/route.ts`
+- Backend service: `lib/solana/settlementPresign.ts`
+
+### 10. What prepare does
+- `prepareSettlementPresignRequest(...)` performs server-side gatekeeping:
+  - verifies session wallet ownership
+  - requires `zoneRunId`
+  - checks the requested run is the oldest pending run
+  - rejects if there are no pending runs
+  - applies idempotency rules
+  - prepares the canonical settlement transaction payload
+  - creates a settlement request row with TTL and request state
+- Response includes:
+  - `prepareRequestId`
+  - `zoneRunId`
+  - prepared transaction
+  - `presignToken`
+
+### 11. Phantom signing flow
+- This is the embedded-wallet-compatible path:
+  1. backend `prepare`
+  2. client starts Phantom sign/send
+  3. Phantom invokes `presignTransaction`
+  4. client sends tx bytes to `/api/v1/settlement/presign`
+  5. backend verifies tx canonically and adds sponsor signature
+  6. tx goes back to Phantom
+  7. Phantom adds player signature and sends
+  8. client calls `/api/v1/settlement/finalize`
+
+### 12. What presign does
+- Route: `app/api/v1/settlement/presign/route.ts`
+- Service: `presignSettlementTransaction(...)` in `lib/solana/settlementPresign.ts`
+- Checks:
+  - request exists and belongs to the session wallet
+  - request is in a presignable state
+  - presign token matches
+  - message hash matches the prepared request
+  - fee payer is the sponsor signer
+  - instruction set is canonical
+  - Runana program id matches the expected program
+  - replay of the same already-presigned message is allowed idempotently
+  - mismatched replay invalidates the request
+- On success:
+  - backend sponsor signs fee-payer role only
+  - request moves to `PRESIGNED`
+
+### 13. What finalize does
+- Route: `app/api/v1/settlement/finalize/route.ts`
+- Service: `finalizeSettlementPresignRequest(...)` in `lib/solana/settlementPresign.ts`
+- Behavior:
+  - verifies wallet ownership again
+  - ensures request is in a finalizable state
+  - resolves the internal settlement record backing the request
+  - if already submitted/confirmed with the same signature, returns idempotently
+  - if a partial recovery retry arrives with a different signature, rejects
+  - records a submission attempt if needed
+  - calls reconciliation
+  - updates request status to `SUBMITTED` or `CONFIRMED`
+
+### 14. Sync detail / attempt history
+- Public sync response is run/request-centric.
+- Internally, attempt history is still stored in settlement-execution rows.
+- Current bridge:
+  - sync detail finds the active settlement request for the character
+  - then loads attempts associated with that active request
+  - no batch identity is exposed in the sync API
+
+### 15. Queue and retry behavior
+- If settlement does not complete:
+  - the run stays pending
+  - it remains at the head of the queue
+  - retries target the oldest pending run
+  - queue depth remains visible
+  - new runs are blocked once queue depth reaches 10
+- If finalize partially succeeded:
+  - same-signature retries are idempotent and recover cleanly
+  - different-signature retries are rejected
+
+### 16. Security model through the whole flow
+- Identity/security:
+  - wallet proves identity at login
+  - backend session cookie is the app auth primitive
+  - protected routes derive character access from session, not client `userId`
+- Settlement security:
+  - backend prepares canonical tx
+  - backend only sponsor-signs the fee payer role
+  - player wallet remains the gameplay authority signer
+  - canonical tx verification prevents fee-payer/program-id/instruction-set tampering
+  - oldest-pending-only enforcement preserves ordered settlement semantics
+- Operational controls:
+  - rate limits on auth and settlement routes
+  - audit logging around v1 routes
+  - replay/idempotency checks on settlement request lifecycle
+
+### 17. Current end-state summary
+- From first visit to settlement, the path is:
+  1. visit app
+  2. Phantom wallet login
+  3. backend session established
+  4. create/select character
+  5. start and complete runs
+  6. each closed run enters a FIFO pending-settlement queue
+  7. app prepares settlement for the oldest pending run
+  8. Phantom embedded flow signs/sends with backend presign callback
+  9. backend finalizes and reconciles
+  10. queue advances to the next run
+
+---
+
 ## 9) Release checklist (must-pass)
 
 - [ ] Phantom Connect is the only visible login path.
