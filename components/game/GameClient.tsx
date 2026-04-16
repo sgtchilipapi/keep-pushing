@@ -2486,7 +2486,9 @@ export default function GameClient() {
     null,
   );
   const authWalletInFlightRef = useRef<string | null>(null);
+  const authProviderRef = useRef<PhantomAuthProvider | null>(null);
   const phantomStateRef = useRef<string | null>(null);
+  authProviderRef.current = authProvider;
 
   const walletAvailability: WalletAvailability = "installed";
   const walletPublicKey = useMemo(
@@ -3012,7 +3014,7 @@ export default function GameClient() {
     void authenticateWalletSession({
       provider: walletProvider,
       walletAddress: walletPublicKey,
-      authProvider,
+      authProvider: authProviderRef.current,
     })
       .then(async () => {
         if (cancelled) {
@@ -3066,7 +3068,6 @@ export default function GameClient() {
       cancelled = true;
     };
   }, [
-    authProvider,
     disconnectEmbeddedWallet,
     phantomConnected,
     sessionActive,
@@ -3102,6 +3103,7 @@ export default function GameClient() {
   async function handleConnectWallet(provider: PhantomAuthProvider = "google") {
     authWalletInFlightRef.current = null;
     setWalletError(null);
+    setAuthProvider(provider);
     logPhantomConnectClientEvent({
       area: "ui",
       stage: "connect_modal_open_requested",
@@ -3114,7 +3116,6 @@ export default function GameClient() {
 
     try {
       const result = await connectEmbeddedWallet({ provider });
-      setAuthProvider(provider);
       logPhantomConnectClientEvent({
         area: "sdk",
         stage: "react_sdk_direct_connect_succeeded",
@@ -3129,6 +3130,7 @@ export default function GameClient() {
         },
       });
     } catch (error) {
+      setAuthProvider(null);
       logPhantomConnectClientEvent({
         area: "sdk",
         stage: "react_sdk_direct_connect_failed",
