@@ -3,9 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 
+import { ensureAuthSchemaBestEffort } from '../../../../../lib/auth/db';
 import { consumeAuthNonce } from '../../../../../lib/auth/nonce';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
-import { ensureAuthSchema } from '../../../../../lib/auth/db';
 import {
   assertRateLimit,
   getClientIpAddress,
@@ -23,7 +23,7 @@ interface VerifyBody {
 }
 
 export async function POST(request: Request) {
-  await ensureAuthSchema();
+  await ensureAuthSchemaBestEffort();
   const requestId = createAuditRequestId();
   const clientIp = getClientIpAddress(request);
   let body: VerifyBody;

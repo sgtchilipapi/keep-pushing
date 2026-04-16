@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 
-import { ensureAuthSchema } from '../../../../../lib/auth/db';
+import { ensureAuthSchemaBestEffort } from '../../../../../lib/auth/db';
 import { clearSessionCookie, parseSessionTokenFromCookieHeader, revokeSessionByToken } from '../../../../../lib/auth/session';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
 
 export async function POST(request: Request) {
-  await ensureAuthSchema();
+  await ensureAuthSchemaBestEffort();
   const requestId = createAuditRequestId();
   const token = parseSessionTokenFromCookieHeader(request.headers.get('cookie'));
   if (token) {

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 
+import { ensureAuthSchemaBestEffort } from '../../../../../lib/auth/db';
 import { issueAuthNonce } from '../../../../../lib/auth/nonce';
-import { ensureAuthSchema } from '../../../../../lib/auth/db';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
 import {
   assertRateLimit,
@@ -11,7 +11,7 @@ import {
 } from '../../../../../lib/security/rateLimit';
 
 export async function POST(request: Request) {
-  await ensureAuthSchema();
+  await ensureAuthSchemaBestEffort();
   const requestId = createAuditRequestId();
   const clientIp = getClientIpAddress(request);
   let body: { walletAddress?: string; chain?: string };

@@ -81,3 +81,11 @@ export async function ensureAuthSchema(): Promise<void> {
 
   await ensureAuthSchemaPromise;
 }
+
+export async function ensureAuthSchemaBestEffort(): Promise<void> {
+  try {
+    await ensureAuthSchema();
+  } catch (error) {
+    console.warn('[auth/db] auth schema bootstrap failed; continuing with fallback auth flows', error);
+  }
+}
