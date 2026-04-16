@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
-import { AddressType, PhantomProvider, darkTheme } from '@phantom/react-sdk';
+import { useEffect, useMemo, type ReactNode } from 'react';
+import {
+  AddressType,
+  DebugLevel,
+  PhantomProvider,
+  darkTheme,
+  type DebugMessage,
+} from '@phantom/react-sdk';
 
 import { logPhantomConnectClientEvent } from '../../lib/observability/phantomConnectClient';
 
@@ -11,6 +17,17 @@ type PhantomSdkProviderProps = {
 
 const PHANTOM_APP_ID = '5a98fa34-66b8-4652-bf30-89a1f690c92e';
 const PHANTOM_REDIRECT_URL = 'https://www.runara.quest/auth/callback/';
+
+function mapDebugLevel(level: DebugLevel): 'info' | 'warn' | 'error' {
+  switch (level) {
+    case DebugLevel.ERROR:
+      return 'error';
+    case DebugLevel.WARN:
+      return 'warn';
+    default:
+      return 'info';
+  }
+}
 
 export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps) {
   useEffect(() => {
@@ -27,6 +44,27 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
     });
   }, []);
 
+  const debugConfig = useMemo(
+    () => ({
+      enabled: true,
+      level: DebugLevel.INFO,
+      callback: (message: DebugMessage) => {
+        logPhantomConnectClientEvent({
+          area: 'sdk',
+          stage: `sdk_native_${message.category.toLowerCase()}`,
+          level: mapDebugLevel(message.level),
+          message: message.message,
+          details: {
+            category: message.category,
+            data: message.data ?? null,
+            timestamp: message.timestamp,
+          },
+        });
+      },
+    }),
+    [],
+  );
+
   return (
     <PhantomProvider
       config={{
@@ -37,6 +75,7 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
           redirectUrl: PHANTOM_REDIRECT_URL,
         },
       }}
+      debugConfig={debugConfig}
       theme={darkTheme}
       appName="Runara"
     >
