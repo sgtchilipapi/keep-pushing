@@ -858,7 +858,7 @@ describeLocalnet("runana localnet integration", () => {
     );
     expect(settlementSimulation.value.err).toBeNull();
     expect(settlementSimulation.value.logs?.join("\n")).toContain(
-      "Program CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm success",
+      "Program FeZgz7XaSXg9uEpC4Lh3fPSYpFmYWdUQ1GNyWX8Heskg success",
     );
   });
 });

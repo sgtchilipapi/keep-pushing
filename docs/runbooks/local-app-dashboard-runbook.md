@@ -59,6 +59,12 @@ This one does a harder reset first:
 - removes local `.tmp` and `.next` artifacts
 - then boots the fresh stack again
 
+Codespaces helpers rebuild the Solana program when source is newer than the deployed `.so`:
+
+- they use `anchor build` when `anchor` exists
+- otherwise they fall back to `cargo-build-sbf`
+- you can still force reuse of the existing artifact with `RUNANA_SKIP_PROGRAM_BUILD=1`
+
 Codespaces manual fallback:
 
 1. Run the Codespaces one-shot block in `Codespaces One-Shot Truly Fresh`
@@ -318,6 +324,12 @@ If you want the same flow but with a wiped DB and cleaned local artifacts first:
 ```bash
 cd /workspaces/keep-pushing
 npm run app:codespace:clean
+```
+
+If you really want to skip the rebuild and reuse the current artifact:
+
+```bash
+RUNANA_SKIP_PROGRAM_BUILD=1 npm run app:codespace:fresh
 ```
 
 Paste this inside the Codespace shell:
