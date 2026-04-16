@@ -2482,6 +2482,9 @@ export default function GameClient() {
     string | null
   >(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [authProvider, setAuthProvider] = useState<PhantomAuthProvider | null>(
+    null,
+  );
   const authWalletInFlightRef = useRef<string | null>(null);
   const phantomStateRef = useRef<string | null>(null);
 
@@ -2527,6 +2530,7 @@ export default function GameClient() {
   async function authenticateWalletSession(args: {
     provider: PhantomSolanaProvider;
     walletAddress: string;
+    authProvider: PhantomAuthProvider | null;
   }): Promise<AuthVerifyResponse> {
     logPhantomConnectClientEvent({
       area: "auth",
@@ -2614,6 +2618,9 @@ export default function GameClient() {
     try {
       verified = await apiRequest<AuthVerifyResponse>("/api/v1/auth/verify", {
         method: "POST",
+        headers: args.authProvider
+          ? { "x-phantom-provider": args.authProvider }
+          : undefined,
         body: JSON.stringify({
           nonceId: nonce.data.nonceId,
           walletAddress: args.walletAddress,
@@ -3005,6 +3012,7 @@ export default function GameClient() {
     void authenticateWalletSession({
       provider: walletProvider,
       walletAddress: walletPublicKey,
+      authProvider,
     })
       .then(async () => {
         if (cancelled) {
@@ -3029,6 +3037,7 @@ export default function GameClient() {
           return;
         }
         authWalletInFlightRef.current = null;
+        const normalizedError = normalizeWalletError(error);
         logPhantomConnectClientEvent({
           area: "session",
           stage: "session_bootstrap_failed",
@@ -3036,11 +3045,16 @@ export default function GameClient() {
           message: "Wallet session bootstrap failed.",
           details: {
             walletPublicKey,
-            error: normalizeWalletError(error),
+            error: normalizedError,
             status: getApiErrorStatus(error),
           },
         });
-        setWalletError(normalizeWalletError(error));
+        if (normalizedError === "User rejected the request.") {
+          resetAuthenticatedState();
+          setAuthProvider(null);
+          void disconnectEmbeddedWallet().catch(() => undefined);
+        }
+        setWalletError(normalizedError);
         setAppPhase("ready");
       })
       .finally(() => {
@@ -3051,7 +3065,14 @@ export default function GameClient() {
     return () => {
       cancelled = true;
     };
-  }, [phantomConnected, sessionActive, walletProvider, walletPublicKey]);
+  }, [
+    authProvider,
+    disconnectEmbeddedWallet,
+    phantomConnected,
+    sessionActive,
+    walletProvider,
+    walletPublicKey,
+  ]);
 
   useEffect(() => {
     const maxZone = maxUnlockedZone(character);
@@ -3093,6 +3114,7 @@ export default function GameClient() {
 
     try {
       const result = await connectEmbeddedWallet({ provider });
+      setAuthProvider(provider);
       logPhantomConnectClientEvent({
         area: "sdk",
         stage: "react_sdk_direct_connect_succeeded",
@@ -3122,6 +3144,7 @@ export default function GameClient() {
   }
 
   async function handleDisconnectWallet() {
+    setAuthProvider(null);
     setWalletError(null);
     logPhantomConnectClientEvent({
       area: "session",

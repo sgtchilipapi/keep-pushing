@@ -18,6 +18,9 @@ const walletVerifyMock = {
 const authPoolMock = {
   query: jest.fn(),
 };
+const dbPoolMock = {
+  query: jest.fn(),
+};
 const ensureAuthSchemaMock = jest.fn();
 const auditMock = {
   createAuditRequestId: jest.fn(() => "request-1"),
@@ -56,6 +59,9 @@ jest.mock("../lib/auth/walletVerify", () => ({
 jest.mock("../lib/auth/db", () => ({
   authPool: authPoolMock,
   ensureAuthSchema: ensureAuthSchemaMock,
+}));
+jest.mock("../lib/prisma", () => ({
+  dbPool: dbPoolMock,
 }));
 jest.mock("../lib/observability/audit", () => ({
   createAuditRequestId: auditMock.createAuditRequestId,
@@ -117,7 +123,7 @@ describe("v1 auth routes", () => {
       message: "signed-message",
     });
     walletVerifyMock.verifySolanaMessageSignature.mockReturnValue(true);
-    authPoolMock.query.mockResolvedValue({
+    dbPoolMock.query.mockResolvedValue({
       rows: [{ id: "user-1" }],
     });
     sessionMock.createSession.mockResolvedValue({

@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 
-import { authPool } from '../../../../../lib/auth/db';
 import { consumeAuthNonce } from '../../../../../lib/auth/nonce';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
 import {
@@ -145,19 +144,21 @@ export async function POST(request: Request) {
       : 'phantom_connect';
   const walletMode =
     request.headers.get('x-phantom-provider') === 'injected' ? 'injected' : 'embedded';
+  const authProvider = walletProvider;
   let userResult;
   try {
-    userResult = await authPool.query<{ id: string }>(
+    userResult = await dbPool.query<{ id: string }>(
       `INSERT INTO "User" (id, "primaryWalletAddress", "walletProvider", "walletMode", "authProvider", "walletVerifiedAt", "lastLoginAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, 'phantom_connect', $5, $5, $5)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $6)
        ON CONFLICT ("primaryWalletAddress") DO UPDATE SET
          "walletProvider" = EXCLUDED."walletProvider",
          "walletMode" = EXCLUDED."walletMode",
+         "authProvider" = EXCLUDED."authProvider",
          "walletVerifiedAt" = EXCLUDED."walletVerifiedAt",
          "lastLoginAt" = EXCLUDED."lastLoginAt",
          "updatedAt" = EXCLUDED."updatedAt"
        RETURNING id`,
-      [randomUUID(), body.walletAddress, walletProvider, walletMode, now],
+      [randomUUID(), body.walletAddress, walletProvider, walletMode, authProvider, now],
     );
   } catch (error) {
     const fallbackUserId = createHash('sha256')
