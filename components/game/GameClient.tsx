@@ -10,8 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import {
   AddressType,
+  useConnect,
   useDisconnect as usePhantomDisconnect,
-  useModal,
   usePhantom,
   useSolana,
 } from "@phantom/react-sdk";
@@ -2407,7 +2407,11 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
 
 export default function GameClient() {
   const router = useRouter();
-  const { open: openWalletModal } = useModal();
+  const {
+    connect: connectEmbeddedWallet,
+    isConnecting: explicitConnectPending,
+    error: explicitConnectError,
+  } = useConnect();
   const { disconnect: disconnectEmbeddedWallet } = usePhantomDisconnect();
   const {
     addresses: phantomAddresses,
@@ -2469,6 +2473,7 @@ export default function GameClient() {
   );
   const walletProvider = useMemo(() => createReactSdkSolanaProvider(solana), [solana]);
   const walletConnectionStatus: WalletConnectionStatus = phantomConnecting
+    || explicitConnectPending
     ? "connecting"
     : phantomLoading
       ? "checking_trusted"
@@ -2925,6 +2930,23 @@ export default function GameClient() {
   }, []);
 
   useEffect(() => {
+    if (!explicitConnectError) {
+      return;
+    }
+
+    logPhantomConnectClientEvent({
+      area: "sdk",
+      stage: "react_sdk_connect_error",
+      level: "error",
+      message: "React SDK direct connect returned an error.",
+      details: {
+        errorName: explicitConnectError.name,
+        errorMessage: explicitConnectError.message,
+      },
+    });
+  }, [explicitConnectError]);
+
+  useEffect(() => {
     if (
       !phantomConnected ||
       !walletPublicKey ||
@@ -3042,7 +3064,33 @@ export default function GameClient() {
         shellView,
       },
     });
-    openWalletModal();
+
+    try {
+      const result = await connectEmbeddedWallet({ provider: "google" });
+      logPhantomConnectClientEvent({
+        area: "sdk",
+        stage: "react_sdk_direct_connect_succeeded",
+        message: "Direct React SDK connect returned successfully.",
+        details: {
+          addressCount: result.addresses.length,
+          addresses: result.addresses.map((address) => ({
+            address: address.address,
+            addressType: address.addressType,
+          })),
+        },
+      });
+    } catch (error) {
+      logPhantomConnectClientEvent({
+        area: "sdk",
+        stage: "react_sdk_direct_connect_failed",
+        level: "error",
+        message: "Direct React SDK connect failed.",
+        details: {
+          error: normalizeWalletError(error),
+        },
+      });
+      setWalletError(normalizeWalletError(error));
+    }
   }
 
   async function handleDisconnectWallet() {
