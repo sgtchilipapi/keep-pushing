@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
-import { authPool } from './db';
+import { authPool, ensureAuthSchema } from './db';
 import { SESSION_COOKIE_NAME, SESSION_TTL_MS } from './constants';
 
 function sha256(value: string): string {
@@ -34,6 +34,7 @@ export async function createSession(input: {
   ipAddress: string | null;
   userAgent: string | null;
 }) {
+  await ensureAuthSchema();
   const token = randomBytes(32).toString('base64url');
   const tokenHash = sha256(token);
   const id = randomUUID();
@@ -66,6 +67,7 @@ export async function createSession(input: {
 }
 
 export async function revokeSessionByToken(token: string): Promise<void> {
+  await ensureAuthSchema();
   const now = new Date();
   await authPool.query(
     `UPDATE "Session"
@@ -86,6 +88,7 @@ export interface ActiveSession {
 }
 
 export async function getActiveSessionByToken(token: string): Promise<ActiveSession | null> {
+  await ensureAuthSchema();
   const now = new Date();
   const result = await authPool.query<{
     id: string;

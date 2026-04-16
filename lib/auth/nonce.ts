@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { authPool } from './db';
+import { authPool, ensureAuthSchema } from './db';
 import { AUTH_NONCE_TTL_MS } from './constants';
 import { buildWalletAuthMessage, randomNonce } from './walletVerify';
 
@@ -9,6 +9,7 @@ function normalizeWallet(value: string): string {
 }
 
 export async function issueAuthNonce(input: { walletAddress: string; origin: string }) {
+  await ensureAuthSchema();
   const walletAddress = normalizeWallet(input.walletAddress);
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + AUTH_NONCE_TTL_MS);
@@ -41,6 +42,7 @@ export async function consumeAuthNonce(input: {
   walletAddress: string;
   message: string;
 }) {
+  await ensureAuthSchema();
   const now = new Date();
   const result = await authPool.query<{
     id: string;
