@@ -18,6 +18,7 @@ const walletVerifyMock = {
 const authPoolMock = {
   query: jest.fn(),
 };
+const ensureAuthSchemaMock = jest.fn();
 const auditMock = {
   createAuditRequestId: jest.fn(() => "request-1"),
   writeAuditLogSafe: jest.fn(),
@@ -54,6 +55,7 @@ jest.mock("../lib/auth/walletVerify", () => ({
 
 jest.mock("../lib/auth/db", () => ({
   authPool: authPoolMock,
+  ensureAuthSchema: ensureAuthSchemaMock,
 }));
 jest.mock("../lib/observability/audit", () => ({
   createAuditRequestId: auditMock.createAuditRequestId,
@@ -74,6 +76,7 @@ const walletAddress = "11111111111111111111111111111111";
 describe("v1 auth routes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    ensureAuthSchemaMock.mockResolvedValue(undefined);
   });
 
   it("issues a Solana auth nonce", async () => {

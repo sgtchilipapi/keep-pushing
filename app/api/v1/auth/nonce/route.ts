@@ -102,10 +102,44 @@ export async function POST(request: Request) {
   }
 
   const origin = request.headers.get('origin') ?? 'unknown-origin';
-  const data = await issueAuthNonce({
-    walletAddress: body.walletAddress,
-    origin,
-  });
+  let data;
+  try {
+    data = await issueAuthNonce({
+      walletAddress: body.walletAddress,
+      origin,
+    });
+  } catch (error) {
+    console.error('[auth/nonce] failed to issue auth nonce', {
+      walletAddress: body.walletAddress,
+      clientIp,
+      origin,
+      error,
+    });
+    await writeAuditLogSafe({
+      requestId,
+      walletAddress: body.walletAddress,
+      actionType: 'AUTH_NONCE',
+      phase: 'REQUEST',
+      status: 'ERROR',
+      errorCode: 'AUTH_NONCE_INTERNAL_ERROR',
+      httpStatus: 500,
+      metadataJson: {
+        clientIp,
+        origin,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+              }
+            : String(error),
+      },
+    });
+    return NextResponse.json(
+      { ok: false, error: { code: 'AUTH_NONCE_INTERNAL_ERROR' } },
+      { status: 500 },
+    );
+  }
   await writeAuditLogSafe({
     requestId,
     walletAddress: body.walletAddress,
