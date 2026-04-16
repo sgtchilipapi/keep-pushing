@@ -44,6 +44,21 @@ npm run app:codespace:fresh
 2. On your machine, start the SSH tunnel it prints
 3. Open `http://127.0.0.1:3000/`
 
+Full clean Codespaces reset:
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:clean
+```
+
+This one does a harder reset first:
+
+- stops host-run app processes
+- stops validator and faucet
+- removes Docker Postgres containers and volume
+- removes local `.tmp` and `.next` artifacts
+- then boots the fresh stack again
+
 Codespaces manual fallback:
 
 1. Run the Codespaces one-shot block in `Codespaces One-Shot Truly Fresh`
@@ -296,6 +311,13 @@ If you do not need the raw block, use the one-line helper instead:
 ```bash
 cd /workspaces/keep-pushing
 npm run app:codespace:fresh
+```
+
+If you want the same flow but with a wiped DB and cleaned local artifacts first:
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:clean
 ```
 
 Paste this inside the Codespace shell:

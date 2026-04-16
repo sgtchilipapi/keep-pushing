@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "app:codespace:clean": "bash scripts/appCodespaceClean.sh",
     "app:local:clean-space": "bash scripts/cleanupLocalDisk.sh",
     "app:codespace:fresh": "bash scripts/appCodespaceFresh.sh",
     "app:local:fresh": "bash scripts/appLocalFresh.sh",
