@@ -1,18 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import {
   AddressType,
   DebugLevel,
   PhantomProvider,
   darkTheme,
   type DebugMessage,
+  type PhantomSDKConfig,
 } from '@phantom/react-sdk';
 
 import { logPhantomConnectClientEvent } from '../../lib/observability/phantomConnectClient';
 
 type PhantomSdkProviderProps = {
   children: ReactNode;
+};
+
+type PhantomSDKConfigWithAutoConnect = PhantomSDKConfig & {
+  autoConnect?: boolean;
 };
 
 const PHANTOM_APP_ID = '5a98fa34-66b8-4652-bf30-89a1f690c92e';
@@ -30,6 +36,9 @@ function mapDebugLevel(level: DebugLevel): 'info' | 'warn' | 'error' {
 }
 
 export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps) {
+  const pathname = usePathname();
+  const autoConnect = pathname === '/auth/callback' || pathname === '/auth/callback/';
+
   useEffect(() => {
     logPhantomConnectClientEvent({
       area: 'sdk',
@@ -40,9 +49,11 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
         redirectUrl: PHANTOM_REDIRECT_URL,
         providers: ['google', 'apple', 'injected'],
         addressTypes: [AddressType.solana],
+        autoConnect,
+        pathname,
       },
     });
-  }, []);
+  }, [autoConnect, pathname]);
 
   const debugConfig = useMemo(
     () => ({
@@ -65,16 +76,22 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
     [],
   );
 
+  const config = useMemo<PhantomSDKConfigWithAutoConnect>(
+    () => ({
+      providers: ['google', 'apple', 'injected'],
+      addressTypes: [AddressType.solana],
+      appId: PHANTOM_APP_ID,
+      autoConnect,
+      authOptions: {
+        redirectUrl: PHANTOM_REDIRECT_URL,
+      },
+    }),
+    [autoConnect],
+  );
+
   return (
     <PhantomProvider
-      config={{
-        providers: ['google', 'apple', 'injected'],
-        addressTypes: [AddressType.solana],
-        appId: PHANTOM_APP_ID,
-        authOptions: {
-          redirectUrl: PHANTOM_REDIRECT_URL,
-        },
-      }}
+      config={config}
       debugConfig={debugConfig}
       theme={darkTheme}
       appName="Runara"

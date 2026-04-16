@@ -27,19 +27,17 @@ export function getReactSdkSolanaAddress(
 
 export function createReactSdkSolanaProvider(
   solana: ISolanaChain,
+  publicKey: string | null,
 ): PhantomSolanaProvider | null {
-  if (!solana.publicKey) {
+  if (!publicKey) {
     return null;
   }
 
   return {
     isPhantom: true,
-    publicKey: createPublicKey(solana.publicKey),
+    publicKey: createPublicKey(publicKey),
     async connect() {
-      if (!solana.publicKey) {
-        throw new Error('Phantom Connect did not return a public key.');
-      }
-      return { publicKey: createPublicKey(solana.publicKey) };
+      return { publicKey: createPublicKey(publicKey) };
     },
     async disconnect() {
       await solana.disconnect();

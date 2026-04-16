@@ -2493,7 +2493,10 @@ export default function GameClient() {
       null,
     [phantomAddresses, solana.publicKey],
   );
-  const walletProvider = useMemo(() => createReactSdkSolanaProvider(solana), [solana]);
+  const walletProvider = useMemo(
+    () => createReactSdkSolanaProvider(solana, walletPublicKey),
+    [solana, walletPublicKey],
+  );
   const walletConnectionStatus: WalletConnectionStatus = phantomConnecting
     || explicitConnectPending
     ? "connecting"
