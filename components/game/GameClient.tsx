@@ -120,7 +120,7 @@ type ApiError = Error & {
   status?: number;
 };
 
-type PhantomAuthProvider = "google" | "apple";
+type PhantomAuthProvider = "google" | "apple" | "injected";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -1165,6 +1165,16 @@ function LandingPanel(props: LandingPanelProps) {
             {props.connectionStatus === "connecting"
               ? "Connecting..."
               : "Continue with Apple"}
+          </button>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={() => void props.onConnect("injected")}
+            disabled={props.pending}
+          >
+            {props.connectionStatus === "connecting"
+              ? "Connecting..."
+              : "Use Phantom Extension"}
           </button>
         </div>
       </div>
