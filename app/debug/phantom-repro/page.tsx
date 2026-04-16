@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AddressType,
-  type AuthProviderType,
   useConnect,
   useDisconnect,
   usePhantom,
@@ -18,7 +17,9 @@ type ReproEvent = {
   message: string;
 };
 
-const CONNECT_PROVIDERS: AuthProviderType[] = ['google', 'apple', 'injected'];
+type ReproProvider = 'google' | 'apple' | 'injected';
+
+const CONNECT_PROVIDERS: ReproProvider[] = ['google', 'apple', 'injected'];
 
 function pushReproEvent(
   setEvents: React.Dispatch<React.SetStateAction<ReproEvent[]>>,
@@ -74,7 +75,7 @@ export default function PhantomReproPage() {
     solanaAddress,
   ]);
 
-  async function handleConnect(provider: AuthProviderType) {
+  async function handleConnect(provider: ReproProvider) {
     setLastActionError(null);
     pushReproEvent(setEvents, `connect start provider=${provider}`);
     logPhantomConnectClientEvent({
