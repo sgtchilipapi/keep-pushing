@@ -32,7 +32,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-keep_pushing}
       RUNANA_SOLANA_RPC_URL: ${RUNANA_SOLANA_RPC_URL:-http://host.docker.internal:8899}
       RUNANA_SOLANA_COMMITMENT: ${RUNANA_SOLANA_COMMITMENT:-confirmed}
-      RUNANA_PROGRAM_ID: ${RUNANA_PROGRAM_ID:-FeZgz7XaSXg9uEpC4Lh3fPSYpFmYWdUQ1GNyWX8Heskg}
+      RUNANA_PROGRAM_ID: ${RUNANA_PROGRAM_ID:-CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm}
       RUNANA_SERVER_SIGNER_KEYPAIR_PATH: ${RUNANA_SERVER_SIGNER_KEYPAIR_PATH:-/runana-secrets/server.json}
       PORT: 3000
     volumes:

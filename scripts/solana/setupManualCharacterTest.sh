@@ -32,6 +32,7 @@ VALIDATOR_PORT="$(node -e "process.stdout.write(new URL(process.argv[1]).port ||
 PROGRAM_KEYPAIR_PATH="${RUNANA_PROGRAM_KEYPAIR_PATH:-$RUNANA_PROGRAM_ROOT/target/deploy/runana_program-keypair.json}"
 PROGRAM_SO_PATH="${RUNANA_PROGRAM_SO_PATH:-$RUNANA_PROGRAM_ROOT/target/deploy/runana_program.so}"
 PROGRAM_ID="${RUNANA_PROGRAM_ID:-$(solana-keygen pubkey "$PROGRAM_KEYPAIR_PATH")}"
+EXPECTED_PROGRAM_ID="$(solana-keygen pubkey "$PROGRAM_KEYPAIR_PATH")"
 PROGRAM_SOURCE_DIR="${RUNANA_PROGRAM_SOURCE_DIR:-$RUNANA_PROGRAM_ROOT/programs/runana-program/src}"
 
 ZONE_ID="${RUNANA_BOOTSTRAP_ZONE_ID:-1}"
@@ -409,6 +410,10 @@ require_command solana-test-validator
 prune_old_artifact_dirs
 
 [[ -f "$PROGRAM_KEYPAIR_PATH" ]] || fail "program keypair not found at $PROGRAM_KEYPAIR_PATH"
+
+if [[ "$PROGRAM_ID" != "$EXPECTED_PROGRAM_ID" ]]; then
+  fail "RUNANA_PROGRAM_ID ($PROGRAM_ID) does not match program keypair pubkey ($EXPECTED_PROGRAM_ID) from $PROGRAM_KEYPAIR_PATH"
+fi
 
 build_program_if_needed
 [[ -f "$PROGRAM_SO_PATH" ]] || fail "program binary not found at $PROGRAM_SO_PATH"
