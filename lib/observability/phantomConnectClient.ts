@@ -6,7 +6,7 @@ import type {
 } from './phantomConnectDebug';
 
 const CLIENT_DEBUG_ENABLED =
-  process.env.NEXT_PUBLIC_PHANTOM_CONNECT_DEBUG_ENABLED === '1';
+  process.env.NEXT_PUBLIC_PHANTOM_CONNECT_DEBUG_ENABLED !== '0';
 const DEBUG_ENDPOINT = '/api/debug/phantom-connect';
 
 type ClientDebugInput = Omit<

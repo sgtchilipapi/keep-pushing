@@ -28,7 +28,7 @@ export interface PhantomConnectStoredDebugEvent extends PhantomConnectDebugEvent
 const DEFAULT_LOG_FILE_NAME = 'phantom-connect.ndjson';
 
 export function isPhantomConnectDebugEnabled(): boolean {
-  return process.env.PHANTOM_CONNECT_DEBUG_ENABLED === '1';
+  return process.env.PHANTOM_CONNECT_DEBUG_ENABLED !== '0';
 }
 
 export function getPhantomConnectDebugLogDir(): string {
