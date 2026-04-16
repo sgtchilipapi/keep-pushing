@@ -27,6 +27,8 @@ const pool = new Pool(
     : undefined
 );
 
+export const dbPool = pool;
+
 function createRowId(): string {
   return randomUUID();
 }
