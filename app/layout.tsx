@@ -6,7 +6,7 @@ import PhantomSdkProvider from "../components/providers/PhantomSdkProvider";
 
 export const metadata: Metadata = {
   title: "RUNARA",
-  description: "Bright atmospheric tactical run prototype.",
+  description: "Exploration RPG secured on Solana.",
 };
 
 type RootLayoutProps = {
