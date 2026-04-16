@@ -3050,7 +3050,6 @@ export default function GameClient() {
     authWalletInFlightRef.current = walletPublicKey;
     const requestedAuthProvider = authProviderRef.current;
     clearPendingAuthProvider();
-    setAuthRequestNonce(0);
     let cancelled = false;
 
     setWalletError(null);
@@ -3116,6 +3115,7 @@ export default function GameClient() {
       })
       .finally(() => {
         if (!cancelled) {
+          setAuthRequestNonce(0);
           setWalletActionStatus("idle");
         }
       });
