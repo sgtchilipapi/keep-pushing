@@ -4,7 +4,7 @@ import { PublicKey, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js';
 
 import type { SettlementBatchPayloadV2 } from '../../types/settlement';
 
-export const RUNANA_PROGRAM_ID = new PublicKey('FeZgz7XaSXg9uEpC4Lh3fPSYpFmYWdUQ1GNyWX8Heskg');
+export const RUNANA_PROGRAM_ID = new PublicKey('CaUejpPZoNjFmSrkfbazrjBUXE8FK1c2Hoz64NFsTfLm');
 export const RUNANA_CLUSTER_ID_LOCALNET = 1;
 export const RUNANA_ZONE_PAGE_WIDTH = 256;
 export const RUNANA_INSTRUCTIONS_SYSVAR_PUBKEY = SYSVAR_INSTRUCTIONS_PUBKEY;
