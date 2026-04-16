@@ -120,6 +120,8 @@ type ApiError = Error & {
   status?: number;
 };
 
+type PhantomAuthProvider = "google" | "apple";
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -1127,7 +1129,7 @@ function CreateCharacterPanel(props: CreateCharacterPanelProps) {
 type LandingPanelProps = {
   connectionStatus: WalletConnectionStatus;
   pending: boolean;
-  onConnect: () => Promise<void>;
+  onConnect: (provider: PhantomAuthProvider) => Promise<void>;
 };
 
 function LandingPanel(props: LandingPanelProps) {
@@ -1147,12 +1149,22 @@ function LandingPanel(props: LandingPanelProps) {
           <button
             type="button"
             className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={() => void props.onConnect()}
+            onClick={() => void props.onConnect("google")}
             disabled={props.pending}
           >
             {props.connectionStatus === "connecting"
               ? "Connecting..."
-              : "Sign In With Phantom"}
+              : "Continue with Google"}
+          </button>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={() => void props.onConnect("apple")}
+            disabled={props.pending}
+          >
+            {props.connectionStatus === "connecting"
+              ? "Connecting..."
+              : "Continue with Apple"}
           </button>
         </div>
       </div>
@@ -1244,7 +1256,7 @@ type WalletToolbarProps = {
   error: string | null;
   pending: boolean;
   refreshPending: boolean;
-  onConnect: () => Promise<void>;
+  onConnect: (provider?: PhantomAuthProvider) => Promise<void>;
   onDisconnect: () => Promise<void>;
   onRefresh: () => void;
 };
@@ -1318,7 +1330,7 @@ function WalletToolbar(props: WalletToolbarProps) {
               <button
                 type="button"
                 className={styles.button}
-                onClick={() => void props.onConnect()}
+                onClick={() => void props.onConnect("google")}
                 disabled={props.pending}
               >
                 {props.connectionStatus === "connecting"
@@ -3053,7 +3065,7 @@ export default function GameClient() {
     activeZoneRunDetail?.topologyVersion,
   ]);
 
-  async function handleConnectWallet() {
+  async function handleConnectWallet(provider: PhantomAuthProvider = "google") {
     authWalletInFlightRef.current = null;
     setWalletError(null);
     logPhantomConnectClientEvent({
@@ -3062,16 +3074,18 @@ export default function GameClient() {
       message: "User requested Phantom connect modal.",
       details: {
         shellView,
+        provider,
       },
     });
 
     try {
-      const result = await connectEmbeddedWallet({ provider: "google" });
+      const result = await connectEmbeddedWallet({ provider });
       logPhantomConnectClientEvent({
         area: "sdk",
         stage: "react_sdk_direct_connect_succeeded",
         message: "Direct React SDK connect returned successfully.",
         details: {
+          provider,
           addressCount: result.addresses.length,
           addresses: result.addresses.map((address) => ({
             address: address.address,
@@ -3086,6 +3100,7 @@ export default function GameClient() {
         level: "error",
         message: "Direct React SDK connect failed.",
         details: {
+          provider,
           error: normalizeWalletError(error),
         },
       });
