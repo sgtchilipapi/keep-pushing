@@ -69,9 +69,14 @@ import {
 } from "../../lib/solana/playerOwnedV0Transactions";
 import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillMetadata";
 import { getSkillDef } from "../../engine/battle/skillRegistry";
+import {
+  clearPendingAuthProvider,
+  readPendingAuthProvider,
+  writePendingAuthProvider,
+  type PhantomAuthProvider,
+} from "../../lib/auth/phantomConnectClient";
 
 const PENDING_SYNC_STORAGE_KEY = "keep-pushing:pending-sync-acks";
-const PENDING_AUTH_PROVIDER_STORAGE_KEY = "keep-pushing:pending-auth-provider";
 
 type AppPhase =
   | "bootstrapping_session"
@@ -120,39 +125,6 @@ type AuthVerifyResponse = {
 type ApiError = Error & {
   status?: number;
 };
-
-type PhantomAuthProvider = "google" | "apple" | "injected";
-
-function isPhantomAuthProvider(value: unknown): value is PhantomAuthProvider {
-  return value === "google" || value === "apple" || value === "injected";
-}
-
-function readPendingAuthProvider(): PhantomAuthProvider | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const stored = window.sessionStorage.getItem(
-    PENDING_AUTH_PROVIDER_STORAGE_KEY,
-  );
-  return isPhantomAuthProvider(stored) ? stored : null;
-}
-
-function writePendingAuthProvider(provider: PhantomAuthProvider): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.sessionStorage.setItem(PENDING_AUTH_PROVIDER_STORAGE_KEY, provider);
-}
-
-function clearPendingAuthProvider(): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.sessionStorage.removeItem(PENDING_AUTH_PROVIDER_STORAGE_KEY);
-}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
