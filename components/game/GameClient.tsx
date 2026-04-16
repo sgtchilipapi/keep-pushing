@@ -147,7 +147,12 @@ async function apiRequest<T>(
     const message =
       isObject(data) && typeof data.error === "string"
         ? data.error
-        : `Request failed with status ${response.status}`;
+        : isObject(data) &&
+            "error" in data &&
+            isObject(data.error) &&
+            typeof data.error.code === "string"
+          ? data.error.code
+          : `Request failed with status ${response.status}`;
     const error = new Error(message) as ApiError;
     error.status = response.status;
     throw error;

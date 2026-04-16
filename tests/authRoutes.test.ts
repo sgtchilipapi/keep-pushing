@@ -109,6 +109,7 @@ describe("v1 auth routes", () => {
     const json = await response.json();
 
     expect(response.status).toBe(201);
+    expect(ensureAuthSchemaMock).toHaveBeenCalled();
     expect(nonceMock.issueAuthNonce).toHaveBeenCalledWith({
       walletAddress,
       origin: "http://localhost:3000",
@@ -153,6 +154,7 @@ describe("v1 auth routes", () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
+    expect(ensureAuthSchemaMock).toHaveBeenCalled();
     expect(nonceMock.consumeAuthNonce).toHaveBeenCalledWith({
       nonceId: "nonce-1",
       walletAddress,
@@ -251,6 +253,7 @@ describe("v1 auth routes", () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
+    expect(ensureAuthSchemaMock).toHaveBeenCalled();
     expect(sessionMock.revokeSessionByToken).toHaveBeenCalledWith("token-1");
     expect(response.headers.get("Set-Cookie")).toContain("Max-Age=0");
     expect(json.ok).toBe(true);

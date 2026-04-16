@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js';
 
 import { consumeAuthNonce } from '../../../../../lib/auth/nonce';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
+import { ensureAuthSchema } from '../../../../../lib/auth/db';
 import {
   assertRateLimit,
   getClientIpAddress,
@@ -22,6 +23,7 @@ interface VerifyBody {
 }
 
 export async function POST(request: Request) {
+  await ensureAuthSchema();
   const requestId = createAuditRequestId();
   const clientIp = getClientIpAddress(request);
   let body: VerifyBody;
