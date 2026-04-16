@@ -3,6 +3,7 @@
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import type { PreparedPlayerOwnedTransaction } from '../../types/api/solana';
+import { logPhantomConnectClientEvent } from '../observability/phantomConnectClient';
 import {
   deserializeLegacyOrVersionedTransactionBase64,
   serializeLegacyOrVersionedTransactionMessageBase64,
@@ -114,6 +115,13 @@ function logPhantomDebug(message: string, details?: Record<string, unknown>) {
   if (typeof window === 'undefined') {
     return;
   }
+
+  logPhantomConnectClientEvent({
+    area: 'sdk',
+    stage: message,
+    message,
+    details,
+  });
 
   if (details) {
     console.info(`[phantom-connect] ${message}`, details);

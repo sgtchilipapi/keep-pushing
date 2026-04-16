@@ -8,3 +8,4 @@ test-ledger/
 .tmp/
 tsconfig.tsbuildinfo
 .env.local
+debug/logs/*.ndjson

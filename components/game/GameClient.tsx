@@ -49,6 +49,7 @@ import type {
 import StatusBadge from "./StatusBadge";
 import styles from "./game-shell.module.css";
 import { resolveSyncPanelState } from "./uiModel";
+import { logPhantomConnectClientEvent } from "../../lib/observability/phantomConnectClient";
 import {
   normalizeWalletError,
   signAuthorizationMessageUtf8,
@@ -2456,6 +2457,7 @@ export default function GameClient() {
   >(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const authWalletInFlightRef = useRef<string | null>(null);
+  const phantomStateRef = useRef<string | null>(null);
 
   const walletAvailability: WalletAvailability = "installed";
   const walletPublicKey = useMemo(
@@ -2496,6 +2498,15 @@ export default function GameClient() {
     provider: PhantomSolanaProvider;
     walletAddress: string;
   }): Promise<AuthVerifyResponse> {
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_nonce_request_started",
+      message: "Starting backend nonce request.",
+      details: {
+        walletAddress: args.walletAddress,
+      },
+    });
+
     const nonce = await apiRequest<AuthNonceResponse>("/api/v1/auth/nonce", {
       method: "POST",
       body: JSON.stringify({
@@ -2504,20 +2515,108 @@ export default function GameClient() {
       }),
     });
 
-    setWalletActionStatus("signing_message");
-    const signatureBase64 = await signAuthorizationMessageUtf8(
-      args.provider,
-      nonce.data.messageToSign,
-    );
-
-    const verified = await apiRequest<AuthVerifyResponse>("/api/v1/auth/verify", {
-      method: "POST",
-      body: JSON.stringify({
-        nonceId: nonce.data.nonceId,
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_nonce_request_succeeded",
+      message: "Backend nonce request succeeded.",
+      details: {
         walletAddress: args.walletAddress,
-        signatureBase64,
-        signedMessage: nonce.data.messageToSign,
-      }),
+        nonceId: nonce.data.nonceId,
+        expiresAt: nonce.data.expiresAt,
+      },
+    });
+
+    setWalletActionStatus("signing_message");
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_sign_message_started",
+      message: "Starting Phantom message signature for auth verify.",
+      details: {
+        walletAddress: args.walletAddress,
+        nonceId: nonce.data.nonceId,
+        messageLength: nonce.data.messageToSign.length,
+      },
+    });
+
+    let signatureBase64: string;
+    try {
+      signatureBase64 = await signAuthorizationMessageUtf8(
+        args.provider,
+        nonce.data.messageToSign,
+      );
+    } catch (error) {
+      logPhantomConnectClientEvent({
+        area: "auth",
+        stage: "auth_sign_message_failed",
+        level: "error",
+        message: "Phantom message signature failed.",
+        details: {
+          walletAddress: args.walletAddress,
+          nonceId: nonce.data.nonceId,
+          error: normalizeWalletError(error),
+        },
+      });
+      throw error;
+    }
+
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_sign_message_succeeded",
+      message: "Phantom message signature succeeded.",
+      details: {
+        walletAddress: args.walletAddress,
+        nonceId: nonce.data.nonceId,
+        signatureLength: signatureBase64.length,
+      },
+    });
+
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_verify_request_started",
+      message: "Starting backend auth verify request.",
+      details: {
+        walletAddress: args.walletAddress,
+        nonceId: nonce.data.nonceId,
+      },
+    });
+
+    let verified: AuthVerifyResponse;
+    try {
+      verified = await apiRequest<AuthVerifyResponse>("/api/v1/auth/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          nonceId: nonce.data.nonceId,
+          walletAddress: args.walletAddress,
+          signatureBase64,
+          signedMessage: nonce.data.messageToSign,
+        }),
+      });
+    } catch (error) {
+      logPhantomConnectClientEvent({
+        area: "auth",
+        stage: "auth_verify_request_failed",
+        level: "error",
+        message: "Backend auth verify request failed.",
+        details: {
+          walletAddress: args.walletAddress,
+          nonceId: nonce.data.nonceId,
+          error: normalizeWalletError(error),
+          status: getApiErrorStatus(error),
+        },
+      });
+      throw error;
+    }
+
+    logPhantomConnectClientEvent({
+      area: "auth",
+      stage: "auth_verify_request_succeeded",
+      message: "Backend auth verify request succeeded.",
+      details: {
+        walletAddress: verified.data.user.walletAddress,
+        userId: verified.data.user.id,
+        sessionId: verified.data.session.id,
+        expiresAt: verified.data.session.expiresAt,
+      },
     });
 
     setSessionActive(true);
@@ -2696,10 +2795,76 @@ export default function GameClient() {
   refreshZoneTopologyRef.current = refreshZoneTopology;
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    logPhantomConnectClientEvent({
+      area: "ui",
+      stage: "game_client_loaded",
+      message: "Game client loaded with Phantom debug telemetry.",
+      details: {
+        pathname: url.pathname,
+        search: url.search,
+        hash: url.hash,
+        hasCode: url.searchParams.has("code"),
+        hasError: url.searchParams.has("error"),
+      },
+    });
+  }, []);
+
+  useEffect(() => {
     if (phantomErrors.connect) {
+      logPhantomConnectClientEvent({
+        area: "sdk",
+        stage: "react_sdk_connect_error",
+        level: "error",
+        message: "React SDK connect error surfaced to GameClient.",
+        details: {
+          error: normalizeWalletError(phantomErrors.connect),
+        },
+      });
       setWalletError(normalizeWalletError(phantomErrors.connect));
     }
   }, [phantomErrors.connect]);
+
+  useEffect(() => {
+    const snapshot = JSON.stringify({
+      phantomConnecting,
+      phantomConnected,
+      walletPublicKey,
+      sessionActive,
+      sessionWalletAddress,
+      addressCount: phantomAddresses.length,
+    });
+
+    if (phantomStateRef.current === snapshot) {
+      return;
+    }
+
+    phantomStateRef.current = snapshot;
+    logPhantomConnectClientEvent({
+      area: "session",
+      stage: "react_sdk_state_changed",
+      message: "React SDK/session state changed.",
+      details: {
+        phantomConnecting,
+        phantomConnected,
+        walletPublicKey,
+        sessionActive,
+        sessionWalletAddress,
+        addressCount: phantomAddresses.length,
+      },
+    });
+  }, [
+    phantomAddresses.length,
+    phantomConnected,
+    phantomConnecting,
+    sessionActive,
+    sessionWalletAddress,
+    walletPublicKey,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2781,6 +2946,14 @@ export default function GameClient() {
 
     setWalletError(null);
     setAppPhase("loading_character");
+    logPhantomConnectClientEvent({
+      area: "session",
+      stage: "session_bootstrap_started",
+      message: "Starting session bootstrap from connected wallet.",
+      details: {
+        walletPublicKey,
+      },
+    });
 
     void authenticateWalletSession({
       provider: walletProvider,
@@ -2794,6 +2967,14 @@ export default function GameClient() {
         if (cancelled) {
           return;
         }
+        logPhantomConnectClientEvent({
+          area: "session",
+          stage: "session_bootstrap_succeeded",
+          message: "Wallet session bootstrap completed.",
+          details: {
+            walletPublicKey,
+          },
+        });
         setShellView("roster");
       })
       .catch((error) => {
@@ -2801,6 +2982,17 @@ export default function GameClient() {
           return;
         }
         authWalletInFlightRef.current = null;
+        logPhantomConnectClientEvent({
+          area: "session",
+          stage: "session_bootstrap_failed",
+          level: "error",
+          message: "Wallet session bootstrap failed.",
+          details: {
+            walletPublicKey,
+            error: normalizeWalletError(error),
+            status: getApiErrorStatus(error),
+          },
+        });
         setWalletError(normalizeWalletError(error));
         setAppPhase("ready");
       })
@@ -2842,24 +3034,73 @@ export default function GameClient() {
   async function handleConnectWallet() {
     authWalletInFlightRef.current = null;
     setWalletError(null);
+    logPhantomConnectClientEvent({
+      area: "ui",
+      stage: "connect_modal_open_requested",
+      message: "User requested Phantom connect modal.",
+      details: {
+        shellView,
+      },
+    });
     openWalletModal();
   }
 
   async function handleDisconnectWallet() {
     setWalletError(null);
+    logPhantomConnectClientEvent({
+      area: "session",
+      stage: "logout_started",
+      message: "Starting app logout and wallet disconnect.",
+      details: {
+        sessionWalletAddress,
+        walletPublicKey,
+      },
+    });
 
     try {
       await apiRequest<{ ok: true }>("/api/v1/auth/logout", {
         method: "POST",
         body: JSON.stringify({}),
       });
+      logPhantomConnectClientEvent({
+        area: "session",
+        stage: "logout_request_succeeded",
+        message: "Backend logout request succeeded.",
+        details: {
+          sessionWalletAddress,
+        },
+      });
     } catch (error) {
+      logPhantomConnectClientEvent({
+        area: "session",
+        stage: "logout_request_failed",
+        level: "error",
+        message: "Backend logout request failed.",
+        details: {
+          error: normalizeWalletError(error),
+          status: getApiErrorStatus(error),
+        },
+      });
       setWalletError(normalizeWalletError(error));
     }
 
     try {
       await disconnectEmbeddedWallet();
+      logPhantomConnectClientEvent({
+        area: "session",
+        stage: "wallet_disconnect_succeeded",
+        message: "Embedded wallet disconnect succeeded.",
+      });
     } catch (error) {
+      logPhantomConnectClientEvent({
+        area: "session",
+        stage: "wallet_disconnect_failed",
+        level: "error",
+        message: "Embedded wallet disconnect failed.",
+        details: {
+          error: normalizeWalletError(error),
+        },
+      });
       setWalletError(normalizeWalletError(error));
     } finally {
       authWalletInFlightRef.current = walletPublicKey;

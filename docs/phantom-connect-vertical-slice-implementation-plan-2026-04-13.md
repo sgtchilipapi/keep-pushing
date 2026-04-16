@@ -261,6 +261,66 @@ Upgrade the frontend framework/tooling stack just far enough to support React 19
 
 ---
 
+## Slice A0.5 — Phantom Connect diagnostic telemetry
+
+### Why this is a separate slice
+- Mobile/manual testing often does not have convenient DevTools access.
+- Phantom Connect failures frequently happen inside hosted redirects, so high-signal client state needs to be captured before and after those handoffs.
+- This slice adds gated diagnostics that can be enabled in preview/dev and disabled for public deployment.
+
+### Scope
+Add a gated debug pipeline for Phantom Connect auth telemetry:
+- browser events emitted by the app before/after Phantom Connect actions
+- backend ingestion endpoint for those events
+- NDJSON log persistence for later inspection
+- optional readback endpoint for recent entries
+
+### Touchpoints
+- `app/api/debug/phantom-connect/route.ts`
+- `lib/observability/phantomConnectDebug.ts`
+- `lib/observability/phantomConnectClient.ts`
+- `components/providers/PhantomSdkProvider.tsx`
+- `components/game/GameClient.tsx`
+- `lib/solana/phantomBrowser.ts`
+
+### Gating
+- server-side gate: `PHANTOM_CONNECT_DEBUG_ENABLED=1`
+- client-side gate: `NEXT_PUBLIC_PHANTOM_CONNECT_DEBUG_ENABLED=1`
+- disabled environments must return `404` from the debug route and emit no client telemetry
+
+### Deliverables
+1. Debug ingest route
+- add `POST /api/debug/phantom-connect` for client log ingestion
+- add `GET /api/debug/phantom-connect?limit=N` for recent log inspection while the slice is enabled
+
+2. File-backed debug store
+- append NDJSON rows under `debug/logs/` locally
+- allow fallback to configurable or temp storage in hosted environments
+
+3. Strategic client instrumentation
+- log React SDK provider initialization
+- log connect modal open requests
+- log React SDK connection state transitions and surfaced connect errors
+- log backend auth nonce/verify start/success/failure
+- log logout/disconnect lifecycle
+
+4. Safety constraints
+- do not log raw auth signatures, nonces, or other secrets
+- truncate oversized payload fields
+- keep telemetry best-effort and non-blocking
+
+### Verification
+- with both debug env vars enabled, manual auth attempts create entries in the debug log file
+- `GET /api/debug/phantom-connect` returns recent events
+- `npm test -- --runInBand tests/authRoutes.test.ts tests/phantomBrowser.test.ts`
+- `npm run build`
+
+### Exit criteria
+- mobile/manual tests can be inspected without browser DevTools by reading the saved Phantom Connect debug events
+- the debug surface is fully disabled when the env gates are off
+
+---
+
 ## Slice A — Auth foundation: nonce + verify + sessions
 
 ### Scope
