@@ -10,8 +10,8 @@ import {
   useSolana,
 } from '@phantom/react-sdk';
 
-import { logPhantomConnectClientEvent } from '../../../../lib/observability/phantomConnectClient';
-import { normalizeWalletError } from '../../../../lib/solana/phantomBrowser';
+import { logPhantomConnectClientEvent } from '../../../lib/observability/phantomConnectClient';
+import { normalizeWalletError } from '../../../lib/solana/phantomBrowser';
 
 type ReproEvent = {
   createdAt: string;
