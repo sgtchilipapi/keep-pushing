@@ -263,7 +263,7 @@ export async function getCharacterSyncDetail(
     detail.character.syncPhase === "LOCAL_ONLY" ||
     detail.character.syncPhase === "CREATING_ON_CHAIN" ||
     detail.character.syncPhase === "FAILED"
-      ? "first_sync"
+      ? "create"
       : detail.character.nextPendingSettlementRun !== null ||
           activeSettlementRequest !== null
         ? "settlement"

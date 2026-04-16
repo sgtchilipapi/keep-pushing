@@ -24,8 +24,8 @@ import type {
 } from "../../types/api/settlementV1";
 import type {
   CharacterCreateV1ResponseEnvelope,
-  CharacterFirstSyncV1FinalizeData,
-  CharacterFirstSyncV1PrepareData,
+  CharacterCreateV1FinalizeData,
+  CharacterCreateV1PrepareData,
 } from "../../types/api/characters";
 import type {
   AccountMode,
@@ -65,6 +65,7 @@ import {
 } from "../../lib/solana/reactPhantomBridge";
 import {
   deserializeLegacyOrVersionedTransactionBase64,
+  serializeLegacyOrVersionedTransactionMessageBase64,
   serializeLegacyOrVersionedTransactionBase64,
 } from "../../lib/solana/playerOwnedV0Transactions";
 import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillMetadata";
@@ -496,7 +497,7 @@ function createIdempotencyKey(): string {
 }
 
 type PendingSyncAckRecord = {
-  kind: "first_sync" | "settlement";
+  kind: "settlement";
   characterId: string;
   transactionSignature: string;
   prepareRequestId?: string;
@@ -1982,29 +1983,6 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
   }
 
   async function acknowledgePending(record: PendingSyncAckRecord) {
-    if (record.kind === "first_sync") {
-      const response = await apiEnvelopeRequest<CharacterFirstSyncV1FinalizeData>(
-        "/api/v1/characters/first-sync/finalize",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            prepared: record.prepared,
-            transactionSignature: record.transactionSignature,
-          }),
-        },
-      );
-
-      clearPendingSyncAck(record.characterId);
-      setPendingAck(null);
-      await refreshAll();
-      setNotice(
-        response.phase === "confirmed"
-          ? `First sync confirmed. Tx ${truncateMiddle(response.transactionSignature)}`
-          : `First sync is still in flight. Tx ${truncateMiddle(response.transactionSignature)}`,
-      );
-      return;
-    }
-
     const response = await apiEnvelopeRequest<SettlementV1FinalizeData>(
       "/api/v1/settlement/finalize",
       {
@@ -2070,71 +2048,64 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
     setNotice(null);
 
     try {
-      if (syncState.syncMode === "create_then_settle") {
-        setStepMessage("Preparing first sync transaction");
-        const prepared = await apiEnvelopeRequest<CharacterFirstSyncV1PrepareData>(
-          "/api/v1/characters/first-sync/prepare",
+      if (syncState.syncMode === "create") {
+        setStepMessage("Preparing character creation");
+        const prepared = await apiEnvelopeRequest<CharacterCreateV1PrepareData>(
+          "/api/v1/characters/create/prepare",
           {
             method: "POST",
             body: JSON.stringify({
               characterId: character.characterId,
+              initialUnlockedZoneId: 1,
             }),
           },
         );
-        if (prepared.phase !== "sign_transaction") {
-          throw new Error(
-            "Unexpected first sync response: expected sign_transaction phase.",
+
+        if (prepared.phase === "submitted") {
+          await refreshAll();
+          setNotice(
+            prepared.transactionSignature
+              ? `Character creation is still in flight. Tx ${truncateMiddle(prepared.transactionSignature)}`
+              : "Character creation is already in flight.",
           );
+          return;
         }
+
         if (!prepared.preparedTransaction) {
           throw new Error(
-            "Unexpected first sync response: prepared transaction was missing.",
+            "Unexpected character creation response: prepared transaction was missing.",
           );
         }
 
         props.setWalletActionStatus("signing_transaction");
-        setStepMessage("Submitting with Phantom");
-        const submitted = await signAndSendPreparedPlayerOwnedTransaction(
-          provider,
-          prepared.preparedTransaction,
+        setStepMessage("Signing create transaction");
+        const signedTransaction = await provider.signTransaction(
+          deserializeLegacyOrVersionedTransactionBase64(
+            prepared.preparedTransaction.serializedTransactionBase64,
+          ),
+        );
+        const signedTransactionBase64 =
+          serializeLegacyOrVersionedTransactionBase64(signedTransaction);
+        const signedMessageBase64 =
+          serializeLegacyOrVersionedTransactionMessageBase64(signedTransaction);
+
+        setStepMessage("Finalizing character creation");
+        const response = await apiEnvelopeRequest<CharacterCreateV1FinalizeData>(
+          "/api/v1/characters/create/finalize",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              prepared: prepared.preparedTransaction,
+              signedMessageBase64,
+              signedTransactionBase64,
+            }),
+          },
         );
 
-        try {
-          setStepMessage("Acknowledging first sync");
-          const response = await apiEnvelopeRequest<CharacterFirstSyncV1FinalizeData>(
-            "/api/v1/characters/first-sync/finalize",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                prepared: prepared.preparedTransaction,
-                transactionSignature: submitted.transactionSignature,
-              }),
-            },
-          );
-
-          clearPendingSyncAck(character.characterId);
-          setPendingAck(null);
-          await refreshAll();
-          setNotice(
-            response.phase === "confirmed"
-              ? `First sync confirmed. Tx ${truncateMiddle(response.transactionSignature)}`
-              : `First sync submitted. Tx ${truncateMiddle(response.transactionSignature)}`,
-          );
-        } catch (ackError) {
-          const record: PendingSyncAckRecord = {
-            kind: "first_sync",
-            characterId: character.characterId,
-            transactionSignature: submitted.transactionSignature,
-            prepared: prepared.preparedTransaction,
-          };
-          writePendingSyncAck(record);
-          setPendingAck(record);
-          await refreshAll();
-          setNotice(
-            `First sync transaction submitted. Ack will retry from this device. Tx ${truncateMiddle(submitted.transactionSignature)}`,
-          );
-          setError(normalizeWalletError(ackError));
-        }
+        await refreshAll();
+        setNotice(
+          `Character creation confirmed. Tx ${truncateMiddle(response.transactionSignature)}`,
+        );
       } else {
         const pendingRun = character.nextPendingSettlementRun;
         if (!pendingRun) {
@@ -2292,8 +2263,8 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
             <p className={styles.panelText}>
               {pendingAck
                 ? "A wallet submission already happened. Retry acknowledgement from here."
-                : sync.mode === "first_sync"
-                  ? "First sync creates the on-chain character, then settlement continues through the normal per-run flow."
+                : sync.mode === "create"
+                  ? "Create the on-chain character first. After confirmation, settlement continues through the normal per-run flow."
                 : sync.mode === "settlement"
                     ? "Only the oldest unresolved settlement run can be submitted from here."
                     : "No sync action is pending."}
@@ -2374,8 +2345,8 @@ function CharacterSyncPage(props: CharacterSyncPageProps) {
                 ? "Syncing..."
                 : pendingAck
                   ? "Retry Acknowledgement"
-                  : syncState.syncMode === "create_then_settle"
-                    ? "First Sync"
+                  : syncState.syncMode === "create"
+                    ? "Create On Chain"
                     : syncState.syncMode === "settlement"
                       ? "Sync Oldest Run"
                       : "Nothing To Sync"}

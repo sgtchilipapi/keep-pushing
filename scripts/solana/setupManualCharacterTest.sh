@@ -48,6 +48,7 @@ DEPLOYER_KEYPAIR_PATH="$KEYPAIR_DIR/deployer.json"
 ADMIN_KEYPAIR_PATH="$KEYPAIR_DIR/admin.json"
 SERVER_SIGNER_KEYPAIR_PATH="$KEYPAIR_DIR/server.json"
 PLAYER_KEYPAIR_PATH="$KEYPAIR_DIR/player.json"
+SPONSOR_KEYPAIR_PATH="${RUNANA_SPONSOR_KEYPAIR_PATH:-$ADMIN_KEYPAIR_PATH}"
 VALIDATOR_LOG_PATH="$LOG_DIR/validator.log"
 VALIDATOR_INTERNAL_LOG_PATH="$VALIDATOR_LEDGER_PATH/validator.log"
 SERVER_LOG_PATH="$LOG_DIR/server.log"
@@ -302,6 +303,7 @@ function seed_bootstrap() {
     cd "$KEEP_PUSHING_ROOT"
     RUNANA_ADMIN_KEYPAIR_PATH="$ADMIN_KEYPAIR_PATH" \
     RUNANA_PAYER_KEYPAIR_PATH="$ADMIN_KEYPAIR_PATH" \
+    RUNANA_SPONSOR_KEYPAIR_PATH="$SPONSOR_KEYPAIR_PATH" \
     RUNANA_SERVER_SIGNER_KEYPAIR_PATH="$SERVER_SIGNER_KEYPAIR_PATH" \
     RUNANA_SOLANA_RPC_URL="$RPC_URL" \
     RUNANA_SOLANA_COMMITMENT="$SOLANA_COMMITMENT" \
@@ -334,6 +336,8 @@ function start_server_if_needed() {
       RUNANA_SOLANA_RPC_URL="$RPC_URL" \
       RUNANA_SOLANA_COMMITMENT="$SOLANA_COMMITMENT" \
       RUNANA_PROGRAM_ID="$PROGRAM_ID" \
+      RUNANA_PAYER_KEYPAIR_PATH="$ADMIN_KEYPAIR_PATH" \
+      RUNANA_SPONSOR_KEYPAIR_PATH="$SPONSOR_KEYPAIR_PATH" \
       RUNANA_SERVER_SIGNER_KEYPAIR_PATH="$SERVER_SIGNER_KEYPAIR_PATH" \
       RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES="${RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES:-0}" \
       PORT="$SERVER_PORT" \
@@ -427,6 +431,7 @@ create_keypair_if_missing "$DEPLOYER_KEYPAIR_PATH"
 create_keypair_if_missing "$ADMIN_KEYPAIR_PATH"
 create_keypair_if_missing "$SERVER_SIGNER_KEYPAIR_PATH"
 create_keypair_if_missing "$PLAYER_KEYPAIR_PATH"
+create_keypair_if_missing "$SPONSOR_KEYPAIR_PATH"
 
 start_validator_if_needed
 
@@ -434,10 +439,14 @@ DEPLOYER_PUBKEY="$(solana-keygen pubkey "$DEPLOYER_KEYPAIR_PATH")"
 ADMIN_PUBKEY="$(solana-keygen pubkey "$ADMIN_KEYPAIR_PATH")"
 SERVER_SIGNER_PUBKEY="$(solana-keygen pubkey "$SERVER_SIGNER_KEYPAIR_PATH")"
 PLAYER_PUBKEY="$(solana-keygen pubkey "$PLAYER_KEYPAIR_PATH")"
+SPONSOR_PUBKEY="$(solana-keygen pubkey "$SPONSOR_KEYPAIR_PATH")"
 
 airdrop_if_needed "$DEPLOYER_AIRDROP_SOL" "$DEPLOYER_PUBKEY"
 airdrop_if_needed "$ADMIN_AIRDROP_SOL" "$ADMIN_PUBKEY"
 airdrop_if_needed "$PLAYER_AIRDROP_SOL" "$PLAYER_PUBKEY"
+if [[ "$SPONSOR_PUBKEY" != "$ADMIN_PUBKEY" && "$SPONSOR_PUBKEY" != "$DEPLOYER_PUBKEY" && "$SPONSOR_PUBKEY" != "$PLAYER_PUBKEY" ]]; then
+  airdrop_if_needed "$ADMIN_AIRDROP_SOL" "$SPONSOR_PUBKEY"
+fi
 
 deploy_program_if_needed
 write_bootstrap_config "$SERVER_SIGNER_PUBKEY"
@@ -460,6 +469,7 @@ printf 'Program ID: %s\n' "$PROGRAM_ID"
 printf 'Validator ledger: %s\n' "$VALIDATOR_LEDGER_PATH"
 printf 'Anon user: %s\n' "$USER_ID"
 printf 'Player pubkey: %s\n' "$PLAYER_PUBKEY"
+printf 'Sponsor pubkey: %s\n' "$SPONSOR_PUBKEY"
 printf 'Prepare request: %s\n' "$PREPARE_REQUEST_PATH"
 printf 'Anon user response: %s\n' "$ANON_USER_RESPONSE_PATH"
 printf 'Validator log: %s\n' "$VALIDATOR_LOG_PATH"

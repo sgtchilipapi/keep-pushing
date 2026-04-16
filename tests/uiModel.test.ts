@@ -119,7 +119,7 @@ describe("game ui model helpers", () => {
       season: null,
       statusLabel: "LOCAL ONLY",
       statusTone: "neutral",
-      syncMode: "create_then_settle",
+      syncMode: "create",
     });
   });
 
@@ -179,7 +179,7 @@ describe("game ui model helpers", () => {
       season: null,
       statusLabel: "CREATING",
       statusTone: "info",
-      syncMode: "create_then_settle",
+      syncMode: "create",
     });
   });
 

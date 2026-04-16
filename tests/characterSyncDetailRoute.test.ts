@@ -75,7 +75,7 @@ describe("GET /api/characters/:characterId/sync", () => {
         phase: "active",
       },
       sync: {
-        mode: "first_sync",
+        mode: "create",
         pendingRunSettlementId: "run-1",
         pendingRunSequence: 3,
         pendingRunCount: 2,
@@ -85,7 +85,7 @@ describe("GET /api/characters/:characterId/sync", () => {
 
     const response = await GET(
       new Request("http://localhost/api/characters/character-1/sync"),
-      { params: { characterId: "character-1" } },
+      { params: Promise.resolve({ characterId: "character-1" }) },
     );
     const json = await response.json();
 
@@ -95,7 +95,7 @@ describe("GET /api/characters/:characterId/sync", () => {
       "user-1",
     );
     expect(json.character.characterId).toBe("character-1");
-    expect(json.sync.mode).toBe("first_sync");
+    expect(json.sync.mode).toBe("create");
     expect(json.sync.pendingRunSettlementId).toBe("run-1");
     expect(json.sync.pendingRunSequence).toBe(3);
     expect(json.sync.pendingRunCount).toBe(2);

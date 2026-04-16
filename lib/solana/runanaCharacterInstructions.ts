@@ -69,9 +69,10 @@ function fixedAscii16(value: string, field: string): Buffer {
     );
   }
 
-  const buffer = Buffer.alloc(MAX_CHARACTER_NAME_LEN);
-  buffer.write(canonical, 0, 'ascii');
-  return buffer;
+  const valueBytes = Buffer.from(canonical, 'ascii');
+  const length = Buffer.alloc(4);
+  length.writeUInt32LE(valueBytes.length, 0);
+  return Buffer.concat([length, valueBytes]);
 }
 
 export function serializeCreateCharacterArgs(
