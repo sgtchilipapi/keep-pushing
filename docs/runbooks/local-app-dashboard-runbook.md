@@ -169,6 +169,100 @@ Use this path when:
 
 Use this when you want the quickest frontend/backend iteration loop.
 
+### Option B1: Codespaces Variant For Terminal-Only Local Dev
+
+Use this when the app is running inside a GitHub Codespace and you want:
+
+- Dockerized Postgres inside the same Codespace
+- host-run Next.js app with hot reload
+- browser access through SSH port forwarding instead of the Codespaces Ports UI
+
+This is the most reliable path when you only have terminal access through `gh`.
+
+### 1. Set local app env in `.env.local`
+
+Make sure `.env.local` contains a local Postgres URL:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing
+```
+
+The Phantom redirect vars may remain in the same file.
+
+### 2. Start local Postgres in Docker
+
+```bash
+cd /workspaces/keep-pushing
+docker compose up -d postgres
+```
+
+Expected local DB settings in this repo:
+
+- host: `127.0.0.1`
+- port: `5432`
+- db: `keep_pushing`
+- user: `postgres`
+- password: `postgres`
+
+### 3. Apply Prisma migrations
+
+Prisma config reads `DATABASE_URL` from the process environment, so export it explicitly before running migrations:
+
+```bash
+cd /workspaces/keep-pushing
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing' npx prisma migrate deploy
+```
+
+### 4. Start the app
+
+```bash
+cd /workspaces/keep-pushing
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing' npm run dev
+```
+
+Wait for:
+
+- `Ready`
+- local listener on `http://localhost:3000`
+
+### 5. Reach the app from your machine with SSH port forwarding
+
+From your local machine:
+
+```bash
+gh codespace ssh -c <codespace-name> -- -L 3000:127.0.0.1:3000
+```
+
+Example:
+
+```bash
+gh codespace ssh -c organic-orbit-gw54q4xxw79hwxgj -- -L 3000:127.0.0.1:3000
+```
+
+Then open locally on your machine:
+
+```text
+http://127.0.0.1:3000/
+```
+
+If your local port `3000` is busy, bind another local port:
+
+```bash
+gh codespace ssh -c <codespace-name> -- -L 3001:127.0.0.1:3000
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3001/
+```
+
+Important:
+
+- do not expect Vercel to reach this DB
+- do not expect Codespaces `app.github.dev` forwarding to be available automatically in terminal-only workflows
+- the SSH tunnel is the canonical terminal-only browser path
+
 ### 1. Start Postgres
 
 ```bash
