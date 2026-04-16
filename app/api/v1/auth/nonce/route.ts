@@ -10,6 +10,22 @@ import {
   RateLimitExceededError,
 } from '../../../../../lib/security/rateLimit';
 
+function isDatabaseUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as Error & { code?: unknown }).code;
+  return (
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === '57P01' ||
+    code === '57P03'
+  );
+}
+
 export async function POST(request: Request) {
   await ensureAuthSchemaBestEffort();
   const requestId = createAuditRequestId();
@@ -111,6 +127,10 @@ export async function POST(request: Request) {
       origin,
     });
   } catch (error) {
+    const errorCode = isDatabaseUnavailableError(error)
+      ? 'AUTH_DB_UNAVAILABLE'
+      : 'AUTH_NONCE_INTERNAL_ERROR';
+    const httpStatus = errorCode === 'AUTH_DB_UNAVAILABLE' ? 503 : 500;
     console.error('[auth/nonce] failed to issue auth nonce', {
       walletAddress: body.walletAddress,
       clientIp,
@@ -123,8 +143,8 @@ export async function POST(request: Request) {
       actionType: 'AUTH_NONCE',
       phase: 'REQUEST',
       status: 'ERROR',
-      errorCode: 'AUTH_NONCE_INTERNAL_ERROR',
-      httpStatus: 500,
+      errorCode,
+      httpStatus,
       metadataJson: {
         clientIp,
         origin,
@@ -138,8 +158,8 @@ export async function POST(request: Request) {
       },
     });
     return NextResponse.json(
-      { ok: false, error: { code: 'AUTH_NONCE_INTERNAL_ERROR' } },
-      { status: 500 },
+      { ok: false, error: { code: errorCode, retryable: errorCode === 'AUTH_DB_UNAVAILABLE' } },
+      { status: httpStatus },
     );
   }
   await writeAuditLogSafe({

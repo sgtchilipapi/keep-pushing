@@ -12,6 +12,7 @@ This document tracks the stable machine-readable error codes used by the wallet-
 | `AUTH_NONCE_WALLET_INVALID` | `/api/v1/auth/nonce` | Wallet address was not a valid Solana public key. | No |
 | `AUTH_NONCE_RATE_LIMIT_IP` | `/api/v1/auth/nonce` | IP-based nonce issuance rate limit exceeded. | Yes |
 | `AUTH_NONCE_RATE_LIMIT_WALLET` | `/api/v1/auth/nonce` | Wallet-based nonce issuance rate limit exceeded. | Yes |
+| `AUTH_DB_UNAVAILABLE` | `/api/v1/auth/nonce`, `/api/v1/auth/verify` | Auth backend could not reach the database. | Yes |
 | `AUTH_VERIFY_INVALID_JSON` | `/api/v1/auth/verify` | Request body could not be parsed as JSON. | No |
 | `AUTH_VERIFY_REQUIRED_FIELDS` | `/api/v1/auth/verify` | One or more required verification fields were missing. | No |
 | `AUTH_VERIFY_WALLET_INVALID` | `/api/v1/auth/verify` | Wallet address was not a valid Solana public key. | No |
