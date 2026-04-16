@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import { applyRoundInitiative, hasReadyActor, nextActorIndex, timeoutWinner } from './initiative';
 import { resolveAttack } from './resolveDamage';
 import { XorShift32 } from '../rng/xorshift32';
@@ -9,7 +11,7 @@ import { applyConditionalPassives, applyFlatPassives } from './applyPassives';
 import { getResolversForRoundStart, getStatusResolver, hasStatusResolveTiming } from './statuses/resolverRegistry';
 import type { StatusResolvePhase } from './statuses/types';
 import type { ArchetypeDecisionModel } from './learning';
-import type { BattleEvent, BattleResult } from '../../types/battle';
+import type { BattleEvent, BattleResult, CombatantBattleStateSnapshot } from '../../types/battle';
 import type { CombatantSnapshot } from '../../types/combat';
 
 export type { CombatantSnapshot } from '../../types/combat';
@@ -19,6 +21,10 @@ export type BattleInput = {
   seed: number;
   playerInitial: CombatantSnapshot;
   enemyInitial: CombatantSnapshot;
+  playerInitialCooldowns?: Record<string, number>;
+  playerInitialStatuses?: ActiveStatuses;
+  enemyInitialCooldowns?: Record<string, number>;
+  enemyInitialStatuses?: ActiveStatuses;
   playerSkillWeights?: ArchetypeDecisionModel;
   enemySkillWeights?: ArchetypeDecisionModel;
   maxRounds?: number;
@@ -26,6 +32,23 @@ export type BattleInput = {
 };
 
 type RuntimeEntity = CombatantSnapshot & { initiative: number; cooldowns: Record<string, number>; statuses: ActiveStatuses };
+
+export function generateBattleSeed(entropy: Uint8Array = randomBytes(4)): number {
+  if (entropy.length < 4) {
+    throw new Error('ERR_INVALID_BATTLE_SEED_ENTROPY: entropy must contain at least 4 bytes');
+  }
+
+  const baseSeed =
+    ((entropy[0] ?? 0) |
+      ((entropy[1] ?? 0) << 8) |
+      ((entropy[2] ?? 0) << 16) |
+      ((entropy[3] ?? 0) << 24)) >>> 0;
+
+  // BattleRecord.seed is stored in PostgreSQL as signed INT, so keep the
+  // generated seed within the 31-bit positive range.
+  const seed = new XorShift32(baseSeed).nextU32() & 0x7fffffff;
+  return seed === 0 ? 1 : seed;
+}
 
 export function adjustDamageForStatuses(baseDamage: number, activeStatusIds: readonly StatusId[]): number {
   const incomingDamageMultiplierBP = activeStatusIds.reduce((acc, statusId) => {
@@ -49,8 +72,44 @@ function cloneEntity(entity: CombatantSnapshot): CombatantSnapshot {
   return cloned;
 }
 
+function cloneRuntimeEntity(entity: RuntimeEntity): CombatantBattleStateSnapshot {
+  return {
+    ...cloneEntity(entity),
+    hp: entity.hp,
+    initiative: entity.initiative,
+    cooldowns: { ...entity.cooldowns },
+    statuses: Object.fromEntries(
+      Object.entries(entity.statuses)
+        .filter(([, value]) => (value?.remainingTurns ?? 0) > 0)
+        .map(([statusId, value]) => [
+          statusId,
+          {
+            sourceId: value?.sourceId ?? entity.entityId,
+            remainingTurns: value?.remainingTurns ?? 0,
+          },
+        ]),
+    ),
+  };
+}
+
 function initializeCooldowns(entity: CombatantSnapshot): Record<string, number> {
   return Object.fromEntries(entity.activeSkillIds.map((skillId) => [skillId, 0]));
+}
+
+function cloneStatuses(statuses: ActiveStatuses | undefined): ActiveStatuses {
+  if (statuses === undefined) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(statuses).map(([statusId, value]) => [
+      statusId,
+      {
+        sourceId: value?.sourceId ?? '',
+        remainingTurns: value?.remainingTurns ?? 0,
+      },
+    ]),
+  ) as ActiveStatuses;
 }
 
 function decrementCooldowns(entity: RuntimeEntity): void {
@@ -144,14 +203,14 @@ export function simulateBattle(input: BattleInput): BattleResult {
   const player: RuntimeEntity = {
     ...applyFlatPassives(cloneEntity(input.playerInitial)),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.playerInitial),
-    statuses: {}
+    cooldowns: { ...initializeCooldowns(input.playerInitial), ...(input.playerInitialCooldowns ?? {}) },
+    statuses: cloneStatuses(input.playerInitialStatuses)
   };
   const enemy: RuntimeEntity = {
     ...applyFlatPassives(cloneEntity(input.enemyInitial)),
     initiative: 0,
-    cooldowns: initializeCooldowns(input.enemyInitial),
-    statuses: {}
+    cooldowns: { ...initializeCooldowns(input.enemyInitial), ...(input.enemyInitialCooldowns ?? {}) },
+    statuses: cloneStatuses(input.enemyInitialStatuses)
   };
   const combatants: RuntimeEntity[] = [player, enemy];
 
@@ -384,6 +443,8 @@ export function simulateBattle(input: BattleInput): BattleResult {
     seed: input.seed,
     playerInitial: cloneEntity(input.playerInitial),
     enemyInitial: cloneEntity(input.enemyInitial),
+    playerFinal: cloneRuntimeEntity(player),
+    enemyFinal: cloneRuntimeEntity(enemy),
     events,
     winnerEntityId: winner.entityId,
     roundsPlayed

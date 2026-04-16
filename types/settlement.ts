@@ -1,4 +1,13 @@
 export type ZoneState = 0 | 1 | 2;
+export type ProgressZoneState = 1 | 2;
+export type SettlementSchemaVersion = 2;
+export type SettlementSignatureScheme = 0 | 1;
+export type RunTerminalStatus =
+  | "COMPLETED"
+  | "FAILED"
+  | "ABANDONED"
+  | "EXPIRED"
+  | "SEASON_CUTOFF";
 
 export interface EncounterCountEntry {
   zoneId: number;
@@ -6,75 +15,122 @@ export interface EncounterCountEntry {
   count: number;
 }
 
-export interface ZoneProgressDeltaEntry {
-  zoneId: number;
-  newState: ZoneState;
+export interface RunEncounterCountEntry {
+  enemyArchetypeId: number;
+  count: number;
 }
 
-export interface ApplyBattleSettlementBatchV1Payload {
+export interface ZoneProgressDeltaEntry {
+  zoneId: number;
+  newState: ProgressZoneState;
+}
+
+export interface SettlementRunSummary {
+  closedRunSequence: number;
+  zoneId: number;
+  topologyVersion: number;
+  topologyHash: string;
+  terminalStatus: RunTerminalStatus;
+  rewardedBattleCount: number;
+  rewardedEncounterHistogram: RunEncounterCountEntry[];
+  zoneProgressDelta: ZoneProgressDeltaEntry[];
+  firstRewardedBattleTs: number;
+  lastRewardedBattleTs: number;
+}
+
+export interface SettlementBatchPayloadV2 {
   characterId: string;
   batchId: number;
+  startRunSequence?: number;
+  endRunSequence?: number;
+  runSummaries?: SettlementRunSummary[];
+  // Compatibility mirrors for older retry/sync surfaces.
   startNonce: number;
   endNonce: number;
   battleCount: number;
   startStateHash: string;
   endStateHash: string;
-  expDelta: number;
   zoneProgressDelta: ZoneProgressDeltaEntry[];
   encounterHistogram: EncounterCountEntry[];
   optionalLoadoutRevision?: number;
   batchHash: string;
-  attestationSlot: number;
-  attestationExpirySlot: number;
-  signatureScheme: 0;
+  firstBattleTs: number;
+  lastBattleTs: number;
+  seasonId: number;
+  schemaVersion: SettlementSchemaVersion;
+  signatureScheme: SettlementSignatureScheme;
 }
+
+export type SettlementBatchPayloadPreimageV2 = Omit<SettlementBatchPayloadV2, "batchHash">;
+
+export type SettlementEndStateHashPreimageV2 = Omit<
+  SettlementBatchPayloadPreimageV2,
+  "endStateHash"
+>;
 
 export interface ProgramConfigState {
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
+  maxRunsPerBatch?: number;
   maxHistogramEntriesPerBatch: number;
-  trustedServerSigners: string[];
+  trustedServerSigner: string;
+}
+
+export interface SeasonPolicyState {
+  seasonId: number;
+  seasonStartTs: number;
+  seasonEndTs: number;
+  commitGraceEndTs: number;
 }
 
 export interface CharacterRootState {
   characterId: string;
   authority: string;
-  level: number;
-  exp: number;
+  characterCreationTs: number;
+  name?: string;
+  classId?: number;
 }
 
 export interface CharacterStatsState {
-  lastRecalcSlot: number;
-}
-
-export interface CharacterLoadoutState {
-  loadoutRevision: number;
+  level: number;
+  totalExp: number;
 }
 
 export interface CharacterWorldProgressState {
-  highestMainZoneUnlocked: number;
-  highestMainZoneCleared: number;
-  updatedAtSlot: number;
+  highestUnlockedZoneId: number;
+  highestClearedZoneId: number;
 }
 
 export interface CharacterSettlementBatchCursorState {
   lastCommittedEndNonce: number;
   lastCommittedStateHash: string;
   lastCommittedBatchId: number;
+  lastCommittedBattleTs: number;
+  lastCommittedSeasonId: number;
   updatedAtSlot: number;
 }
 
 export interface ZoneRegistryEntry {
   zoneId: number;
-  allowDirectLockedToCleared?: boolean;
+  topologyVersion?: number;
+  topologyHash?: string;
+  totalSubnodeCount?: number;
+  expMultiplierNum: number;
+  expMultiplierDen: number;
+}
+
+export interface ZoneEnemyRuleEntry {
+  enemyArchetypeId: number;
+  maxPerRun: number;
 }
 
 export interface EnemyArchetypeRegistryEntry {
   enemyArchetypeId: number;
-  expCapPerEncounter: number;
+  expRewardBase: number;
 }
 
 export interface SettlementValidationContext {
+  currentUnixTimestamp: number;
   currentSlot: number;
   playerAuthority: string;
   serverSigner: string;
@@ -82,11 +138,11 @@ export interface SettlementValidationContext {
   characterStats: CharacterStatsState;
   characterWorldProgress: CharacterWorldProgressState;
   zoneStates: Map<number, ZoneState>;
-  loadout?: CharacterLoadoutState;
   cursor: CharacterSettlementBatchCursorState;
   programConfig: ProgramConfigState;
-  zoneRegistry: Map<number, ZoneRegistryEntry>;
-  zoneEnemySet: Map<number, Set<number>>;
+  seasonPolicy: SeasonPolicyState;
+  zoneRegistry: Map<string | number, ZoneRegistryEntry>;
+  zoneEnemySet: Map<string | number, ZoneEnemyRuleEntry[] | Set<number>>;
   enemyArchetypes: Map<number, EnemyArchetypeRegistryEntry>;
 }
 

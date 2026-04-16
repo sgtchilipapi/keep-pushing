@@ -1,0 +1,41 @@
+{
+  "programConfig": {
+    "trustedServerSigner": "11111111111111111111111111111111",
+    "settlementPaused": false,
+    "maxBattlesPerBatch": 20,
+    "maxRunsPerBatch": 4,
+    "maxHistogramEntriesPerBatch": 20
+  },
+  "seasons": [
+    {
+      "seasonId": 1,
+      "seasonStartTs": 1710000000,
+      "seasonEndTs": 1712592000,
+      "commitGraceEndTs": 1712678400
+    }
+  ],
+  "zoneRegistries": [
+    {
+      "zoneId": 1,
+      "topologyVersion": 1,
+      "totalSubnodeCount": 4,
+      "topologyHash": "436a32bbf7e7424082f292ae2f838df41387e9e4892558f0f4bc54f3b0fb4456",
+      "expMultiplierNum": 1,
+      "expMultiplierDen": 1
+    }
+  ],
+  "classRegistries": [
+    {
+      "classId": 1,
+      "enabled": true
+    },
+    {
+      "classId": 2,
+      "enabled": true
+    },
+    {
+      "classId": 3,
+      "enabled": true
+    }
+  ]
+}

@@ -2,3 +2,10 @@ node_modules
 .next
 coverage
 npm-debug.log*
+test-ledger/
+.env.docker
+.docker/secrets/
+.tmp/
+tsconfig.tsbuildinfo
+.env.local
+debug/logs/*.ndjson

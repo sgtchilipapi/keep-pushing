@@ -3,30 +3,46 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "app:local:clean-space": "bash scripts/cleanupLocalDisk.sh",
+    "app:local:fresh": "bash scripts/appLocalFresh.sh",
     "dev": "next dev",
     "build": "next build",
+    "start": "next start",
     "test": "jest --runInBand",
-    "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts"
+    "test:solana:localnet": "RUNANA_ENABLE_LOCALNET_TESTS=1 jest --runInBand tests/runanaLocalnet.integration.test.ts",
+    "simulate:combat": "npx tsx scripts/randomCombatSimulation.ts",
+    "solana:manual:character:setup": "bash scripts/solana/setupManualCharacterTest.sh",
+    "solana:lookup-table:create": "npx tsx scripts/solana/createSettlementLookupTable.ts",
+    "solana:character:create": "npx tsx scripts/solana/createCharacter.ts",
+    "solana:first-sync": "npx tsx scripts/solana/runFirstSync.ts",
+    "solana:encounter:settle": "npx tsx scripts/solana/runEncounterSettlement.ts",
+    "solana:benchmark:settlement-envelope": "npx tsx scripts/solana/benchmarkSettlementEnvelope.ts",
+    "solana:bootstrap": "npx tsx scripts/solana/seedBootstrap.ts",
+    "solana:bootstrap:dry-run": "npx tsx scripts/solana/seedBootstrap.ts --dry-run"
   },
   "dependencies": {
+    "@phantom/browser-sdk": "^2.0.1",
+    "@phantom/react-sdk": "^2.0.1",
     "@prisma/client": "^7.4.2",
+    "@solana/web3.js": "^1.98.4",
     "@types/pg": "^8.18.0",
-    "next": "14.2.5",
+    "next": "^15.5.15",
     "pg": "^8.20.0",
     "prisma": "^7.4.2",
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/jest": "29.5.12",
     "@types/node": "20.14.12",
-    "@types/react": "18.3.3",
-    "@types/react-dom": "18.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "eslint": "8.57.0",
-    "eslint-config-next": "14.2.5",
+    "eslint-config-next": "^15.5.15",
     "jest": "29.7.0",
     "jest-environment-node": "29.7.0",
     "ts-jest": "29.2.5",
+    "tsx": "^4.20.6",
     "typescript": "5.5.4"
   }
 }

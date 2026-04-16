@@ -1,9 +1,12 @@
+import "./globals.css";
+
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import PhantomSdkProvider from "../components/providers/PhantomSdkProvider";
 
 export const metadata: Metadata = {
-  title: "Keep Pushing",
-  description: "Vertical slice scaffold"
+  title: "RUNARA",
+  description: "Bright atmospheric tactical run prototype.",
 };
 
 type RootLayoutProps = {
@@ -13,7 +16,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PhantomSdkProvider>{children}</PhantomSdkProvider>
+      </body>
     </html>
   );
 }

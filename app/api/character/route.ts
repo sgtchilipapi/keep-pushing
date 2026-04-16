@@ -1,41 +1,27 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
 
-import { prisma } from '../../../lib/prisma';
+import { getFirstCharacterDetailForUser } from "../../../lib/characterAppService";
+import {
+  SessionRequiredError,
+  requireSession,
+} from "../../../lib/auth/requireSession";
+import type { CharacterQueryResponse } from "../../../types/api/frontend";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('userId');
-
-  if (userId === null || userId.length === 0) {
-    return NextResponse.json({ error: 'userId query parameter is required.' }, { status: 400 });
+  try {
+    const actor = await requireSession(request);
+    const character = await getFirstCharacterDetailForUser(actor.user.id);
+    const response: CharacterQueryResponse = { character };
+    return NextResponse.json(response);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to load character.";
+    const status =
+      error instanceof SessionRequiredError
+        ? 401
+        : message.startsWith("ERR_USER_NOT_FOUND")
+          ? 404
+          : 500;
+    return NextResponse.json({ error: message }, { status });
   }
-
-  const character = await prisma.character.findByUserId(userId);
-
-  if (character === null) {
-    return NextResponse.json({ character: null });
-  }
-
-  return NextResponse.json({
-    character: {
-      characterId: character.id,
-      userId: character.userId,
-      name: character.name,
-      level: character.level,
-      exp: character.exp,
-      stats: {
-        hp: character.hp,
-        hpMax: character.hpMax,
-        atk: character.atk,
-        def: character.def,
-        spd: character.spd,
-        accuracyBP: character.accuracyBP,
-        evadeBP: character.evadeBP
-      },
-      activeSkills: character.activeSkills,
-      passiveSkills: character.passiveSkills,
-      unlockedSkillIds: character.unlockedSkillIds,
-      inventory: character.inventory
-    }
-  });
 }

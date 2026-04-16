@@ -1,3 +1,4 @@
+import { generateBattleSeed } from '../engine/battle/battleEngine';
 import { XorShift32 } from '../engine/rng/xorshift32';
 
 describe('XorShift32', () => {
@@ -36,5 +37,13 @@ describe('XorShift32', () => {
     const oneSeed = new XorShift32(1);
 
     expect(zeroSeed.nextU32()).toBe(oneSeed.nextU32());
+  });
+
+  it('generates battle seeds that fit in signed PostgreSQL integer range', () => {
+    const seed = generateBattleSeed(Uint8Array.from([255, 255, 255, 255]));
+
+    expect(Number.isInteger(seed)).toBe(true);
+    expect(seed).toBeGreaterThanOrEqual(1);
+    expect(seed).toBeLessThanOrEqual(2147483647);
   });
 });

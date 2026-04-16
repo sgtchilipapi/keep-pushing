@@ -1,0 +1,9 @@
+Host cs.organic-orbit-gw54q4xxw79hwxgj.sync-redesign
+	User codespace
+	ProxyCommand /usr/bin/gh cs ssh -c organic-orbit-gw54q4xxw79hwxgj --stdio -- -i /home/codespace/.ssh/codespaces.auto
+	UserKnownHostsFile=/dev/null
+	StrictHostKeyChecking no
+	LogLevel quiet
+	ControlMaster auto
+	IdentityFile /home/codespace/.ssh/codespaces.auto
+

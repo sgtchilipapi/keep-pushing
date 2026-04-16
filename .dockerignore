@@ -1,0 +1,8 @@
+.git
+.next
+coverage
+node_modules
+npm-debug.log*
+test-ledger
+.env.docker
+.tmp

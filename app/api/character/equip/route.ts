@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 
 import { getPassiveDef } from '../../../../engine/battle/passiveRegistry';
 import { getSkillDef } from '../../../../engine/battle/skillRegistry';
+import {
+  SessionForbiddenError,
+  SessionRequiredError,
+  requireSessionCharacterAccess,
+} from '../../../../lib/auth/requireSession';
 import { prisma } from '../../../../lib/prisma';
 
 type EquipPayload = {
@@ -65,7 +70,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Character not found.' }, { status: 404 });
   }
 
-  await prisma.character.updateEquip(body.characterId, body.activeSkills, body.passiveSkills);
+  try {
+    await requireSessionCharacterAccess(request, body.characterId);
+  } catch (error) {
+    const status =
+      error instanceof SessionRequiredError
+        ? 401
+        : error instanceof SessionForbiddenError
+          ? 403
+          : 500;
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : 'Failed to authorize character loadout update.',
+      },
+      { status },
+    );
+  }
+
+  await prisma.character.updateEquip(
+    body.characterId,
+    body.activeSkills,
+    body.passiveSkills,
+  );
 
   return NextResponse.json({
     characterId: body.characterId,
