@@ -10,7 +10,7 @@ type PhantomSdkProviderProps = {
 };
 
 const PHANTOM_APP_ID = '5a98fa34-66b8-4652-bf30-89a1f690c92e';
-const PHANTOM_REDIRECT_URL = 'https://www.runara.quest';
+const PHANTOM_REDIRECT_URL = 'https://www.runara.quest/auth/callback';
 
 export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps) {
   useEffect(() => {
