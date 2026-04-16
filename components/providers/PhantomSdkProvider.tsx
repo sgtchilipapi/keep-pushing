@@ -38,7 +38,7 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
       details: {
         appId: PHANTOM_APP_ID,
         redirectUrl: PHANTOM_REDIRECT_URL,
-        providers: ['google', 'apple'],
+        providers: ['google', 'apple', 'injected'],
         addressTypes: [AddressType.solana],
       },
     });
@@ -68,7 +68,7 @@ export default function PhantomSdkProvider({ children }: PhantomSdkProviderProps
   return (
     <PhantomProvider
       config={{
-        providers: ['google', 'apple'],
+        providers: ['google', 'apple', 'injected'],
         addressTypes: [AddressType.solana],
         appId: PHANTOM_APP_ID,
         authOptions: {
