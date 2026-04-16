@@ -19,16 +19,21 @@ export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:54
 export RUNANA_ACTIVE_SEASON_ID="${RUNANA_ACTIVE_SEASON_ID:-1}"
 export RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES="${RUNANA_AUTO_CREATE_SETTLEMENT_LOOKUP_TABLES:-1}"
 
+DOCKER_COMPOSE_CMD=(docker compose)
+if [[ -f "$ROOT/.env.docker" ]]; then
+  DOCKER_COMPOSE_CMD+=(--env-file .env.docker)
+fi
+
 echo "[app:local:fresh] stopping old app and validator if present"
 pkill -f "next dev" || true
 pkill -f solana-test-validator || true
 pkill -f solana-faucet || true
 
 echo "[app:local:fresh] stopping dockerized app if present"
-docker compose --env-file .env.docker stop app >/dev/null 2>&1 || true
+"${DOCKER_COMPOSE_CMD[@]}" stop app >/dev/null 2>&1 || true
 
 echo "[app:local:fresh] ensuring postgres is running"
-docker compose --env-file .env.docker up -d postgres
+"${DOCKER_COMPOSE_CMD[@]}" up -d postgres
 
 echo "[app:local:fresh] bootstrapping validator, program, backend, and local artifacts"
 npm run solana:manual:character:setup

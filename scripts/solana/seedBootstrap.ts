@@ -49,9 +49,12 @@ import {
   mergeZoneRegistryDefaults,
 } from '../../lib/combat/solanaBootstrapCatalog';
 
+const SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1 = 0;
+
 interface BootstrapConfigFile {
   programConfig: {
     trustedServerSigner: string;
+    settlementAuthorizationMode: number;
     settlementPaused: boolean;
     maxBattlesPerBatch: number;
     maxRunsPerBatch: number;
@@ -237,6 +240,11 @@ function decodeBootstrapConfig(raw: unknown): BootstrapConfigFile {
       trustedServerSigner: expectString(
         programConfig.trustedServerSigner,
         'programConfig.trustedServerSigner',
+      ),
+      settlementAuthorizationMode: expectInteger(
+        programConfig.settlementAuthorizationMode ?? SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1,
+        'programConfig.settlementAuthorizationMode',
+        0,
       ),
       settlementPaused: expectBoolean(programConfig.settlementPaused, 'programConfig.settlementPaused'),
       maxBattlesPerBatch: expectInteger(
@@ -442,6 +450,7 @@ async function main(): Promise<void> {
 
   const desiredProgramConfig: InitializeProgramConfigArgs = {
     trustedServerSigner: new PublicKey(config.programConfig.trustedServerSigner),
+    settlementAuthorizationMode: config.programConfig.settlementAuthorizationMode,
     settlementPaused: config.programConfig.settlementPaused,
     maxBattlesPerBatch: config.programConfig.maxBattlesPerBatch,
     maxRunsPerBatch: config.programConfig.maxRunsPerBatch,
@@ -472,6 +481,7 @@ async function main(): Promise<void> {
 
     const matches =
       decoded.trustedServerSigner.equals(desiredProgramConfig.trustedServerSigner) &&
+      decoded.settlementAuthorizationMode === desiredProgramConfig.settlementAuthorizationMode &&
       decoded.settlementPaused === desiredProgramConfig.settlementPaused &&
       decoded.maxBattlesPerBatch === desiredProgramConfig.maxBattlesPerBatch &&
       decoded.maxRunsPerBatch === desiredProgramConfig.maxRunsPerBatch &&

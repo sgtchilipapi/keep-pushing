@@ -19,6 +19,7 @@ import {
 const RUNANA_MAX_ZONE_ENEMY_RULES = 64;
 
 type U64Like = number | bigint;
+const SETTLEMENT_AUTHORIZATION_MODE_DUAL_SERVER_AND_PLAYER_V1 = 0;
 
 function u16(value: number, field: string): Buffer {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
@@ -28,6 +29,14 @@ function u16(value: number, field: string): Buffer {
   const buffer = Buffer.alloc(2);
   buffer.writeUInt16LE(value, 0);
   return buffer;
+}
+
+function u8(value: number, field: string): Buffer {
+  if (!Number.isInteger(value) || value < 0 || value > 0xff) {
+    throw new Error(`ERR_INVALID_${field.toUpperCase()}: ${field} must fit in u8`);
+  }
+
+  return Buffer.from([value]);
 }
 
 function u32(value: number, field: string): Buffer {
@@ -150,6 +159,7 @@ export interface ZoneEnemyRuleEntry {
 
 export interface InitializeProgramConfigArgs {
   trustedServerSigner: PublicKey;
+  settlementAuthorizationMode: number;
   settlementPaused: boolean;
   maxBattlesPerBatch: number;
   maxRunsPerBatch: number;
@@ -213,6 +223,10 @@ interface UpdateAdminAccountInput {
 export function serializeInitializeProgramConfigArgs(args: InitializeProgramConfigArgs): Buffer {
   return Buffer.concat([
     args.trustedServerSigner.toBuffer(),
+    u8(
+      args.settlementAuthorizationMode,
+      'settlementAuthorizationMode',
+    ),
     bool(args.settlementPaused, 'settlementPaused'),
     u16(args.maxBattlesPerBatch, 'maxBattlesPerBatch'),
     u16(args.maxRunsPerBatch, 'maxRunsPerBatch'),

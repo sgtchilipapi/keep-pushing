@@ -246,7 +246,14 @@ function build_program_if_needed() {
   note "Building latest runana-program artifact"
   (
     cd "$RUNANA_PROGRAM_ROOT"
-    anchor build -p runana-program >/dev/null
+    if command -v anchor >/dev/null 2>&1; then
+      anchor build -p runana-program >/dev/null
+    else
+      require_command cargo-build-sbf
+      cargo-build-sbf \
+        --manifest-path programs/runana-program/Cargo.toml \
+        --sbf-out-dir target/deploy >/dev/null
+    fi
   )
 }
 
@@ -268,6 +275,7 @@ const now = Math.floor(Date.now() / 1000);
 const config = {
   programConfig: {
     trustedServerSigner,
+    settlementAuthorizationMode: 0,
     settlementPaused: false,
     maxBattlesPerBatch: Number(maxBattlesPerBatch),
     maxRunsPerBatch: 4,
@@ -393,7 +401,7 @@ EOF
 require_command curl
 require_command node
 require_command npm
-require_command anchor
+require_command cargo-build-sbf
 require_command solana
 require_command solana-keygen
 require_command solana-test-validator

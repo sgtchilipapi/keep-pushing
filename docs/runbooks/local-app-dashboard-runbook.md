@@ -32,6 +32,45 @@ http://127.0.0.1:3000/
 - sync the character
 - settle later backlog from the sync page
 
+Quickest fresh start in Codespaces terminal-only:
+
+1. Run the one-line helper
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:fresh
+```
+
+2. On your machine, start the SSH tunnel it prints
+3. Open `http://127.0.0.1:3000/`
+
+Full clean Codespaces reset:
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:clean
+```
+
+This one does a harder reset first:
+
+- stops host-run app processes
+- stops validator and faucet
+- removes Docker Postgres containers and volume
+- removes local `.tmp` and `.next` artifacts
+- then boots the fresh stack again
+
+Codespaces helpers rebuild the Solana program when source is newer than the deployed `.so`:
+
+- they use `anchor build` when `anchor` exists
+- otherwise they fall back to `cargo-build-sbf`
+- you can still force reuse of the existing artifact with `RUNANA_SKIP_PROGRAM_BUILD=1`
+
+Codespaces manual fallback:
+
+1. Run the Codespaces one-shot block in `Codespaces One-Shot Truly Fresh`
+2. On your machine, start the SSH tunnel it prints
+3. Open `http://127.0.0.1:3000/`
+
 Truly fresh:
 
 cd /home/paps/projects/keep-pushing
@@ -168,6 +207,193 @@ Use this path when:
 ### Option B: Host-Run App For Fast Dev Iteration
 
 Use this when you want the quickest frontend/backend iteration loop.
+
+### Option B1: Codespaces Variant For Terminal-Only Local Dev
+
+Use this when the app is running inside a GitHub Codespace and you want:
+
+- Dockerized Postgres inside the same Codespace
+- host-run Next.js app with hot reload
+- browser access through SSH port forwarding instead of the Codespaces Ports UI
+
+This is the most reliable path when you only have terminal access through `gh`.
+
+### 1. Set local app env in `.env.local`
+
+Make sure `.env.local` contains a local Postgres URL:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing
+```
+
+The Phantom redirect vars may remain in the same file.
+
+### 2. Start local Postgres in Docker
+
+```bash
+cd /workspaces/keep-pushing
+docker compose up -d postgres
+```
+
+Expected local DB settings in this repo:
+
+- host: `127.0.0.1`
+- port: `5432`
+- db: `keep_pushing`
+- user: `postgres`
+- password: `postgres`
+
+### 3. Apply Prisma migrations
+
+Prisma config reads `DATABASE_URL` from the process environment, so export it explicitly before running migrations:
+
+```bash
+cd /workspaces/keep-pushing
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing' npx prisma migrate deploy
+```
+
+### 4. Start the app
+
+```bash
+cd /workspaces/keep-pushing
+DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing' npm run dev
+```
+
+Wait for:
+
+- `Ready`
+- local listener on `http://localhost:3000`
+
+### 5. Reach the app from your machine with SSH port forwarding
+
+From your local machine:
+
+```bash
+gh codespace ssh -c <codespace-name> -- -L 3000:127.0.0.1:3000
+```
+
+Example:
+
+```bash
+gh codespace ssh -c organic-orbit-gw54q4xxw79hwxgj -- -L 3000:127.0.0.1:3000
+```
+
+Then open locally on your machine:
+
+```text
+http://127.0.0.1:3000/
+```
+
+If your local port `3000` is busy, bind another local port:
+
+```bash
+gh codespace ssh -c <codespace-name> -- -L 3001:127.0.0.1:3000
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3001/
+```
+
+Important:
+
+- do not expect Vercel to reach this DB
+- do not expect Codespaces `app.github.dev` forwarding to be available automatically in terminal-only workflows
+- the SSH tunnel is the canonical terminal-only browser path
+
+### Codespaces One-Shot Truly Fresh
+
+Use this when you want one pasteable block that does all local setup inside the Codespace:
+
+- starts Dockerized Postgres
+- applies Prisma migrations
+- starts the Next dev server on `127.0.0.1:3000`
+- runs the Solana validator bootstrap helper
+- prints the exact `gh codespace ssh -L ...` command to use from your machine
+
+If you do not need the raw block, use the one-line helper instead:
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:fresh
+```
+
+If you want the same flow but with a wiped DB and cleaned local artifacts first:
+
+```bash
+cd /workspaces/keep-pushing
+npm run app:codespace:clean
+```
+
+If you really want to skip the rebuild and reuse the current artifact:
+
+```bash
+RUNANA_SKIP_PROGRAM_BUILD=1 npm run app:codespace:fresh
+```
+
+Paste this inside the Codespace shell:
+
+```bash
+set -euo pipefail
+
+cd /workspaces/keep-pushing
+
+export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/keep_pushing'
+export RUNANA_ACTIVE_SEASON_ID=1
+
+echo "==> Starting Docker Postgres"
+docker compose up -d postgres
+
+echo "==> Applying Prisma migrations"
+npx prisma migrate deploy
+
+echo "==> Stopping old local app / validator if present"
+pkill -f "next dev -- --hostname 127.0.0.1 --port 3000" || true
+pkill -f "next dev" || true
+pkill -f solana-test-validator || true
+pkill -f solana-faucet || true
+
+mkdir -p .tmp
+
+echo "==> Starting Next app on http://127.0.0.1:3000"
+nohup env \
+  DATABASE_URL="$DATABASE_URL" \
+  RUNANA_ACTIVE_SEASON_ID="$RUNANA_ACTIVE_SEASON_ID" \
+  npm run dev -- --hostname 127.0.0.1 --port 3000 \
+  > .tmp/local-app-dashboard.log 2>&1 &
+APP_PID=$!
+
+echo "==> Waiting for app to respond"
+for i in $(seq 1 60); do
+  code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)"
+  if [ "$code" = "200" ]; then
+    break
+  fi
+  sleep 1
+done
+
+echo "==> Starting validator, deploying program, bootstrapping chain state"
+RUNANA_SKIP_SERVER_START=1 npm run solana:manual:character:setup
+
+echo
+echo "App URL inside codespace: http://127.0.0.1:3000/"
+echo "Old proof page inside codespace: http://127.0.0.1:3000/battle%20(old%20pof)"
+echo "App log: /workspaces/keep-pushing/.tmp/local-app-dashboard.log"
+echo "Next dev PID: $APP_PID"
+echo
+echo "From your machine, run:"
+echo "gh codespace ssh -c ${CODESPACE_NAME:-<codespace-name>} -- -L 3000:127.0.0.1:3000"
+echo
+echo "Then open:"
+echo "http://127.0.0.1:3000/"
+```
+
+This path is for local dev only:
+
+- the DB stays inside the Codespace
+- Vercel cannot reach this DB
+- the browser path is the SSH tunnel, not `app.github.dev`
 
 ### 1. Start Postgres
 
@@ -435,7 +661,7 @@ Use the longer companion runbook:
 
 ONE-SHOTTER:
 
-Assumption: you already have a local PostgreSQL server running on `127.0.0.1:5432` and a `postgres` superuser with password `postgres`. If your local Postgres uses different credentials, edit the vars at the top first.
+Host-local variant. Assumption: you already have a local PostgreSQL server running on `127.0.0.1:5432` and a `postgres` superuser with password `postgres`. If your local Postgres uses different credentials, edit the vars at the top first.
 
 ```bash
 set -euo pipefail

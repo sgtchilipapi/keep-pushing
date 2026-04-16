@@ -69,6 +69,12 @@ import {
 } from "../../lib/solana/playerOwnedV0Transactions";
 import { canUseSkillDuringPostBattlePause } from "../../lib/combat/zoneRunSkillMetadata";
 import { getSkillDef } from "../../engine/battle/skillRegistry";
+import {
+  clearPendingAuthProvider,
+  readPendingAuthProvider,
+  writePendingAuthProvider,
+  type PhantomAuthProvider,
+} from "../../lib/auth/phantomConnectClient";
 
 const PENDING_SYNC_STORAGE_KEY = "keep-pushing:pending-sync-acks";
 
@@ -120,8 +126,6 @@ type ApiError = Error & {
   status?: number;
 };
 
-type PhantomAuthProvider = "google" | "apple" | "injected";
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -147,7 +151,12 @@ async function apiRequest<T>(
     const message =
       isObject(data) && typeof data.error === "string"
         ? data.error
-        : `Request failed with status ${response.status}`;
+        : isObject(data) &&
+            "error" in data &&
+            isObject(data.error) &&
+            typeof data.error.code === "string"
+          ? data.error.code
+          : `Request failed with status ${response.status}`;
     const error = new Error(message) as ApiError;
     error.status = response.status;
     throw error;
@@ -2485,6 +2494,7 @@ export default function GameClient() {
   const [authProvider, setAuthProvider] = useState<PhantomAuthProvider | null>(
     null,
   );
+  const [authRequestNonce, setAuthRequestNonce] = useState(0);
   const authWalletInFlightRef = useRef<string | null>(null);
   const authProviderRef = useRef<PhantomAuthProvider | null>(null);
   const phantomStateRef = useRef<string | null>(null);
@@ -2906,6 +2916,16 @@ export default function GameClient() {
   ]);
 
   useEffect(() => {
+    const pendingAuthProvider = readPendingAuthProvider();
+    if (!pendingAuthProvider) {
+      return;
+    }
+
+    setAuthProvider(pendingAuthProvider);
+    setAuthRequestNonce((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function initialize() {
@@ -2985,7 +3005,9 @@ export default function GameClient() {
       !phantomConnected ||
       !walletPublicKey ||
       walletProvider === null ||
-      sessionActive
+      sessionActive ||
+      authRequestNonce === 0 ||
+      authProviderRef.current === null
     ) {
       if (!phantomConnected || !walletPublicKey) {
         authWalletInFlightRef.current = null;
@@ -2998,6 +3020,8 @@ export default function GameClient() {
     }
 
     authWalletInFlightRef.current = walletPublicKey;
+    const requestedAuthProvider = authProviderRef.current;
+    clearPendingAuthProvider();
     let cancelled = false;
 
     setWalletError(null);
@@ -3014,7 +3038,7 @@ export default function GameClient() {
     void authenticateWalletSession({
       provider: walletProvider,
       walletAddress: walletPublicKey,
-      authProvider: authProviderRef.current,
+      authProvider: requestedAuthProvider,
     })
       .then(async () => {
         if (cancelled) {
@@ -3032,6 +3056,7 @@ export default function GameClient() {
             walletPublicKey,
           },
         });
+        setAuthProvider(null);
         setShellView("roster");
       })
       .catch((error) => {
@@ -3056,11 +3081,13 @@ export default function GameClient() {
           setAuthProvider(null);
           void disconnectEmbeddedWallet().catch(() => undefined);
         }
+        setAuthProvider(null);
         setWalletError(normalizedError);
         setAppPhase("ready");
       })
       .finally(() => {
         if (!cancelled) {
+          setAuthRequestNonce(0);
           setWalletActionStatus("idle");
         }
       });
@@ -3069,6 +3096,7 @@ export default function GameClient() {
     };
   }, [
     disconnectEmbeddedWallet,
+    authRequestNonce,
     phantomConnected,
     sessionActive,
     walletProvider,
@@ -3104,6 +3132,8 @@ export default function GameClient() {
     authWalletInFlightRef.current = null;
     setWalletError(null);
     setAuthProvider(provider);
+    setAuthRequestNonce((current) => current + 1);
+    writePendingAuthProvider(provider);
     logPhantomConnectClientEvent({
       area: "ui",
       stage: "connect_modal_open_requested",
@@ -3130,7 +3160,9 @@ export default function GameClient() {
         },
       });
     } catch (error) {
+      clearPendingAuthProvider();
       setAuthProvider(null);
+      setAuthRequestNonce(0);
       logPhantomConnectClientEvent({
         area: "sdk",
         stage: "react_sdk_direct_connect_failed",
@@ -3147,6 +3179,8 @@ export default function GameClient() {
 
   async function handleDisconnectWallet() {
     setAuthProvider(null);
+    setAuthRequestNonce(0);
+    clearPendingAuthProvider();
     setWalletError(null);
     logPhantomConnectClientEvent({
       area: "session",

@@ -1,8 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 
+import { ensureAuthSchemaBestEffort } from '../../../../../lib/auth/db';
 import { consumeAuthNonce } from '../../../../../lib/auth/nonce';
 import { createAuditRequestId, writeAuditLogSafe } from '../../../../../lib/observability/audit';
 import {
@@ -21,7 +22,24 @@ interface VerifyBody {
   signedMessage?: string;
 }
 
+function isDatabaseUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as Error & { code?: unknown }).code;
+  return (
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === '57P01' ||
+    code === '57P03'
+  );
+}
+
 export async function POST(request: Request) {
+  await ensureAuthSchemaBestEffort();
   const requestId = createAuditRequestId();
   const clientIp = getClientIpAddress(request);
   let body: VerifyBody;
@@ -145,39 +163,65 @@ export async function POST(request: Request) {
   const walletMode =
     request.headers.get('x-phantom-provider') === 'injected' ? 'injected' : 'embedded';
   const authProvider = walletProvider;
-  let userResult;
+  let userId: string | null = null;
   try {
-    userResult = await dbPool.query<{ id: string }>(
+    const insertedUser = await dbPool.query<{ id: string }>(
       `INSERT INTO "User" (id, "primaryWalletAddress", "walletProvider", "walletMode", "authProvider", "walletVerifiedAt", "lastLoginAt", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, $6, $6, $6)
-       ON CONFLICT ("primaryWalletAddress") DO UPDATE SET
-         "walletProvider" = EXCLUDED."walletProvider",
-         "walletMode" = EXCLUDED."walletMode",
-         "authProvider" = EXCLUDED."authProvider",
-         "walletVerifiedAt" = EXCLUDED."walletVerifiedAt",
-         "lastLoginAt" = EXCLUDED."lastLoginAt",
-         "updatedAt" = EXCLUDED."updatedAt"
+       ON CONFLICT DO NOTHING
        RETURNING id`,
       [randomUUID(), body.walletAddress, walletProvider, walletMode, authProvider, now],
     );
-  } catch (error) {
-    const fallbackUserId = createHash('sha256')
-      .update(`wallet:${body.walletAddress}`)
-      .digest('hex');
-    console.warn('[auth/verify] falling back to basic user row upsert', {
-      walletAddress: body.walletAddress,
-      error,
-    });
-    userResult = await dbPool.query<{ id: string }>(
-      `INSERT INTO "User" (id, "updatedAt")
-       VALUES ($1, $2)
-       ON CONFLICT (id) DO UPDATE SET "updatedAt" = EXCLUDED."updatedAt"
-       RETURNING id`,
-      [fallbackUserId, now],
-    );
-  }
 
-  const userId = userResult.rows[0]?.id;
+    userId = insertedUser.rows[0]?.id ?? null;
+    if (userId === null) {
+      const updatedUser = await dbPool.query<{ id: string }>(
+        `UPDATE "User"
+           SET "walletProvider" = $2,
+               "walletMode" = $3,
+               "authProvider" = $4,
+               "walletVerifiedAt" = $5,
+               "lastLoginAt" = $5,
+               "updatedAt" = $5
+         WHERE "primaryWalletAddress" = $1
+         RETURNING id`,
+        [body.walletAddress, walletProvider, walletMode, authProvider, now],
+      );
+      userId = updatedUser.rows[0]?.id ?? null;
+    }
+  } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      const errorDetails =
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+            }
+          : {
+              name: 'UnknownError',
+              message: String(error),
+            };
+      await writeAuditLogSafe({
+        requestId,
+        walletAddress: body.walletAddress,
+        actionType: 'AUTH_VERIFY',
+        phase: 'REQUEST',
+        status: 'ERROR',
+        errorCode: 'AUTH_DB_UNAVAILABLE',
+        httpStatus: 503,
+        metadataJson: {
+          clientIp,
+          error: errorDetails,
+        },
+      });
+      return NextResponse.json(
+        { ok: false, error: { code: 'AUTH_DB_UNAVAILABLE', retryable: true } },
+        { status: 503 },
+      );
+    }
+
+    throw error;
+  }
   if (!userId) {
     await writeAuditLogSafe({
       requestId,
