@@ -467,7 +467,7 @@ http://127.0.0.1:3000/
 
 The homepage is now the main dashboard for:
 
-- anonymous user bootstrap
+- wallet-backed session login
 - local-first character creation
 - roster and character management
 - zone-run setup, active run, result, and share
@@ -484,7 +484,7 @@ http://127.0.0.1:3000/battle%20(old%20pof)
 ### Local-First Path
 
 1. Open `/`
-2. Wait for anonymous user bootstrap
+2. Sign in through the wallet-backed session flow
 3. Create a character from the roster
 4. Open the character page and press `Start Run`
 5. Complete or abandon a run

@@ -57,7 +57,7 @@ function usage(): string {
     "Options:",
     "  --server-url <url>        Backend base URL. Default: http://127.0.0.1:3000",
     "  --player-keypair <path>   Required signer keypair JSON path",
-    "  --user-id <id>            Optional existing backend user id; otherwise create anon user",
+    "  --user-id <id>            Required existing wallet-backed backend user id",
     "  --name <name>             Optional character name. Default: CLI Manual",
     "  --season-id <id>          Season id at creation. Default: 1",
     "  --zone-id <id>            Initial unlocked zone id. Default: 1",
@@ -199,20 +199,15 @@ async function postJson<TResponse>(
 }
 
 async function resolveUserId(
-  serverUrl: string,
   explicitUserId?: string,
 ): Promise<string> {
   if (explicitUserId) {
     return explicitUserId;
   }
 
-  const response = await postJson<{ userId: string }>(
-    `${serverUrl}/api/auth/anon`,
+  throw new Error(
+    "ERR_MISSING_USER_ID: provide --user-id <id>; anonymous bootstrap has been removed",
   );
-  if (response.userId.trim().length === 0) {
-    throw new Error("ERR_EMPTY_USER_ID: backend returned an empty user id");
-  }
-  return response.userId;
 }
 
 async function main(): Promise<void> {
@@ -223,7 +218,7 @@ async function main(): Promise<void> {
 
   mkdirSync(artifactsDir, { recursive: true });
 
-  const userId = await resolveUserId(options.serverUrl, options.userId);
+  const userId = await resolveUserId(options.userId);
   const prepareRequest = {
     userId,
     authority,

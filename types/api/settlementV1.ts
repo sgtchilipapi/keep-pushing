@@ -10,7 +10,7 @@ export interface SettlementV1PrepareRequest {
 export interface SettlementV1PrepareData {
   prepareRequestId: string;
   zoneRunId: string;
-  settlementBatchId: string;
+  runSettlementId: string;
   payload: SettlementBatchPayloadV2;
   preparedTransaction: PreparedPlayerOwnedTransaction;
   presignToken: string;
@@ -36,7 +36,7 @@ export interface SettlementV1FinalizeRequest {
 
 export interface SettlementV1FinalizeData {
   phase: 'submitted' | 'confirmed';
-  settlementBatchId: string;
+  runSettlementId: string;
   transactionSignature: string;
 }
 

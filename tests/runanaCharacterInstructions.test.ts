@@ -105,7 +105,8 @@ describe("runanaCharacterInstructions", () => {
           Buffer.from(characterIdHex, "hex"),
           u16(300),
           u16(1),
-          Buffer.concat([Buffer.from("Rookie One", "ascii"), Buffer.alloc(6)]),
+          Buffer.from([10, 0, 0, 0]),
+          Buffer.from("Rookie One", "ascii"),
         ]),
       ),
     ).toBe(true);

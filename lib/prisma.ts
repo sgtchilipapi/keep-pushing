@@ -69,6 +69,7 @@ export type BattleOutcomeLedgerStatus =
   | 'COMMITTED';
 export type SettlementBatchStatus = 'SEALED' | 'PREPARED' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 export type SettlementSubmissionAttemptStatus = 'STARTED' | 'BROADCAST' | 'CONFIRMED' | 'FAILED' | 'TIMEOUT';
+export type RunSettlementStatus = 'PREPARED' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 export type ActiveZoneRunStateRecord = ActiveZoneRunState;
 export type ZoneRunTerminalStatusRecord = ZoneRunTerminalStatus;
 export type CharacterProvisionalZoneState = ZoneState;
@@ -522,6 +523,49 @@ export type SettlementRequestStatus =
   | 'CONFIRMED'
   | 'INVALIDATED'
   | 'FAILED';
+export type RunSettlementRequestStatus = SettlementRequestStatus;
+
+export type RunSettlementRecord = {
+  id: string;
+  characterId: string;
+  zoneRunId: string;
+  closedRunSequence: number;
+  settlementSequence: number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  status: RunSettlementStatus;
+  failureCode: string | null;
+  latestTransactionSignature: string | null;
+  preparedAt: Date | null;
+  submittedAt: Date | null;
+  confirmedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateRunSettlementInput = {
+  characterId: string;
+  zoneRunId: string;
+  closedRunSequence: number;
+  settlementSequence: number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  status?: RunSettlementStatus;
+  preparedAt?: Date | null;
+};
+
+export type UpdateRunSettlementInput = {
+  payloadHash?: string;
+  prepareMessageHash?: string;
+  status: RunSettlementStatus;
+  failureCode?: string | null;
+  latestTransactionSignature?: string | null;
+  preparedAt?: Date | null;
+  submittedAt?: Date | null;
+  confirmedAt?: Date | null;
+  failedAt?: Date | null;
+};
 
 export type SettlementRequestRecord = {
   id: string;
@@ -541,6 +585,60 @@ export type SettlementRequestRecord = {
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type RunSettlementRequestRecord = {
+  id: string;
+  runSettlementId: string;
+  characterId: string;
+  sessionId: string | null;
+  walletAddress: string;
+  zoneRunId: string;
+  settlementSequence: number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  presignedMessageHash: string | null;
+  status: RunSettlementRequestStatus;
+  invalidReasonCode: string | null;
+  idempotencyKey: string;
+  preparedAt: Date | null;
+  presignedAt: Date | null;
+  finalizedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateRunSettlementRequestInput = {
+  runSettlementId: string;
+  characterId: string;
+  sessionId?: string | null;
+  walletAddress: string;
+  zoneRunId: string;
+  settlementSequence: number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  idempotencyKey: string;
+  status?: RunSettlementRequestStatus;
+  preparedAt?: Date | null;
+  expiresAt?: Date | null;
+};
+
+export type UpdateRunSettlementRequestInput = {
+  runSettlementId?: string;
+  sessionId?: string | null;
+  walletAddress?: string;
+  zoneRunId?: string;
+  settlementSequence?: number;
+  payloadHash?: string;
+  prepareMessageHash?: string;
+  status: RunSettlementRequestStatus;
+  presignedMessageHash?: string | null;
+  invalidReasonCode?: string | null;
+  preparedAt?: Date | null;
+  presignedAt?: Date | null;
+  finalizedAt?: Date | null;
+  expiresAt?: Date | null;
 };
 
 export type CreateSettlementRequestInput = {
@@ -810,6 +908,47 @@ type SettlementRequestRow = {
   prepareMessageHash: string;
   presignedMessageHash: string | null;
   status: SettlementRequestStatus;
+  invalidReasonCode: string | null;
+  idempotencyKey: string;
+  preparedAt: Date | null;
+  presignedAt: Date | null;
+  finalizedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type RunSettlementRow = {
+  id: string;
+  characterId: string;
+  zoneRunId: string;
+  closedRunSequence: string | number;
+  settlementSequence: string | number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  status: RunSettlementStatus;
+  failureCode: string | null;
+  latestTransactionSignature: string | null;
+  preparedAt: Date | null;
+  submittedAt: Date | null;
+  confirmedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type RunSettlementRequestRow = {
+  id: string;
+  runSettlementId: string;
+  characterId: string;
+  sessionId: string | null;
+  walletAddress: string;
+  zoneRunId: string;
+  settlementSequence: string | number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  presignedMessageHash: string | null;
+  status: RunSettlementRequestStatus;
   invalidReasonCode: string | null;
   idempotencyKey: string;
   preparedAt: Date | null;
@@ -1235,6 +1374,51 @@ function mapSettlementRequest(row: SettlementRequestRow): SettlementRequestRecor
     walletAddress: row.walletAddress,
     batchId: parseRequiredSafeInteger(row.batchId, 'batchId'),
     batchHash: row.batchHash,
+    prepareMessageHash: row.prepareMessageHash,
+    presignedMessageHash: row.presignedMessageHash,
+    status: row.status,
+    invalidReasonCode: row.invalidReasonCode,
+    idempotencyKey: row.idempotencyKey,
+    preparedAt: row.preparedAt,
+    presignedAt: row.presignedAt,
+    finalizedAt: row.finalizedAt,
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapRunSettlement(row: RunSettlementRow): RunSettlementRecord {
+  return {
+    id: row.id,
+    characterId: row.characterId,
+    zoneRunId: row.zoneRunId,
+    closedRunSequence: parseRequiredSafeInteger(row.closedRunSequence, 'closedRunSequence'),
+    settlementSequence: parseRequiredSafeInteger(row.settlementSequence, 'settlementSequence'),
+    payloadHash: row.payloadHash,
+    prepareMessageHash: row.prepareMessageHash,
+    status: row.status,
+    failureCode: row.failureCode,
+    latestTransactionSignature: row.latestTransactionSignature,
+    preparedAt: row.preparedAt,
+    submittedAt: row.submittedAt,
+    confirmedAt: row.confirmedAt,
+    failedAt: row.failedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapRunSettlementRequest(row: RunSettlementRequestRow): RunSettlementRequestRecord {
+  return {
+    id: row.id,
+    runSettlementId: row.runSettlementId,
+    characterId: row.characterId,
+    sessionId: row.sessionId,
+    walletAddress: row.walletAddress,
+    zoneRunId: row.zoneRunId,
+    settlementSequence: parseRequiredSafeInteger(row.settlementSequence, 'settlementSequence'),
+    payloadHash: row.payloadHash,
     prepareMessageHash: row.prepareMessageHash,
     presignedMessageHash: row.presignedMessageHash,
     status: row.status,
@@ -2495,10 +2679,9 @@ export const prisma = {
           AND "closedRunSequence" IS NOT NULL
           AND NOT EXISTS (
             SELECT 1
-            FROM "SettlementBatch" batch,
-                 jsonb_array_elements(batch."runSummariesJson") AS summary
-            WHERE batch."characterId" = "ClosedZoneRunSummary"."characterId"
-              AND ((summary ->> 'closedRunSequence')::bigint) = "ClosedZoneRunSummary"."closedRunSequence"
+            FROM "RunSettlement" settlement
+            WHERE settlement."zoneRunId" = "ClosedZoneRunSummary"."zoneRunId"
+              AND settlement."status" = 'CONFIRMED'
           )
         ORDER BY "closedRunSequence" ASC
         LIMIT $2`,
@@ -3526,6 +3709,50 @@ export const prisma = {
 
       return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
     },
+    async findByCharacterAndBatchHash(characterId: string, batchHash: string) {
+      const result = await pool.query<SettlementBatchRow>(
+        `SELECT
+          id,
+          "characterId",
+          "batchId",
+          "startRunSequence",
+          "endRunSequence",
+          "runCount",
+          "runSummariesJson",
+          "startNonce",
+          "endNonce",
+          "battleCount",
+          "firstBattleTs",
+          "lastBattleTs",
+          "seasonId",
+          "startStateHash",
+          "endStateHash",
+          "zoneProgressDeltaJson",
+          "encounterHistogramJson",
+          "optionalLoadoutRevision",
+          "batchHash",
+          "schemaVersion",
+          "signatureScheme",
+          "status",
+          "failureCategory",
+          "failureCode",
+          "latestMessageSha256Hex",
+          "latestSignedTxSha256Hex",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "SettlementBatch"
+        WHERE "characterId" = $1 AND "batchHash" = $2
+        LIMIT 1`,
+        [characterId, batchHash]
+      );
+
+      return result.rows[0] ? mapSettlementBatch(result.rows[0]) : null;
+    },
     async findNextUnconfirmedForCharacter(characterId: string) {
       const result = await pool.query<SettlementBatchRow>(
         `SELECT
@@ -3772,9 +3999,11 @@ export const prisma = {
         FROM "SettlementSubmissionAttempt" attempt
         JOIN "SettlementBatch" batch
           ON batch.id = attempt."settlementBatchId"
-        JOIN "SettlementRequest" request
-          ON request."characterId" = batch."characterId"
-         AND request."batchId" = batch."batchId"
+        JOIN "RunSettlement" settlement
+          ON settlement."characterId" = batch."characterId"
+         AND settlement."payloadHash" = batch."batchHash"
+        JOIN "RunSettlementRequest" request
+          ON request."runSettlementId" = settlement.id
         WHERE request."characterId" = $1
           AND request."status" IN ('PREPARED', 'PRESIGNED', 'SUBMITTED')
         ORDER BY
@@ -3825,6 +4054,432 @@ export const prisma = {
 
       return result.rows[0] ? mapSettlementSubmissionAttempt(result.rows[0]) : null;
     }
+  },
+  runSettlement: {
+    async create(input: CreateRunSettlementInput) {
+      const result = await pool.query<RunSettlementRow>(
+        `INSERT INTO "RunSettlement"
+          (
+            id,
+            "characterId",
+            "zoneRunId",
+            "closedRunSequence",
+            "settlementSequence",
+            "payloadHash",
+            "prepareMessageHash",
+            "status",
+            "failureCode",
+            "latestTransactionSignature",
+            "preparedAt",
+            "submittedAt",
+            "confirmedAt",
+            "failedAt",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        RETURNING
+          id,
+          "characterId",
+          "zoneRunId",
+          "closedRunSequence",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "status",
+          "failureCode",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.characterId,
+          input.zoneRunId,
+          input.closedRunSequence,
+          input.settlementSequence,
+          input.payloadHash,
+          input.prepareMessageHash,
+          input.status ?? 'PREPARED',
+          null,
+          null,
+          input.preparedAt ?? null,
+          null,
+          null,
+          null,
+          new Date(),
+        ]
+      );
+
+      return mapRunSettlement(result.rows[0]);
+    },
+    async findById(id: string) {
+      const result = await pool.query<RunSettlementRow>(
+        `SELECT
+          id,
+          "characterId",
+          "zoneRunId",
+          "closedRunSequence",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "status",
+          "failureCode",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlement"
+        WHERE id = $1
+        LIMIT 1`,
+        [id]
+      );
+
+      return result.rows[0] ? mapRunSettlement(result.rows[0]) : null;
+    },
+    async findByZoneRunId(zoneRunId: string) {
+      const result = await pool.query<RunSettlementRow>(
+        `SELECT
+          id,
+          "characterId",
+          "zoneRunId",
+          "closedRunSequence",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "status",
+          "failureCode",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlement"
+        WHERE "zoneRunId" = $1
+        LIMIT 1`,
+        [zoneRunId]
+      );
+
+      return result.rows[0] ? mapRunSettlement(result.rows[0]) : null;
+    },
+    async update(id: string, input: UpdateRunSettlementInput) {
+      const result = await pool.query<RunSettlementRow>(
+        `UPDATE "RunSettlement"
+        SET
+          "payloadHash" = COALESCE($2, "payloadHash"),
+          "prepareMessageHash" = COALESCE($3, "prepareMessageHash"),
+          "status" = $4,
+          "failureCode" = $5,
+          "latestTransactionSignature" = $6,
+          "preparedAt" = $7,
+          "submittedAt" = $8,
+          "confirmedAt" = $9,
+          "failedAt" = $10,
+          "updatedAt" = $11
+        WHERE id = $1
+        RETURNING
+          id,
+          "characterId",
+          "zoneRunId",
+          "closedRunSequence",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "status",
+          "failureCode",
+          "latestTransactionSignature",
+          "preparedAt",
+          "submittedAt",
+          "confirmedAt",
+          "failedAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          id,
+          input.payloadHash ?? null,
+          input.prepareMessageHash ?? null,
+          input.status,
+          input.failureCode ?? null,
+          input.latestTransactionSignature ?? null,
+          input.preparedAt ?? null,
+          input.submittedAt ?? null,
+          input.confirmedAt ?? null,
+          input.failedAt ?? null,
+          new Date(),
+        ]
+      );
+
+      return result.rows[0] ? mapRunSettlement(result.rows[0]) : null;
+    },
+  },
+  runSettlementRequest: {
+    async create(input: CreateRunSettlementRequestInput) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `INSERT INTO "RunSettlementRequest"
+          (
+            id,
+            "runSettlementId",
+            "characterId",
+            "sessionId",
+            "walletAddress",
+            "zoneRunId",
+            "settlementSequence",
+            "payloadHash",
+            "prepareMessageHash",
+            "presignedMessageHash",
+            "status",
+            "invalidReasonCode",
+            "idempotencyKey",
+            "preparedAt",
+            "presignedAt",
+            "finalizedAt",
+            "expiresAt",
+            "updatedAt"
+          )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        RETURNING
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          createRowId(),
+          input.runSettlementId,
+          input.characterId,
+          input.sessionId ?? null,
+          input.walletAddress,
+          input.zoneRunId,
+          input.settlementSequence,
+          input.payloadHash,
+          input.prepareMessageHash,
+          null,
+          input.status ?? 'PREPARED',
+          null,
+          input.idempotencyKey,
+          input.preparedAt ?? null,
+          null,
+          null,
+          input.expiresAt ?? null,
+          new Date(),
+        ]
+      );
+
+      return mapRunSettlementRequest(result.rows[0]);
+    },
+    async findById(id: string) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `SELECT
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlementRequest"
+        WHERE id = $1
+        LIMIT 1`,
+        [id]
+      );
+
+      return result.rows[0] ? mapRunSettlementRequest(result.rows[0]) : null;
+    },
+    async findByCharacterZoneRunAndIdempotencyKey(
+      characterId: string,
+      zoneRunId: string,
+      idempotencyKey: string,
+    ) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `SELECT
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlementRequest"
+        WHERE "characterId" = $1
+          AND "zoneRunId" = $2
+          AND "idempotencyKey" = $3
+        LIMIT 1`,
+        [characterId, zoneRunId, idempotencyKey]
+      );
+
+      return result.rows[0] ? mapRunSettlementRequest(result.rows[0]) : null;
+    },
+    async findActiveByRunSettlementId(runSettlementId: string) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `SELECT
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlementRequest"
+        WHERE "runSettlementId" = $1
+          AND "status" IN ('PREPARED', 'PRESIGNED', 'SUBMITTED')
+        ORDER BY COALESCE("finalizedAt", "presignedAt", "preparedAt", "createdAt") DESC, "createdAt" DESC
+        LIMIT 1`,
+        [runSettlementId]
+      );
+
+      return result.rows[0] ? mapRunSettlementRequest(result.rows[0]) : null;
+    },
+    async findLatestActiveByCharacter(characterId: string) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `SELECT
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        FROM "RunSettlementRequest"
+        WHERE "characterId" = $1
+          AND "status" IN ('PREPARED', 'PRESIGNED', 'SUBMITTED')
+        ORDER BY COALESCE("finalizedAt", "presignedAt", "preparedAt", "createdAt") DESC, "createdAt" DESC
+        LIMIT 1`,
+        [characterId]
+      );
+
+      return result.rows[0] ? mapRunSettlementRequest(result.rows[0]) : null;
+    },
+    async update(id: string, input: UpdateRunSettlementRequestInput) {
+      const result = await pool.query<RunSettlementRequestRow>(
+        `UPDATE "RunSettlementRequest"
+        SET
+          "runSettlementId" = COALESCE($2, "runSettlementId"),
+          "sessionId" = COALESCE($3, "sessionId"),
+          "walletAddress" = COALESCE($4, "walletAddress"),
+          "zoneRunId" = COALESCE($5, "zoneRunId"),
+          "settlementSequence" = COALESCE($6, "settlementSequence"),
+          "payloadHash" = COALESCE($7, "payloadHash"),
+          "prepareMessageHash" = COALESCE($8, "prepareMessageHash"),
+          "status" = $9,
+          "presignedMessageHash" = $10,
+          "invalidReasonCode" = $11,
+          "preparedAt" = $12,
+          "presignedAt" = $13,
+          "finalizedAt" = $14,
+          "expiresAt" = $15,
+          "updatedAt" = $16
+        WHERE id = $1
+        RETURNING
+          id,
+          "runSettlementId",
+          "characterId",
+          "sessionId",
+          "walletAddress",
+          "zoneRunId",
+          "settlementSequence",
+          "payloadHash",
+          "prepareMessageHash",
+          "presignedMessageHash",
+          "status",
+          "invalidReasonCode",
+          "idempotencyKey",
+          "preparedAt",
+          "presignedAt",
+          "finalizedAt",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"`,
+        [
+          id,
+          input.runSettlementId ?? null,
+          input.sessionId ?? null,
+          input.walletAddress ?? null,
+          input.zoneRunId ?? null,
+          input.settlementSequence ?? null,
+          input.payloadHash ?? null,
+          input.prepareMessageHash ?? null,
+          input.status,
+          input.presignedMessageHash ?? null,
+          input.invalidReasonCode ?? null,
+          input.preparedAt ?? null,
+          input.presignedAt ?? null,
+          input.finalizedAt ?? null,
+          input.expiresAt ?? null,
+          new Date(),
+        ]
+      );
+
+      return result.rows[0] ? mapRunSettlementRequest(result.rows[0]) : null;
+    },
   },
   settlementRequest: {
     async create(input: CreateSettlementRequestInput) {

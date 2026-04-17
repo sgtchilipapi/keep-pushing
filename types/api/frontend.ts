@@ -170,7 +170,7 @@ export interface CharacterSyncDetailResponse {
   character: CharacterReadModel;
   season: CurrentSeasonResponse;
   sync: {
-    mode: "first_sync" | "settlement" | null;
+    mode: "create" | "settlement" | null;
     pendingRunSettlementId?: string | null;
     pendingRunSequence?: number | null;
     pendingRunCount?: number;

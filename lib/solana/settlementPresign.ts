@@ -32,8 +32,8 @@ function buildPresignToken(requestId: string): string {
   return requestId;
 }
 
-function requireSettlementRequestOwnership(
-  request: Awaited<ReturnType<typeof prisma.settlementRequest.findById>>,
+function requireRunSettlementRequestOwnership(
+  request: Awaited<ReturnType<typeof prisma.runSettlementRequest.findById>>,
   walletAddress: string,
   options: { allowExpired?: boolean } = {},
 ) {
@@ -53,6 +53,41 @@ function requireSettlementRequestOwnership(
     throw new Error('ERR_SETTLEMENT_REQUEST_EXPIRED: settlement request has expired');
   }
   return request;
+}
+
+async function ensurePreparedRunSettlement(args: {
+  characterId: string;
+  zoneRunId: string;
+  closedRunSequence: number;
+  payloadHash: string;
+  prepareMessageHash: string;
+  preparedAt: Date;
+}) {
+  const existing = await prisma.runSettlement.findByZoneRunId(args.zoneRunId);
+  if (existing === null) {
+    return prisma.runSettlement.create({
+      characterId: args.characterId,
+      zoneRunId: args.zoneRunId,
+      closedRunSequence: args.closedRunSequence,
+      settlementSequence: args.closedRunSequence,
+      payloadHash: args.payloadHash,
+      prepareMessageHash: args.prepareMessageHash,
+      status: 'PREPARED',
+      preparedAt: args.preparedAt,
+    });
+  }
+
+  return prisma.runSettlement.update(existing.id, {
+    payloadHash: args.payloadHash,
+    prepareMessageHash: args.prepareMessageHash,
+    status: 'PREPARED',
+    failureCode: null,
+    latestTransactionSignature: null,
+    preparedAt: args.preparedAt,
+    submittedAt: null,
+    confirmedAt: null,
+    failedAt: null,
+  });
 }
 
 function signSponsorTransaction(
@@ -87,10 +122,10 @@ function getTransactionProgramIds(transaction: Transaction | VersionedTransactio
 
 async function invalidateSettlementRequest(
   requestId: string,
-  request: Awaited<ReturnType<typeof prisma.settlementRequest.findById>>,
+  request: Awaited<ReturnType<typeof prisma.runSettlementRequest.findById>>,
   invalidReasonCode: string,
 ) {
-  await prisma.settlementRequest.update(requestId, {
+  await prisma.runSettlementRequest.update(requestId, {
     status: 'INVALIDATED',
     invalidReasonCode,
     preparedAt: request?.preparedAt ?? null,
@@ -101,7 +136,7 @@ async function invalidateSettlementRequest(
 }
 
 async function verifyCanonicalSettlementTransaction(args: {
-  request: NonNullable<Awaited<ReturnType<typeof prisma.settlementRequest.findById>>>;
+  request: NonNullable<Awaited<ReturnType<typeof prisma.runSettlementRequest.findById>>>;
   transaction: Transaction | VersionedTransaction;
   sponsorFeePayer: string;
 }) {
@@ -164,8 +199,9 @@ export async function prepareSettlementPresignRequest(input: {
       'ERR_SETTLEMENT_RUN_NOT_OLDEST_PENDING: requested run is not the oldest pending settlement run',
     );
   }
-  const existing = await prisma.settlementRequest.findByCharacterAndIdempotencyKey(
+  const existing = await prisma.runSettlementRequest.findByCharacterZoneRunAndIdempotencyKey(
     characterId,
+    zoneRunId,
     idempotencyKey,
   );
   if (existing !== null) {
@@ -201,22 +237,67 @@ export async function prepareSettlementPresignRequest(input: {
   }
 
   const now = new Date();
-  const request = await prisma.settlementRequest.create({
+  const closedRunSequence = oldestPendingRun.closedRunSequence;
+  if (closedRunSequence === null) {
+    throw new Error('ERR_SETTLEMENT_PREPARE_INTERNAL: pending run did not carry a closed sequence');
+  }
+  const runSettlement = await ensurePreparedRunSettlement({
     characterId,
-    sessionId,
-    walletAddress,
-    batchId: prepared.payload.batchId,
-    batchHash: prepared.payload.batchHash,
+    zoneRunId,
+    closedRunSequence,
+    payloadHash: prepared.payload.batchHash,
     prepareMessageHash: prepared.preparedTransaction.messageSha256Hex,
-    idempotencyKey,
     preparedAt: now,
-    expiresAt: new Date(now.getTime() + SETTLEMENT_REQUEST_TTL_MS),
   });
+  if (runSettlement === null) {
+    throw new Error('ERR_SETTLEMENT_PREPARE_INTERNAL: failed to persist run settlement');
+  }
+  const activeRequest = await prisma.runSettlementRequest.findActiveByRunSettlementId(runSettlement.id);
+  if (activeRequest !== null && activeRequest.id !== existing?.id) {
+    throw new Error(
+      'ERR_SETTLEMENT_REQUEST_ALREADY_EXISTS: settlement idempotency key is already in use',
+    );
+  }
+  const requestExpiresAt = new Date(now.getTime() + SETTLEMENT_REQUEST_TTL_MS);
+  const request =
+    existing === null
+      ? await prisma.runSettlementRequest.create({
+          runSettlementId: runSettlement.id,
+          characterId,
+          sessionId,
+          walletAddress,
+          zoneRunId,
+          settlementSequence: runSettlement.settlementSequence,
+          payloadHash: runSettlement.payloadHash,
+          prepareMessageHash: runSettlement.prepareMessageHash,
+          idempotencyKey,
+          preparedAt: now,
+          expiresAt: requestExpiresAt,
+        })
+      : await prisma.runSettlementRequest.update(existing.id, {
+          runSettlementId: runSettlement.id,
+          sessionId,
+          walletAddress,
+          zoneRunId,
+          settlementSequence: runSettlement.settlementSequence,
+          payloadHash: runSettlement.payloadHash,
+          prepareMessageHash: runSettlement.prepareMessageHash,
+          status: 'PREPARED',
+          presignedMessageHash: null,
+          invalidReasonCode: null,
+          preparedAt: now,
+          presignedAt: null,
+          finalizedAt: null,
+          expiresAt: requestExpiresAt,
+        });
+  if (request === null) {
+    throw new Error('ERR_SETTLEMENT_PREPARE_INTERNAL: failed to persist settlement request');
+  }
 
   return {
     prepareRequestId: request.id,
     zoneRunId,
-    settlementBatchId: prepared.settlementBatchId,
+    runSettlementId: runSettlement.id,
     payload: prepared.payload,
     preparedTransaction: prepared.preparedTransaction,
     presignToken: buildPresignToken(request.id),
@@ -244,8 +325,8 @@ export async function presignSettlementTransaction(input: {
     throw new Error('ERR_SETTLEMENT_PRESIGN_TOKEN_INVALID: presign token did not match request');
   }
 
-  const request = requireSettlementRequestOwnership(
-    await prisma.settlementRequest.findById(prepareRequestId),
+  const request = requireRunSettlementRequestOwnership(
+    await prisma.runSettlementRequest.findById(prepareRequestId),
     walletAddress,
   );
 
@@ -299,7 +380,7 @@ export async function presignSettlementTransaction(input: {
   const signedTransactionBase64 = serializeLegacyOrVersionedTransactionBase64(signedTransaction);
   const now = new Date();
 
-  await prisma.settlementRequest.update(request.id, {
+  await prisma.runSettlementRequest.update(request.id, {
     status: 'PRESIGNED',
     presignedMessageHash: messageSha256Hex,
     preparedAt: request.preparedAt,
@@ -329,8 +410,8 @@ export async function finalizeSettlementPresignRequest(input: {
     input.transactionSignature,
     'ERR_EMPTY_TRANSACTION_SIGNATURE',
   );
-  const request = requireSettlementRequestOwnership(
-    await prisma.settlementRequest.findById(prepareRequestId),
+  const request = requireRunSettlementRequestOwnership(
+    await prisma.runSettlementRequest.findById(prepareRequestId),
     walletAddress,
     { allowExpired: true },
   );
@@ -343,11 +424,15 @@ export async function finalizeSettlementPresignRequest(input: {
       'ERR_SETTLEMENT_REQUEST_STATE_INVALID: settlement request is not in a finalizable state',
     );
   }
-  const batch = await prisma.settlementBatch.findByCharacterAndBatchId(
+  const runSettlement = await prisma.runSettlement.findById(request.runSettlementId);
+  if (runSettlement === null || runSettlement.zoneRunId !== request.zoneRunId) {
+    throw new Error('ERR_SETTLEMENT_BATCH_NOT_FOUND: settlement batch was not found');
+  }
+  const batch = await prisma.settlementBatch.findByCharacterAndBatchHash(
     request.characterId,
-    request.batchId,
+    request.payloadHash,
   );
-  if (batch === null || batch.batchHash !== request.batchHash) {
+  if (batch === null) {
     throw new Error('ERR_SETTLEMENT_BATCH_NOT_FOUND: settlement batch was not found');
   }
   if (
@@ -367,7 +452,7 @@ export async function finalizeSettlementPresignRequest(input: {
     }
     return {
       phase: batch.status === 'CONFIRMED' ? 'confirmed' : 'submitted',
-      settlementBatchId: batch.id,
+      runSettlementId: runSettlement.id,
       transactionSignature,
     } as const;
   }
@@ -381,6 +466,17 @@ export async function finalizeSettlementPresignRequest(input: {
     latestTransactionSignature: transactionSignature,
     preparedAt: batch.preparedAt ?? request.preparedAt ?? now,
     submittedAt: now,
+  });
+  await prisma.runSettlement.update(runSettlement.id, {
+    status: 'SUBMITTED',
+    payloadHash: request.payloadHash,
+    prepareMessageHash: request.prepareMessageHash,
+    failureCode: null,
+    latestTransactionSignature: transactionSignature,
+    preparedAt: runSettlement.preparedAt ?? request.preparedAt ?? now,
+    submittedAt: now,
+    confirmedAt: null,
+    failedAt: null,
   });
 
   const attempts = await prisma.settlementSubmissionAttempt.listByBatch(batch.id);
@@ -398,7 +494,7 @@ export async function finalizeSettlementPresignRequest(input: {
 
   const reconciled = await reconcileSettlementBatch(batch.id);
   const isConfirmed = reconciled.state === 'CONFIRMED';
-  await prisma.settlementRequest.update(request.id, {
+  await prisma.runSettlementRequest.update(request.id, {
     status: isConfirmed ? 'CONFIRMED' : 'SUBMITTED',
     presignedMessageHash: request.presignedMessageHash ?? request.prepareMessageHash,
     preparedAt: request.preparedAt,
@@ -406,10 +502,21 @@ export async function finalizeSettlementPresignRequest(input: {
     finalizedAt: now,
     expiresAt: request.expiresAt,
   });
+  await prisma.runSettlement.update(runSettlement.id, {
+    status: isConfirmed ? 'CONFIRMED' : 'SUBMITTED',
+    payloadHash: request.payloadHash,
+    prepareMessageHash: request.prepareMessageHash,
+    failureCode: isConfirmed ? null : runSettlement.failureCode,
+    latestTransactionSignature: transactionSignature,
+    preparedAt: runSettlement.preparedAt ?? request.preparedAt ?? now,
+    submittedAt: runSettlement.submittedAt ?? now,
+    confirmedAt: isConfirmed ? now : null,
+    failedAt: isConfirmed ? null : runSettlement.failedAt,
+  });
 
   return {
     phase: isConfirmed ? 'confirmed' : 'submitted',
-    settlementBatchId: batch.id,
+    runSettlementId: runSettlement.id,
     transactionSignature,
   } as const;
 }

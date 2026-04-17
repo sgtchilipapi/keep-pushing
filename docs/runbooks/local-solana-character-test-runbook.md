@@ -109,18 +109,14 @@ That means the validator must run on the host, not inside the Docker stack.
 In a second terminal:
 
 ```bash
-curl -i -X POST http://127.0.0.1:3000/api/auth/anon
+curl -i http://127.0.0.1:3000/api/v1/settlement/prepare
 ```
 
 Expected:
-- HTTP `201`
-- JSON body with `userId`
+- HTTP `405` or `401`
+- the route responds, which confirms the app is up
 
-Example:
-
-```json
-{"userId":"..."}
-```
+Anonymous bootstrap has been removed. The app now requires a wallet-backed session for live gameplay flows.
 
 ## 3. Start Fresh Local Validator, Deploy Program, Seed Bootstrap
 
@@ -155,8 +151,8 @@ What this does:
   - versioned zone registry
   - versioned zone enemy set
   - enemy archetype registry
-- creates an anon backend user
 - writes local test artifacts under `.tmp/manual-character-test/<timestamp>`
+- requires `RUNANA_USER_ID` to be set to an existing wallet-backed backend user id
 
 The helper now reuses one validator ledger path instead of creating a new multi-GB ledger inside every timestamped artifact directory:
 - `.tmp/manual-character-test/validator-ledger-current`
@@ -176,25 +172,25 @@ Expected end state:
 Use this as the primary product-level check after bootstrap:
 
 1. Open `http://127.0.0.1:3000/`
-2. Let the anon session bootstrap silently
+2. Sign in through the wallet-backed session flow
 3. Create a character with class card + unique name
 4. Open the character page and start a run
 5. Complete or abandon the run through the zone-run UI
 6. Open the result page or public share page
-7. Connect Phantom and use the dedicated sync page to perform first sync or later settlement
+7. Use the dedicated sync page to perform settlement with the connected wallet
 
 Expected product behavior:
 
 - roster and character pages show season + sync context
 - active play uses the zone-run map window, not raw encounter endpoints
-- first sync and later settlement each use one Phantom transaction approval
-- the sync page surfaces the oldest unresolved batch as the primary action
+- character creation and later settlement use wallet-backed sync flows
+- the sync page surfaces the oldest unresolved run as the primary action
 
 ## 4. Create A Local-Only Character
 
 If you want to exercise the new local-first flow, create a backend character first without sending any transaction on chain.
 
-Take the `userId` returned from `POST /api/auth/anon` in step 2 and create a character directly:
+Use an existing wallet-backed `userId` and create a character directly:
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/api/character/create \
@@ -271,7 +267,7 @@ This script lives at:
 - [createCharacter.ts](/home/paps/projects/keep-pushing/scripts/solana/createCharacter.ts)
 
 What it does:
-- creates an anon user if `--user-id` is not provided
+- requires `--user-id` for an existing wallet-backed backend user
 - calls `POST /api/solana/character/create/prepare`
 - signs the returned transaction with the provided player keypair
 - calls `POST /api/solana/character/create/submit`
@@ -418,13 +414,14 @@ newgrp docker
 docker ps
 ```
 
-### Backend `POST /api/auth/anon` returns 500
+### Manual setup fails immediately asking for `RUNANA_USER_ID`
 
-This was fixed by explicit ID generation in [prisma.ts](/home/paps/projects/keep-pushing/lib/prisma.ts). If this reappears, rebuild the app container:
+Cause:
+- anonymous bootstrap has been removed from the app and setup scripts
 
-```bash
-docker compose --env-file .env.docker up --build -d app
-```
+Fix:
+- create or locate an existing wallet-backed backend user id
+- rerun the helper with `RUNANA_USER_ID=<user-id>`
 
 ### Bootstrap admin mismatch or season mismatch
 
@@ -465,7 +462,7 @@ In another terminal:
 ```bash
 pkill -f solana-test-validator || true
 cd /home/paps/projects/keep-pushing
-RUNANA_SKIP_SERVER_START=1 npm run solana:manual:character:setup
+RUNANA_USER_ID=<user-id> RUNANA_SKIP_SERVER_START=1 npm run solana:manual:character:setup
 ```
 
 Then, using the printed manual-test artifact directory:
@@ -494,19 +491,7 @@ npm run solana:encounter:settle -- \
 
 If that prints `settlementState=CONFIRMED`, the local environment is functioning end-to-end for character creation, real encounters, and settlement submission.
 
-If you want the shortest local-first simulation path before on-chain sync:
-
-```bash
-curl -s -X POST http://127.0.0.1:3000/api/auth/anon
-curl -s -X POST http://127.0.0.1:3000/api/character/create \
-  -H 'content-type: application/json' \
-  -d '{"userId":"<user-id>","name":"Local First Manual"}'
-curl -s -X POST http://127.0.0.1:3000/api/combat/encounter \
-  -H 'content-type: application/json' \
-  -d '{"characterId":"<character-id>","zoneId":1,"seed":77}'
-```
-
-If that final call returns `settlementStatus=AWAITING_FIRST_SYNC`, the local-first combat path is functioning and persisting battle backlog correctly.
+If you want the shortest local-first simulation path before on-chain sync, use an existing wallet-backed `userId`, then create a character and run the encounter routes directly.
 
 ## 13. What This Proves
 

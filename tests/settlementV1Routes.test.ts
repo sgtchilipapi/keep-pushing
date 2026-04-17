@@ -89,7 +89,7 @@ describe('v1 settlement routes', () => {
     settlementPresignMock.prepareSettlementPresignRequest.mockResolvedValue({
       prepareRequestId: 'request-1',
       zoneRunId: 'run-1',
-      settlementBatchId: 'batch-1',
+      runSettlementId: 'run-settlement-1',
       payload: { batchId: 1 },
       preparedTransaction: {
         kind: 'battle_settlement',

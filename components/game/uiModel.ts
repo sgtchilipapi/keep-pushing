@@ -4,7 +4,7 @@ import type { CharacterReadModel } from '../../types/api/frontend';
 
 export type PanelTone = 'neutral' | 'warning' | 'success' | 'danger' | 'info';
 
-export type SyncMode = 'create_then_settle' | 'settlement' | null;
+export type SyncMode = 'create' | 'settlement' | null;
 
 export interface SyncPanelState {
   season: number | null;
@@ -54,14 +54,14 @@ export function resolveSyncPanelState(character: CharacterReadModel): SyncPanelS
         season: resolveEffectiveSeason(character),
         statusLabel: 'LOCAL ONLY',
         statusTone: 'neutral',
-        syncMode: 'create_then_settle',
+        syncMode: 'create',
       };
     case 'CREATING_ON_CHAIN':
       return {
         season: resolveEffectiveSeason(character),
         statusLabel: 'CREATING',
         statusTone: 'info',
-        syncMode: 'create_then_settle',
+        syncMode: 'create',
       };
     case 'INITIAL_SETTLEMENT_REQUIRED':
       return {
@@ -82,7 +82,7 @@ export function resolveSyncPanelState(character: CharacterReadModel): SyncPanelS
         season: resolveEffectiveSeason(character),
         statusLabel: 'FAILED',
         statusTone: 'danger',
-        syncMode: 'create_then_settle',
+        syncMode: 'create',
       };
     case 'SYNCED':
     default:

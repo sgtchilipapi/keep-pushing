@@ -55,6 +55,8 @@ const STARTER_ACTIVE_SKILLS = ["1001", "1002"];
 const STARTER_PASSIVES = ["2001", "2002"];
 const DEFAULT_CHARACTER_NAME = "Rookie";
 const MAX_CHARACTER_ID_ASSIGNMENT_ATTEMPTS = 5;
+const CREATE_CHARACTER_COMPUTE_UNIT_LIMIT = 1_000_000;
+const CREATE_CHARACTER_HEAP_FRAME_BYTES = 262_144;
 
 interface CreatedCharacterRecord {
   id: string;
@@ -377,7 +379,10 @@ function assertSemanticallyValidSignedCreateTransaction(args: {
     {
       pubkey: authority,
       isSigner: true,
-      isWritable: true,
+      // When payer and authority are the same key, Solana's compiled message
+      // merges the duplicate account metas and preserves the most permissive
+      // flags, so the authority appears writable after decompilation.
+      isWritable: authority.equals(feePayer),
       label: "authority",
     },
     {
@@ -754,7 +759,15 @@ export async function prepareSolanaCharacterCreation(
     preparedTransactionBytes = await buildPreparedVersionedTransaction({
       connection: connection as Connection,
       feePayer,
-      instructions: [createInstruction.instruction],
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: CREATE_CHARACTER_COMPUTE_UNIT_LIMIT,
+        }),
+        ComputeBudgetProgram.requestHeapFrame({
+          bytes: CREATE_CHARACTER_HEAP_FRAME_BYTES,
+        }),
+        createInstruction.instruction,
+      ],
       commitment,
       partialSigners: [sponsorSigner],
     });
