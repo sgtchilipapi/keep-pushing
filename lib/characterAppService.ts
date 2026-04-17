@@ -63,12 +63,11 @@ async function buildCharacterReadModel(
     return null;
   }
 
-  const [chainState, provisionalProgress, latestBattle, nextSettlementBatch, activeZoneRun, latestClosedZoneRun, pendingSettlementRuns] =
+  const [chainState, provisionalProgress, latestBattle, activeZoneRun, latestClosedZoneRun, pendingSettlementRuns] =
     await Promise.all([
       prisma.character.findChainState(character.id),
       prisma.characterProvisionalProgress.findByCharacterId(character.id),
       prisma.battleOutcomeLedger.findLatestForCharacter(character.id),
-      prisma.settlementBatch.findNextUnconfirmedForCharacter(character.id),
       prisma.activeZoneRun.findByCharacterId(character.id),
       prisma.closedZoneRunSummary.findLatestForCharacter(character.id),
       prisma.closedZoneRunSummary.listNextSettleableForCharacter(character.id, 11),
@@ -250,7 +249,7 @@ export async function getCharacterSyncDetail(
   userId?: string,
 ): Promise<CharacterSyncDetailResponse> {
   const detail = await getCharacterDetail(characterId, userId);
-  const activeSettlementRequest = await prisma.settlementRequest.findLatestActiveByCharacter(
+  const activeSettlementRequest = await prisma.runSettlementRequest.findLatestActiveByCharacter(
     detail.character.characterId,
   );
   const attempts =

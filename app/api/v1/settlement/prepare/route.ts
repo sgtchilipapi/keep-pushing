@@ -109,7 +109,7 @@ export async function POST(request: Request) {
       entityId: typeof body.characterId === 'string' ? body.characterId : null,
       metadataJson: {
         prepareRequestId: data.prepareRequestId,
-        settlementBatchId: data.settlementBatchId,
+        runSettlementId: data.runSettlementId,
       },
     });
 

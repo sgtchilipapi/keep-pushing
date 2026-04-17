@@ -15,14 +15,21 @@ const prismaMock = {
   closedZoneRunSummary: {
     listNextSettleableForCharacter: jest.fn(),
   },
-  settlementRequest: {
+  runSettlement: {
     findById: jest.fn(),
-    findByCharacterAndIdempotencyKey: jest.fn(),
+    findByZoneRunId: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  runSettlementRequest: {
+    findById: jest.fn(),
+    findByCharacterZoneRunAndIdempotencyKey: jest.fn(),
+    findActiveByRunSettlementId: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
   },
   settlementBatch: {
-    findByCharacterAndBatchId: jest.fn(),
+    findByCharacterAndBatchHash: jest.fn(),
     updateStatus: jest.fn(),
   },
   settlementSubmissionAttempt: {
@@ -72,14 +79,38 @@ function sha256HexFromBase64(value: string): string {
   return createHash('sha256').update(Buffer.from(value, 'base64')).digest('hex');
 }
 
+function buildRunSettlement(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'run-settlement-1',
+    characterId: 'character-1',
+    zoneRunId: 'run-1',
+    closedRunSequence: 7,
+    settlementSequence: 7,
+    payloadHash: 'ab'.repeat(32),
+    prepareMessageHash: '12'.repeat(32),
+    status: 'PREPARED',
+    failureCode: null,
+    latestTransactionSignature: null,
+    preparedAt: new Date('2026-04-13T00:00:00.000Z'),
+    submittedAt: null,
+    confirmedAt: null,
+    failedAt: null,
+    createdAt: new Date('2026-04-13T00:00:00.000Z'),
+    updatedAt: new Date('2026-04-13T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 function buildSettlementRequest(overrides: Record<string, unknown> = {}) {
   return {
     id: 'request-1',
+    runSettlementId: 'run-settlement-1',
     characterId: 'character-1',
     sessionId: 'session-1',
     walletAddress: 'wallet-1',
-    batchId: 4,
-    batchHash: 'ab'.repeat(32),
+    zoneRunId: 'run-1',
+    settlementSequence: 7,
+    payloadHash: 'ab'.repeat(32),
     prepareMessageHash: '',
     presignedMessageHash: null,
     status: 'PREPARED',
@@ -184,6 +215,13 @@ describe('settlementPresign', () => {
         updatedAt: new Date('2026-04-13T00:00:00.000Z'),
       },
     ]);
+    prismaMock.runSettlement.findByZoneRunId.mockResolvedValue(null);
+    prismaMock.runSettlement.create.mockResolvedValue(buildRunSettlement());
+    prismaMock.runSettlement.findById.mockResolvedValue(buildRunSettlement());
+    prismaMock.runSettlement.update.mockImplementation(async (_id: string, input: Record<string, unknown>) =>
+      buildRunSettlement(input),
+    );
+    prismaMock.runSettlementRequest.findActiveByRunSettlementId.mockResolvedValue(null);
     prismaMock.settlementSubmissionAttempt.listByBatch.mockResolvedValue([]);
     settlementLifecycleMock.reconcileSettlementBatch.mockResolvedValue({
       state: 'SUBMITTED',
@@ -226,10 +264,9 @@ describe('settlementPresign', () => {
   });
 
   it('echoes the prepared zone run id when prepare succeeds', async () => {
-    prismaMock.settlementRequest.findByCharacterAndIdempotencyKey.mockResolvedValue(null);
-    prismaMock.settlementRequest.create.mockResolvedValue({
+    prismaMock.runSettlementRequest.findByCharacterZoneRunAndIdempotencyKey.mockResolvedValue(null);
+    prismaMock.runSettlementRequest.create.mockResolvedValue({
       ...buildSettlementRequest(),
-      batchId: 4,
     });
     settlementRelayMock.prepareSolanaSettlement.mockResolvedValue({
       phase: 'sign_transaction',
@@ -252,17 +289,18 @@ describe('settlementPresign', () => {
     });
 
     expect(result.zoneRunId).toBe('run-1');
+    expect(result.runSettlementId).toBe('run-settlement-1');
     expect(settlementRelayMock.prepareSolanaSettlement).toHaveBeenCalled();
   });
 
   it('invalidates the request when the presign callback message hash does not match', async () => {
     const transaction = buildPreparedTransaction({});
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         prepareMessageHash: '00'.repeat(32),
       }),
     );
-    prismaMock.settlementRequest.update.mockResolvedValue(null);
+    prismaMock.runSettlementRequest.update.mockResolvedValue(null);
 
     await expect(
       presignSettlementTransaction({
@@ -273,7 +311,7 @@ describe('settlementPresign', () => {
       }),
     ).rejects.toThrow('ERR_SETTLEMENT_TX_MISMATCH_MESSAGE_HASH');
 
-    expect(prismaMock.settlementRequest.update).toHaveBeenCalledWith(
+    expect(prismaMock.runSettlementRequest.update).toHaveBeenCalledWith(
       'request-1',
       expect.objectContaining({
         status: 'INVALIDATED',
@@ -289,12 +327,12 @@ describe('settlementPresign', () => {
     const messageSha256Hex = sha256HexFromBase64(
       serializeLegacyOrVersionedTransactionMessageBase64(transaction),
     );
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         prepareMessageHash: messageSha256Hex,
       }),
     );
-    prismaMock.settlementRequest.update.mockResolvedValue(null);
+    prismaMock.runSettlementRequest.update.mockResolvedValue(null);
 
     await expect(
       presignSettlementTransaction({
@@ -305,7 +343,7 @@ describe('settlementPresign', () => {
       }),
     ).rejects.toThrow('ERR_SETTLEMENT_TX_MISMATCH_FEE_PAYER');
 
-    expect(prismaMock.settlementRequest.update).toHaveBeenCalledWith(
+    expect(prismaMock.runSettlementRequest.update).toHaveBeenCalledWith(
       'request-1',
       expect.objectContaining({
         status: 'INVALIDATED',
@@ -320,7 +358,7 @@ describe('settlementPresign', () => {
     const messageSha256Hex = sha256HexFromBase64(
       serializeLegacyOrVersionedTransactionMessageBase64(transaction),
     );
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         status: 'PRESIGNED',
         prepareMessageHash: messageSha256Hex,
@@ -337,17 +375,17 @@ describe('settlementPresign', () => {
 
     expect(result.prepareRequestId).toBe('request-1');
     expect(result.messageSha256Hex).toBe(messageSha256Hex);
-    expect(prismaMock.settlementRequest.update).not.toHaveBeenCalled();
+    expect(prismaMock.runSettlementRequest.update).not.toHaveBeenCalled();
   });
 
   it('returns the prior finalize result idempotently for the same transaction signature', async () => {
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         status: 'SUBMITTED',
         presignedMessageHash: '12'.repeat(32),
       }),
     );
-    prismaMock.settlementBatch.findByCharacterAndBatchId.mockResolvedValue(
+    prismaMock.settlementBatch.findByCharacterAndBatchHash.mockResolvedValue(
       buildSettlementBatch({
         status: 'SUBMITTED',
         latestTransactionSignature: 'sig-1',
@@ -362,7 +400,7 @@ describe('settlementPresign', () => {
 
     expect(result).toEqual({
       phase: 'submitted',
-      settlementBatchId: 'settlement-batch-1',
+      runSettlementId: 'run-settlement-1',
       transactionSignature: 'sig-1',
     });
     expect(prismaMock.settlementBatch.updateStatus).not.toHaveBeenCalled();
@@ -370,13 +408,13 @@ describe('settlementPresign', () => {
   });
 
   it('retries finalize recovery for a presigned request when the same transaction was already broadcast', async () => {
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         status: 'PRESIGNED',
         presignedMessageHash: '12'.repeat(32),
       }),
     );
-    prismaMock.settlementBatch.findByCharacterAndBatchId.mockResolvedValue(
+    prismaMock.settlementBatch.findByCharacterAndBatchHash.mockResolvedValue(
       buildSettlementBatch({
         status: 'SUBMITTED',
         latestTransactionSignature: 'sig-1',
@@ -409,7 +447,7 @@ describe('settlementPresign', () => {
 
     expect(result).toEqual({
       phase: 'confirmed',
-      settlementBatchId: 'settlement-batch-1',
+      runSettlementId: 'run-settlement-1',
       transactionSignature: 'sig-1',
     });
     expect(prismaMock.settlementBatch.updateStatus).toHaveBeenCalledWith(
@@ -423,7 +461,7 @@ describe('settlementPresign', () => {
     expect(settlementLifecycleMock.reconcileSettlementBatch).toHaveBeenCalledWith(
       'settlement-batch-1',
     );
-    expect(prismaMock.settlementRequest.update).toHaveBeenCalledWith(
+    expect(prismaMock.runSettlementRequest.update).toHaveBeenCalledWith(
       'request-1',
       expect.objectContaining({
         status: 'CONFIRMED',
@@ -433,13 +471,13 @@ describe('settlementPresign', () => {
   });
 
   it('rejects finalize recovery when a presigned request is retried with a different transaction signature', async () => {
-    prismaMock.settlementRequest.findById.mockResolvedValue(
+    prismaMock.runSettlementRequest.findById.mockResolvedValue(
       buildSettlementRequest({
         status: 'PRESIGNED',
         presignedMessageHash: '12'.repeat(32),
       }),
     );
-    prismaMock.settlementBatch.findByCharacterAndBatchId.mockResolvedValue(
+    prismaMock.settlementBatch.findByCharacterAndBatchHash.mockResolvedValue(
       buildSettlementBatch({
         status: 'SUBMITTED',
         latestTransactionSignature: 'sig-1',
@@ -458,6 +496,6 @@ describe('settlementPresign', () => {
 
     expect(prismaMock.settlementBatch.updateStatus).not.toHaveBeenCalled();
     expect(settlementLifecycleMock.reconcileSettlementBatch).not.toHaveBeenCalled();
-    expect(prismaMock.settlementRequest.update).not.toHaveBeenCalled();
+    expect(prismaMock.runSettlementRequest.update).not.toHaveBeenCalled();
   });
 });

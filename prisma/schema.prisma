@@ -38,6 +38,22 @@ enum SettlementSubmissionAttemptStatus {
   TIMEOUT
 }
 
+enum RunSettlementStatus {
+  PREPARED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+enum RunSettlementRequestStatus {
+  PREPARED
+  PRESIGNED
+  SUBMITTED
+  CONFIRMED
+  INVALIDATED
+  FAILED
+}
+
 enum ActiveZoneRunState {
   TRAVERSING
   AWAITING_BRANCH
@@ -117,6 +133,8 @@ model Character {
   battleOutcomes   BattleOutcomeLedger[]
   settlementBatches SettlementBatch[]
   settlementRequests SettlementRequest[]
+  runSettlements   RunSettlement[]
+  runSettlementRequests RunSettlementRequest[]
   provisionalProgress CharacterProvisionalProgress?
   activeZoneRun    ActiveZoneRun?
   closedZoneRuns   ClosedZoneRunSummary[]
@@ -402,6 +420,58 @@ model SettlementSubmissionAttempt {
 
   @@unique([settlementBatchId, attemptNumber])
   @@index([settlementBatchId, status, attemptNumber])
+}
+
+model RunSettlement {
+  id                        String              @id @default(cuid())
+  characterId               String
+  zoneRunId                 String              @unique
+  closedRunSequence         BigInt
+  settlementSequence        BigInt
+  payloadHash               String
+  prepareMessageHash        String
+  status                    RunSettlementStatus @default(PREPARED)
+  failureCode               String?
+  latestTransactionSignature String?
+  preparedAt                DateTime?
+  submittedAt               DateTime?
+  confirmedAt               DateTime?
+  failedAt                  DateTime?
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  character                 Character           @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  requests                  RunSettlementRequest[]
+
+  @@unique([characterId, settlementSequence])
+  @@index([characterId, status, closedRunSequence])
+}
+
+model RunSettlementRequest {
+  id                 String                   @id @default(cuid())
+  runSettlementId    String
+  characterId        String
+  sessionId          String?
+  walletAddress      String
+  zoneRunId          String
+  settlementSequence BigInt
+  payloadHash        String
+  prepareMessageHash String
+  presignedMessageHash String?
+  status             RunSettlementRequestStatus @default(PREPARED)
+  invalidReasonCode  String?
+  idempotencyKey     String
+  preparedAt         DateTime?
+  presignedAt        DateTime?
+  finalizedAt        DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  character          Character                @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  runSettlement      RunSettlement            @relation(fields: [runSettlementId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, zoneRunId, idempotencyKey])
+  @@index([characterId, status, createdAt])
+  @@index([walletAddress, status, createdAt])
 }
 
 model AuthNonce {
