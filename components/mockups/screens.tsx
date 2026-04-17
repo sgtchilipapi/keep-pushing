@@ -156,7 +156,10 @@ export function MockCreateCharacterScreen() {
   return (
     <MockAppShell activeNav="characters" label="Create">
       <MockScreenStack>
-        <MockSectionCard title="Choose a class" fill>
+        <div className={[styles.screenStack, styles.screenFill].join(" ")}>
+          <div>
+            <h2 className={styles.sectionTitle}>Choose a class</h2>
+          </div>
           <MockScrollablePane>
             <div className={styles.classGrid}>
               {mockCreateClasses.map((item) => {
@@ -214,7 +217,7 @@ export function MockCreateCharacterScreen() {
               </label>
             </div>
           </MockScrollablePane>
-        </MockSectionCard>
+        </div>
 
         <MockActionPanel
           secondary={

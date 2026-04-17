@@ -55,9 +55,9 @@ SERVER_LOG_PATH="$LOG_DIR/server.log"
 VALIDATOR_PID_PATH="$ARTIFACT_DIR/validator.pid"
 SERVER_PID_PATH="$ARTIFACT_DIR/server.pid"
 BOOTSTRAP_CONFIG_PATH="$ARTIFACT_DIR/bootstrap.json"
-ANON_USER_RESPONSE_PATH="$ARTIFACT_DIR/anon-user.json"
 PREPARE_REQUEST_PATH="$ARTIFACT_DIR/character-create-prepare.request.json"
 STOP_SCRIPT_PATH="$ARTIFACT_DIR/stop-stack.sh"
+USER_ID="${RUNANA_USER_ID:-}"
 
 mkdir -p "$LOG_DIR" "$KEYPAIR_DIR"
 mkdir -p "$ARTIFACT_PARENT"
@@ -149,7 +149,7 @@ function wait_for_rpc() {
 function server_health_code() {
   curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --request GET \
-    "$SERVER_URL/api/auth/anon" || true
+    "$SERVER_URL/api/v1/settlement/prepare" || true
 }
 
 function apply_prisma_migrations() {
@@ -349,13 +349,8 @@ function start_server_if_needed() {
   wait_for_server
 }
 
-function create_anon_user() {
-  note "Creating anon user"
-  curl --silent --show-error \
-    --fail \
-    --request POST \
-    --header 'content-type: application/json' \
-    "$SERVER_URL/api/auth/anon" >"$ANON_USER_RESPONSE_PATH"
+function note_missing_user_id() {
+  note "Skipping user-scoped character-create artifacts because RUNANA_USER_ID is not set"
 }
 
 function write_prepare_request() {
@@ -452,12 +447,11 @@ deploy_program_if_needed
 write_bootstrap_config "$SERVER_SIGNER_PUBKEY"
 seed_bootstrap
 start_server_if_needed
-create_anon_user
-
-USER_ID="$(node -e "const fs=require('node:fs'); const data=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); if (!data.userId) { process.exit(1); } process.stdout.write(String(data.userId));" "$ANON_USER_RESPONSE_PATH")" \
-  || fail "failed to parse anon user response from $ANON_USER_RESPONSE_PATH"
-
-write_prepare_request "$USER_ID" "$PLAYER_PUBKEY"
+if [[ -z "$USER_ID" ]]; then
+  note_missing_user_id
+else
+  write_prepare_request "$USER_ID" "$PLAYER_PUBKEY"
+fi
 write_stop_script
 
 note "Manual character test stack is ready"
@@ -467,13 +461,17 @@ printf 'RPC URL: %s\n' "$RPC_URL"
 printf 'Server URL: %s\n' "$SERVER_URL"
 printf 'Program ID: %s\n' "$PROGRAM_ID"
 printf 'Validator ledger: %s\n' "$VALIDATOR_LEDGER_PATH"
-printf 'Anon user: %s\n' "$USER_ID"
 printf 'Player pubkey: %s\n' "$PLAYER_PUBKEY"
 printf 'Sponsor pubkey: %s\n' "$SPONSOR_PUBKEY"
-printf 'Prepare request: %s\n' "$PREPARE_REQUEST_PATH"
-printf 'Anon user response: %s\n' "$ANON_USER_RESPONSE_PATH"
 printf 'Validator log: %s\n' "$VALIDATOR_LOG_PATH"
 printf 'Server log: %s\n' "$SERVER_LOG_PATH"
 printf 'Stop helper: %s\n' "$STOP_SCRIPT_PATH"
 printf '\n'
-printf 'Next: POST %s/api/solana/character/create/prepare with the JSON from %s\n' "$SERVER_URL" "$PREPARE_REQUEST_PATH"
+if [[ -n "$USER_ID" ]]; then
+  printf 'User ID: %s\n' "$USER_ID"
+  printf 'Prepare request: %s\n' "$PREPARE_REQUEST_PATH"
+  printf '\n'
+  printf 'Next: POST %s/api/solana/character/create/prepare with the JSON from %s\n' "$SERVER_URL" "$PREPARE_REQUEST_PATH"
+else
+  printf 'User-scoped prepare request was skipped. Set RUNANA_USER_ID to generate character-create request artifacts.\n'
+fi

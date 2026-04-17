@@ -28,10 +28,14 @@ Attempting to clone `https://github.com/sgtchilipapi/runana-program/tree/validat
 
 ## Executive summary
 
+Note:
+- This document captures repo state on 2026-04-13.
+- Some auth/session gaps listed below are now partially resolved in the current repo, including removal of the anonymous bootstrap route and introduction of wallet-backed session flows.
+
 Overall status against the target spec: **major gaps remain**.
 
 - Wallet integration exists, but it is **Phantom extension/provider style**, not **Phantom Connect modal + embedded wallet flow**.
-- Auth/session are currently **anonymous user-id based** with localStorage query-param propagation, not backend wallet-proof login with nonce verification and secure app sessions.
+- Auth/session were, at the time of analysis, **anonymous user-id based** with localStorage query-param propagation rather than backend wallet-proof login with nonce verification and secure app sessions.
 - Settlement and first-sync are implemented as **player-paid/player-signed transactions** with backend preparation/ack logic; they do **not** use Phantom Connect `presignTransaction` co-sign sponsorship flow.
 - Character creation exists, but it is a Solana-prepare/submit path tied to raw wallet pubkey and local user id, not the target `/v1/characters/create/prepare|finalize` contract and backend-session-gated policy model.
 - Token transfer flow (check/finalize + restrictions) is **absent**.
@@ -45,9 +49,10 @@ Overall status against the target spec: **major gaps remain**.
 
 ### Implemented now
 
-- Anonymous account bootstrap endpoint exists: `POST /api/auth/anon` creates a user and returns `userId`. No wallet proof is required.
-- Frontend persists `userId` in localStorage and sends it on subsequent API calls via query/body.
-- No middleware-based session guard exists for game APIs.
+- Historical note from 2026-04-13:
+  - `POST /api/auth/anon` existed and created a user with no wallet proof.
+  - the frontend persisted `userId` in localStorage and sent it on subsequent API calls.
+  - middleware-based session guards were not yet in place for game APIs.
 
 ### Gap vs target
 
@@ -139,7 +144,7 @@ Legend: ✅ implemented, ⚠️ partial/misaligned, ❌ missing
 ## Auth / App Session
 
 - ⚠️ Phantom Connect integrated: partial Phantom wallet provider integration exists, but not Phantom Connect embedded-wallet flow.
-- ⚠️ Single visible login flow only: wallet connect exists, but app also supports anonymous auth bootstrap and is not unified under Phantom login.
+- Historical note: at analysis time, wallet connect coexisted with anonymous auth bootstrap and login was not yet unified under Phantom-backed auth.
 - ❌ Backend nonce issuance exists.
 - ❌ Wallet signature verification exists for app login.
 - ❌ Backend session issuance exists (cookie/JWT with refresh/revocation model).
@@ -186,7 +191,7 @@ Legend: ✅ implemented, ⚠️ partial/misaligned, ❌ missing
 
 ## Current route families (observed)
 
-- `POST /api/auth/anon`
+- Historical route at analysis time: `POST /api/auth/anon`
 - `GET/POST /api/characters` (+ `userId` in query/body)
 - `POST /api/solana/character/create/prepare`
 - `POST /api/solana/character/create/submit`
@@ -247,4 +252,3 @@ Legend: ✅ implemented, ⚠️ partial/misaligned, ❌ missing
 - **Runtime environment blocker**: unable to directly inspect `runana-program` validation branch from this environment due outbound GitHub access restrictions.
 - **Signer model transition risk**: current implementation enforces player-paid settlement; migrating to sponsored co-sign flow affects transaction assembly, Phantom client integration, and security policy checks.
 - **Session migration risk**: many existing endpoints trust caller-provided `userId`; moving to backend sessions requires broad API contract changes and compatibility handling.
-
