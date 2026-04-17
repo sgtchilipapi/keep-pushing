@@ -290,7 +290,9 @@ export function MockCharacterOverviewScreen() {
 export function MockRunScreen() {
   const latestUnlockedIndex = Math.max(
     0,
-    mockZoneCards.findLastIndex((zone) => zone.status !== "Locked"),
+    mockZoneCards.reduce((latestIndex, zone, index) => {
+      return zone.status !== "Locked" ? index : latestIndex;
+    }, -1),
   );
   const [activeZoneIndex, setActiveZoneIndex] = useState(latestUnlockedIndex);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
