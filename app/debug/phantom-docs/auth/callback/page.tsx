@@ -1,3 +1,5 @@
+'use client';
+
 import { ConnectBox } from '@phantom/react-sdk';
 
 import PhantomDocsExactProvider from '../../../../../components/debug/PhantomDocsExactProvider';
