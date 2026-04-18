@@ -33,6 +33,7 @@ import {
 import {
   createRunanaConnection,
   loadRunanaSponsorPayer,
+  loadRunanaTrustedServerSigner,
   resolveRunanaCommitment,
   resolveRunanaProgramId,
 } from './runanaClient';
@@ -176,7 +177,8 @@ export async function prepareSolanaSettlement(
   assertNonEmptyString(input.authority, 'authority');
 
   const authority = toPublicKey(input.authority, 'authority');
-  const sponsorSigner = deps.serverSigner ?? loadRunanaSponsorPayer().signer;
+  const trustedServerSigner = deps.serverSigner ?? loadRunanaTrustedServerSigner().signer;
+  const sponsorSigner = loadRunanaSponsorPayer().signer;
   const feePayer = toPublicKey(
     input.feePayer ?? sponsorSigner.publicKey.toBase58(),
     'feePayer',
@@ -273,7 +275,7 @@ export async function prepareSolanaSettlement(
       envelope,
       payload: sealed.payload,
       feePayer,
-      serverSigner: sponsorSigner,
+      serverSigner: trustedServerSigner,
       addressLookupTableAccounts,
       commitment,
       clusterId,

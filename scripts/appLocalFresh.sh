@@ -36,7 +36,7 @@ echo "[app:local:fresh] ensuring postgres is running"
 "${DOCKER_COMPOSE_CMD[@]}" up -d postgres
 
 echo "[app:local:fresh] bootstrapping validator, program, backend, and local artifacts"
-npm run solana:manual:character:setup
+bash "$ROOT/scripts/solana/setupManualCharacterTest.sh"
 
 echo
 echo "App URL: http://127.0.0.1:3000/"
