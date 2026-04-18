@@ -37,6 +37,10 @@ rm -rf \
   "$RUNANA_PROGRAM_ROOT/.tmp/test-ledger" \
   "$RUNANA_PROGRAM_ROOT/.anchor/test-ledger" \
   "$RUNANA_PROGRAM_ROOT/test-ledger" \
+  "$RUNANA_PROGRAM_ROOT/target/deploy/runana_program.so" \
+  "$RUNANA_PROGRAM_ROOT/target/deploy/runana_program.d" \
+  "$RUNANA_PROGRAM_ROOT/target/idl/runana_program.json" \
+  "$RUNANA_PROGRAM_ROOT/target/types/runana_program.ts" \
   "$RUNANA_PROGRAM_ROOT/target/debug" \
   "$RUNANA_PROGRAM_ROOT/target/release" \
   "$RUNANA_PROGRAM_ROOT/target/sbpf-solana-solana"

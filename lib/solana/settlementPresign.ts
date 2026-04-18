@@ -254,9 +254,20 @@ export async function prepareSettlementPresignRequest(input: {
   }
   const activeRequest = await prisma.runSettlementRequest.findActiveByRunSettlementId(runSettlement.id);
   if (activeRequest !== null && activeRequest.id !== existing?.id) {
-    throw new Error(
-      'ERR_SETTLEMENT_REQUEST_ALREADY_EXISTS: settlement idempotency key is already in use',
-    );
+    if (activeRequest.status === 'SUBMITTED') {
+      throw new Error(
+        'ERR_SETTLEMENT_ALREADY_SUBMITTED: settlement request is already in flight for this run',
+      );
+    }
+
+    await prisma.runSettlementRequest.update(activeRequest.id, {
+      status: 'INVALIDATED',
+      invalidReasonCode: 'SETTLEMENT_REQUEST_REPLACED',
+      preparedAt: activeRequest.preparedAt,
+      presignedAt: activeRequest.presignedAt,
+      finalizedAt: activeRequest.finalizedAt,
+      expiresAt: activeRequest.expiresAt,
+    });
   }
   const requestExpiresAt = new Date(now.getTime() + SETTLEMENT_REQUEST_TTL_MS);
   const request =

@@ -5,6 +5,8 @@
   "scripts": {
     "app:local:clean": "bash scripts/appLocalClean.sh",
     "app:codespace:clean": "bash scripts/appCodespaceClean.sh",
+    "clean:local:db": "bash scripts/cleanupDb.sh",
+    "clean:codespace:db": "bash scripts/cleanupDb.sh",
     "app:local:clean-space": "bash scripts/cleanupLocalDisk.sh",
     "app:codespace:fresh": "bash scripts/appCodespaceFresh.sh",
     "app:local:fresh": "bash scripts/appLocalFresh.sh",

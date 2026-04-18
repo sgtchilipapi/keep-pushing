@@ -293,6 +293,46 @@ describe('settlementPresign', () => {
     expect(settlementRelayMock.prepareSolanaSettlement).toHaveBeenCalled();
   });
 
+  it('replaces an older prepared request for the same run when a new prepare starts after client-side failure', async () => {
+    prismaMock.runSettlementRequest.findByCharacterZoneRunAndIdempotencyKey.mockResolvedValue(null);
+    prismaMock.runSettlementRequest.findActiveByRunSettlementId.mockResolvedValue(
+      buildSettlementRequest({
+        id: 'request-old',
+        idempotencyKey: 'idem-old',
+        status: 'PREPARED',
+      }),
+    );
+    prismaMock.runSettlementRequest.create.mockResolvedValue(buildSettlementRequest());
+    settlementRelayMock.prepareSolanaSettlement.mockResolvedValue({
+      phase: 'sign_transaction',
+      settlementBatchId: 'settlement-batch-1',
+      payload: { batchId: 4, batchHash: 'ab'.repeat(32) },
+      preparedTransaction: {
+        kind: 'battle_settlement',
+        authority: 'wallet-1',
+        feePayer: 'sponsor-1',
+        messageSha256Hex: '12'.repeat(32),
+      },
+    });
+
+    const result = await prepareSettlementPresignRequest({
+      characterId: 'character-1',
+      zoneRunId: 'run-1',
+      walletAddress: 'wallet-1',
+      sessionId: 'session-1',
+      idempotencyKey: 'idem-new',
+    });
+
+    expect(prismaMock.runSettlementRequest.update).toHaveBeenCalledWith(
+      'request-old',
+      expect.objectContaining({
+        status: 'INVALIDATED',
+        invalidReasonCode: 'SETTLEMENT_REQUEST_REPLACED',
+      }),
+    );
+    expect(result.prepareRequestId).toBe('request-1');
+  });
+
   it('invalidates the request when the presign callback message hash does not match', async () => {
     const transaction = buildPreparedTransaction({});
     prismaMock.runSettlementRequest.findById.mockResolvedValue(
